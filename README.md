@@ -132,6 +132,4 @@ A couple of things worth knowing about GitHub Actions schedules: they're **best-
 - Zod schemas validate all API query params, bodies, and response shapes at the boundary.
 - Business logic lives in `/lib` (server) and `/features/*/use*Logic.ts` hooks (client), kept separate from presentational components.
 - Tailwind utility classes only — no inline styles.
-- `Layout` renders once in `_app.tsx` (not per-page) so client-side navigation doesn't remount the nav/auth state — see CLAUDE.md § Known Gotchas if you're adding a new page.
-#   c o i n s - t r a c k e r - v 2  
- 
+- `Layout` renders once in `_app.tsx` (not per-page) so client-side navigation doesn't remount the nav/auth state — see CLAUDE.md 
