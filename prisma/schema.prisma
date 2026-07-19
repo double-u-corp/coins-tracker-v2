@@ -1,0 +1,124 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Coin {
+  id             Int            @id @default(autoincrement())
+  name           String
+  symbol         String         @unique
+  records        Record[]
+  transactions   Transaction[]
+  priceTarget    PriceTarget?
+  journalEntries JournalEntry[]
+  newsItems      NewsItem[]
+}
+
+model Record {
+  id        Int      @id @default(autoincrement())
+  coinId    Int
+  coin      Coin     @relation(fields: [coinId], references: [id])
+  price     Float
+  high      Float
+  low       Float
+  // Flags whether THIS record is the moment a new all-time high/low was set,
+  // so the Home page can alert on genuinely new records instead of having to
+  // re-derive it by comparing against prior rows.
+  isNewHigh Boolean  @default(false)
+  isNewLow  Boolean  @default(false)
+  // Which cron run produced this record, so the Home page can ask "did the
+  // most recent run set any new highs/lows" for the alert modal.
+  cronLogId Int?
+  cronLog   CronLog? @relation(fields: [cronLogId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@index([coinId, createdAt])
+  @@index([cronLogId])
+}
+
+// A buy or sell entry: either live (we look up the current PHP price) or a
+// manually logged historical transaction (user supplies the price and date
+// for a trade they made before using this app). Sells reduce holdings —
+// see /api/transactions for the "can't sell more than you hold" check.
+model Transaction {
+  id             Int      @id @default(autoincrement())
+  coinId         Int
+  coin           Coin     @relation(fields: [coinId], references: [id])
+  type           String // "buy" | "sell"
+  phpAmount      Float // PHP spent (buy) or PHP received (sell)
+  price          Float // PHP price per unit at the time of the transaction
+  coinAmount     Float // quantity of the coin bought or sold
+  isManual       Boolean  @default(false) // true if logged retroactively with a user-supplied price/date
+  transactedAt   DateTime @default(now())
+
+  @@index([coinId, transactedAt])
+}
+
+// One row per coin: the price levels the user wants to be alerted about so
+// they know when to consider buying (near targetLow) or selling (at/above
+// targetHigh). Either field may be left unset.
+model PriceTarget {
+  id         Int      @id @default(autoincrement())
+  coinId     Int      @unique
+  coin       Coin     @relation(fields: [coinId], references: [id])
+  targetHigh Float?
+  targetLow  Float?
+  updatedAt  DateTime @updatedAt
+}
+
+// Tracks every cron execution so the UI can display "last run" status,
+// independent of whether new price records were successfully written.
+model CronLog {
+  id        Int        @id @default(autoincrement())
+  ranAt     DateTime   @default(now())
+  status    String // "success" | "partial" | "error"
+  message   String?
+  records   Record[]
+  newsItems NewsItem[]
+}
+
+// A user-authored note about a specific date, for context alongside the
+// price chart (e.g. "sold half my position after the exchange hack news").
+// Optionally tied to one coin; a null coinId means a general/market-wide
+// entry that shows up regardless of which coin's chart is open. Never
+// pruned by retention — this is the user's own record, not disposable
+// operational data.
+model JournalEntry {
+  id        Int      @id @default(autoincrement())
+  coinId    Int?
+  coin      Coin?    @relation(fields: [coinId], references: [id])
+  entryDate DateTime // the date this entry is ABOUT, not necessarily when it was typed
+  title     String
+  notes     String
+  createdAt DateTime @default(now())
+
+  @@index([coinId, entryDate])
+}
+
+// An auto-generated bullish/bearish signal about a coin. Two sources feed
+// this table (see lib/newsApi.ts): a heuristic computed from that cron
+// run's own price movement (`source: "System"`, `externalId: null`), and —
+// if CRYPTOPANIC_API_TOKEN is configured — real articles from CryptoPanic
+// (`source`: the real outlet name, `externalId`: CryptoPanic's post id, used
+// to avoid re-saving the same article on the next cron run since their feed
+// resurfaces recent posts on every request).
+model NewsItem {
+  id          Int      @id @default(autoincrement())
+  coinId      Int
+  coin        Coin     @relation(fields: [coinId], references: [id])
+  headline    String
+  summary     String
+  sentiment   String // "bullish" | "bearish" | "neutral"
+  source      String // "System" for auto-generated; a real outlet name for fetched articles
+  url         String?
+  externalId  String?  @unique // dedup key for fetched articles; always null for system-generated signals
+  cronLogId   Int?
+  cronLog     CronLog? @relation(fields: [cronLogId], references: [id])
+  publishedAt DateTime @default(now())
+
+  @@index([coinId, publishedAt])
+}

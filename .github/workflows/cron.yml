@@ -1,0 +1,26 @@
+name: Trigger price cron
+
+# Runs at 2:00, 6:00, 11:00, 14:00, 18:00, 23:00 UTC — which is
+# 10:00, 14:00, 19:00, 22:00, 2:00, 7:00 in Philippine time (UTC+8), respectively.
+# GitHub Actions schedules always run in UTC.
+on:
+  schedule:
+    - cron: "0 2,6,11,14,18,23 * * *"
+  # Lets you trigger a run manually from the Actions tab, for testing.
+  workflow_dispatch:
+
+jobs:
+  trigger-cron:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call /api/cron
+        run: |
+          response=$(curl -sS -o response.txt -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.APP_URL }}/api/cron")
+          echo "HTTP status: $response"
+          cat response.txt
+          if [ "$response" -ge 400 ]; then
+            echo "Cron call failed"
+            exit 1
+          fi
