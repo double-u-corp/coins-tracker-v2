@@ -24,6 +24,10 @@ export const coinSummarySchema = z.object({
   targetLow: z.number().nullable(),
   targetHighReached: z.boolean(),
   targetLowReached: z.boolean(),
+  // Direction vs. the previous stored Record, i.e. did this run's price go
+  // up/down/stay flat since the last time a price was recorded for this
+  // coin. Null when there's fewer than two Records yet to compare.
+  priceDirection: z.enum(["up", "down", "flat"]).nullable(),
 });
 
 export type CoinSummary = z.infer<typeof coinSummarySchema>;

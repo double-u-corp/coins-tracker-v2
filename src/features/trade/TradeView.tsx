@@ -16,18 +16,14 @@ export default function TradeView() {
     loadError,
     type,
     setType,
-    mode,
-    setMode,
     symbol,
     setSymbol,
     phpAmount,
     setPhpAmount,
     coinAmount,
     setCoinAmount,
-    manualPrice,
-    setManualPrice,
-    manualDate,
-    setManualDate,
+    date,
+    setDate,
     submitting,
     submitError,
     lastTransaction,
@@ -37,8 +33,8 @@ export default function TradeView() {
     editingId,
     editCoinAmount,
     setEditCoinAmount,
-    editPrice,
-    setEditPrice,
+    editPhpAmount,
+    setEditPhpAmount,
     editError,
     editSaving,
     startEdit,
@@ -51,48 +47,25 @@ export default function TradeView() {
       {loadError && <AlertBanner variant="error" message={`Failed to load data: ${loadError}`} />}
 
       <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-        <div className="mb-4 flex flex-wrap items-center gap-4">
-          <div className="inline-flex rounded-md border border-gray-200 p-1 text-sm">
-            <button
-              type="button"
-              onClick={() => setType("buy")}
-              className={`rounded px-4 py-1.5 font-semibold transition-colors ${
-                type === "buy" ? "bg-green-600 text-white" : "text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              Buy
-            </button>
-            <button
-              type="button"
-              onClick={() => setType("sell")}
-              className={`rounded px-4 py-1.5 font-semibold transition-colors ${
-                type === "sell" ? "bg-red-600 text-white" : "text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              Sell
-            </button>
-          </div>
-
-          <div className="inline-flex rounded-md border border-gray-200 p-1 text-sm">
-            <button
-              type="button"
-              onClick={() => setMode("live")}
-              className={`rounded px-3 py-1.5 font-medium transition-colors ${
-                mode === "live" ? "bg-brand-600 text-white" : "text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              Live price
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode("manual")}
-              className={`rounded px-3 py-1.5 font-medium transition-colors ${
-                mode === "manual" ? "bg-brand-600 text-white" : "text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              Log a past trade
-            </button>
-          </div>
+        <div className="mb-4 inline-flex rounded-md border border-gray-200 p-1 text-sm">
+          <button
+            type="button"
+            onClick={() => setType("buy")}
+            className={`rounded px-4 py-1.5 font-semibold transition-colors ${
+              type === "buy" ? "bg-green-600 text-white" : "text-gray-600 hover:bg-gray-100"
+            }`}
+          >
+            Buy
+          </button>
+          <button
+            type="button"
+            onClick={() => setType("sell")}
+            className={`rounded px-4 py-1.5 font-semibold transition-colors ${
+              type === "sell" ? "bg-red-600 text-white" : "text-gray-600 hover:bg-gray-100"
+            }`}
+          >
+            Sell
+          </button>
         </div>
 
         <form onSubmit={submitTransaction} className="flex flex-col gap-4 sm:flex-row sm:items-end sm:flex-wrap">
@@ -104,64 +77,44 @@ export default function TradeView() {
             options={coinOptions.map((c) => ({ label: `${c.name} (${c.symbol})`, value: c.symbol }))}
           />
 
-          {type === "buy" ? (
-            <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
-              <span>PHP amount to spend</span>
-              <input
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="0.01"
-                value={phpAmount}
-                onChange={(e) => setPhpAmount(e.target.value)}
-                placeholder="e.g. 1000"
-                className="w-full max-w-xs rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              />
-            </label>
-          ) : (
-            <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
-              <span>Coin amount to sell</span>
-              <input
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="any"
-                value={coinAmount}
-                onChange={(e) => setCoinAmount(e.target.value)}
-                placeholder="e.g. 0.005"
-                className="w-full max-w-xs rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              />
-            </label>
-          )}
+          <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
+            <span>{type === "buy" ? "PHP amount spent" : "PHP amount received"}</span>
+            <input
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="0.01"
+              value={phpAmount}
+              onChange={(e) => setPhpAmount(e.target.value)}
+              placeholder="e.g. 1000"
+              className="w-full max-w-xs rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+          </label>
 
-          {mode === "manual" && (
-            <>
-              <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
-                <span>Price {type === "buy" ? "paid" : "sold at"} (PHP per unit)</span>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min="0"
-                  step="0.00000001"
-                  value={manualPrice}
-                  onChange={(e) => setManualPrice(e.target.value)}
-                  placeholder="e.g. 3500000"
-                  className="w-full max-w-xs rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                />
-              </label>
+          <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
+            <span>Number of coins</span>
+            <input
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="any"
+              value={coinAmount}
+              onChange={(e) => setCoinAmount(e.target.value)}
+              placeholder="e.g. 0.005"
+              className="w-full max-w-xs rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+          </label>
 
-              <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
-                <span>Date</span>
-                <input
-                  type="date"
-                  value={manualDate}
-                  max={new Date().toISOString().slice(0, 10)}
-                  onChange={(e) => setManualDate(e.target.value)}
-                  className="w-full max-w-xs rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                />
-              </label>
-            </>
-          )}
+          <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
+            <span>Date</span>
+            <input
+              type="date"
+              value={date}
+              max={new Date().toISOString().slice(0, 10)}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full max-w-xs rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+          </label>
 
           <button
             type="submit"
@@ -170,14 +123,13 @@ export default function TradeView() {
               type === "buy" ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700"
             }`}
           >
-            {submitting ? "Saving…" : mode === "live" ? (type === "buy" ? "Buy" : "Sell") : "Log trade"}
+            {submitting ? "Saving…" : type === "buy" ? "Buy" : "Sell"}
           </button>
         </form>
 
         <p className="mt-2 text-xs text-gray-500">
-          {mode === "live"
-            ? "Uses the live Coins.ph PHP price for the selected coin (not the monitored USDT price used elsewhere in the app)."
-            : "For a trade you already made before using this app — enter what you actually paid/received and when. No live price lookup happens in this mode."}
+          Enter what you actually spent/received and how many coins — no per-unit price needed, since the exact
+          execution price doesn't always match a live ticker lookup.
         </p>
 
         {submitError && <div className="mt-3"><AlertBanner variant="error" message={submitError} /></div>}
@@ -185,9 +137,9 @@ export default function TradeView() {
           <div className="mt-3">
             <AlertBanner
               variant="success"
-              message={`${lastTransaction.isManual ? "Logged" : lastTransaction.type === "buy" ? "Bought" : "Sold"} ${formatCoinAmount(
+              message={`${lastTransaction.type === "buy" ? "Bought" : "Sold"} ${formatCoinAmount(
                 lastTransaction.coinAmount
-              )} ${lastTransaction.symbol} for ${formatPhp(lastTransaction.phpAmount)} at ${formatPhp(lastTransaction.price)}/unit.`}
+              )} ${lastTransaction.symbol} for ${formatPhp(lastTransaction.phpAmount)}.`}
             />
           </div>
         )}
@@ -206,10 +158,9 @@ export default function TradeView() {
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-500">Coin</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500">Holdings</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500">Avg. Buy Price</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500">Total Spent</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500">Current Value</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500">Unrealized G/L</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500">Realized G/L</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500">Gain / Loss</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -218,31 +169,18 @@ export default function TradeView() {
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">
                       {entry.name} <span className="text-gray-400">({entry.symbol})</span>
                     </td>
-                    <td className="px-4 py-3 text-right text-sm text-gray-700">
-                      {formatCoinAmount(entry.totalCoinAmount)}
-                    </td>
-                    <td className="px-4 py-3 text-right text-sm text-gray-700">{formatPhp(entry.averageBuyPrice)}</td>
+                    <td className="px-4 py-3 text-right text-sm text-gray-700">{formatCoinAmount(entry.holdings)}</td>
+                    <td className="px-4 py-3 text-right text-sm text-gray-700">{formatPhp(entry.spent)}</td>
                     <td className="px-4 py-3 text-right text-sm text-gray-700">
                       {entry.currentValue !== null ? formatPhp(entry.currentValue) : "—"}
                     </td>
                     <td
                       className={`px-4 py-3 text-right text-sm font-medium ${
-                        entry.unrealizedGainLoss === null
-                          ? "text-gray-400"
-                          : entry.unrealizedGainLoss >= 0
-                          ? "text-green-700"
-                          : "text-red-700"
+                        entry.gainLoss === null ? "text-gray-400" : entry.gainLoss >= 0 ? "text-green-700" : "text-red-700"
                       }`}
                     >
-                      {entry.unrealizedGainLoss !== null
-                        ? `${entry.unrealizedGainLoss >= 0 ? "+" : ""}${formatPhp(entry.unrealizedGainLoss)}${
-                            entry.unrealizedGainLossPercent !== null ? ` (${entry.unrealizedGainLossPercent.toFixed(1)}%)` : ""
-                          }`
-                        : "—"}
-                    </td>
-                    <td className={`px-4 py-3 text-right text-sm font-medium ${entry.realizedGainLoss >= 0 ? "text-green-700" : "text-red-700"}`}>
-                      {entry.realizedGainLoss !== 0
-                        ? `${entry.realizedGainLoss >= 0 ? "+" : ""}${formatPhp(entry.realizedGainLoss)}`
+                      {entry.gainLoss !== null
+                        ? `${entry.gainLoss >= 0 ? "+" : ""}${formatPhp(entry.gainLoss)}`
                         : "—"}
                     </td>
                   </tr>
@@ -267,7 +205,7 @@ export default function TradeView() {
                   <div className="flex w-full flex-col gap-2">
                     <div className="flex flex-wrap items-end gap-3">
                       <label className="flex flex-col gap-1 text-xs font-medium text-gray-600">
-                        <span>Coin amount</span>
+                        <span>Number of coins</span>
                         <input
                           type="number"
                           inputMode="decimal"
@@ -279,14 +217,14 @@ export default function TradeView() {
                         />
                       </label>
                       <label className="flex flex-col gap-1 text-xs font-medium text-gray-600">
-                        <span>Price (PHP/unit)</span>
+                        <span>PHP amount</span>
                         <input
                           type="number"
                           inputMode="decimal"
                           min="0"
                           step="any"
-                          value={editPrice}
-                          onChange={(e) => setEditPrice(e.target.value)}
+                          value={editPhpAmount}
+                          onChange={(e) => setEditPhpAmount(e.target.value)}
                           className="w-32 rounded-md border border-gray-300 px-2 py-1.5 text-xs shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
                         />
                       </label>
@@ -321,14 +259,9 @@ export default function TradeView() {
                       <span className="font-medium text-gray-900">
                         {t.name} ({t.symbol})
                       </span>
-                      {t.isManual && (
-                        <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">
-                          Logged manually
-                        </span>
-                      )}
                       <span className="text-gray-500">
                         {" "}
-                        — {formatCoinAmount(t.coinAmount)} for {formatPhp(t.phpAmount)} at {formatPhp(t.price)}/unit
+                        — {formatCoinAmount(t.coinAmount)} for {formatPhp(t.phpAmount)}
                       </span>
                       <div className="text-xs text-gray-400">{formatDateTime(t.transactedAt)}</div>
                     </div>

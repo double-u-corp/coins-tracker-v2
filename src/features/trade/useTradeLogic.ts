@@ -8,7 +8,6 @@ interface CoinOption {
 }
 
 export type TradeType = "buy" | "sell";
-export type TradeMode = "live" | "manual";
 
 export function useTradeLogic() {
   const [coinOptions, setCoinOptions] = useState<CoinOption[]>([]);
@@ -18,12 +17,10 @@ export function useTradeLogic() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [type, setType] = useState<TradeType>("buy");
-  const [mode, setMode] = useState<TradeMode>("live");
   const [symbol, setSymbol] = useState("");
-  const [phpAmount, setPhpAmount] = useState(""); // used when type === "buy"
-  const [coinAmount, setCoinAmount] = useState(""); // used when type === "sell"
-  const [manualPrice, setManualPrice] = useState("");
-  const [manualDate, setManualDate] = useState("");
+  const [phpAmount, setPhpAmount] = useState(""); // amount spent (buy) or received (sell)
+  const [coinAmount, setCoinAmount] = useState(""); // quantity bought or sold
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [lastTransaction, setLastTransaction] = useState<TransactionView | null>(null);
@@ -32,7 +29,7 @@ export function useTradeLogic() {
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editCoinAmount, setEditCoinAmount] = useState("");
-  const [editPrice, setEditPrice] = useState("");
+  const [editPhpAmount, setEditPhpAmount] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const [editSaving, setEditSaving] = useState(false);
 
@@ -47,7 +44,9 @@ export function useTradeLogic() {
       const coinsData = (await coinsRes.json()) as { coins: CoinSummary[] };
       const txData = (await txRes.json()) as { transactions: TransactionView[]; portfolio: PortfolioEntry[] };
 
-      setCoinOptions(coinsData.coins.map((c) => ({ symbol: c.symbol, name: c.name })));
+      const options = coinsData.coins.map((c) => ({ symbol: c.symbol, name: c.name }));
+      setCoinOptions(options);
+      setSymbol((prev) => prev || options[0]?.symbol || ""); // default to first monitored coin
       setTransactions(txData.transactions);
       setPortfolio(txData.portfolio);
     } catch (err) {
@@ -69,35 +68,15 @@ export function useTradeLogic() {
       setSubmitError("Select a coin first");
       return;
     }
-
-    const payload: Record<string, unknown> = { symbol, type };
-
-    if (type === "buy") {
-      const amount = Number(phpAmount);
-      if (!phpAmount || Number.isNaN(amount) || amount <= 0) {
-        setSubmitError("Enter a valid PHP amount greater than 0");
-        return;
-      }
-      payload.phpAmount = amount;
-    } else {
-      const amount = Number(coinAmount);
-      if (!coinAmount || Number.isNaN(amount) || amount <= 0) {
-        setSubmitError("Enter a valid coin amount greater than 0");
-        return;
-      }
-      payload.coinAmount = amount;
+    const amount = Number(phpAmount);
+    if (!phpAmount || Number.isNaN(amount) || amount <= 0) {
+      setSubmitError("Enter a valid PHP amount greater than 0");
+      return;
     }
-
-    if (mode === "manual") {
-      const priceNum = Number(manualPrice);
-      if (!manualPrice || Number.isNaN(priceNum) || priceNum <= 0) {
-        setSubmitError(`Enter the price you ${type === "buy" ? "paid" : "sold at"} per unit`);
-        return;
-      }
-      payload.price = priceNum;
-      if (manualDate) {
-        payload.transactedAt = new Date(manualDate).toISOString();
-      }
+    const coins = Number(coinAmount);
+    if (!coinAmount || Number.isNaN(coins) || coins <= 0) {
+      setSubmitError("Enter a valid number of coins greater than 0");
+      return;
     }
 
     setSubmitting(true);
@@ -105,7 +84,13 @@ export function useTradeLogic() {
       const res = await fetch("/api/transactions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          symbol,
+          type,
+          phpAmount: amount,
+          coinAmount: coins,
+          transactedAt: new Date(date).toISOString(),
+        }),
       });
       const data = (await res.json()) as { transaction?: TransactionView; error?: string };
       if (!res.ok || !data.transaction) {
@@ -114,8 +99,6 @@ export function useTradeLogic() {
       setLastTransaction(data.transaction);
       setPhpAmount("");
       setCoinAmount("");
-      setManualPrice("");
-      setManualDate("");
       await load();
     } catch (err) {
       setSubmitError((err as Error).message);
@@ -147,7 +130,7 @@ export function useTradeLogic() {
   function startEdit(tx: TransactionView) {
     setEditingId(tx.id);
     setEditCoinAmount(String(tx.coinAmount));
-    setEditPrice(String(tx.price));
+    setEditPhpAmount(String(tx.phpAmount));
     setEditError(null);
   }
 
@@ -160,13 +143,13 @@ export function useTradeLogic() {
     if (editingId === null) return;
 
     const coinAmountNum = Number(editCoinAmount);
-    const priceNum = Number(editPrice);
+    const phpAmountNum = Number(editPhpAmount);
     if (!editCoinAmount || Number.isNaN(coinAmountNum) || coinAmountNum <= 0) {
       setEditError("Enter a valid coin amount greater than 0");
       return;
     }
-    if (!editPrice || Number.isNaN(priceNum) || priceNum <= 0) {
-      setEditError("Enter a valid price greater than 0");
+    if (!editPhpAmount || Number.isNaN(phpAmountNum) || phpAmountNum <= 0) {
+      setEditError("Enter a valid PHP amount greater than 0");
       return;
     }
 
@@ -176,7 +159,7 @@ export function useTradeLogic() {
       const res = await fetch("/api/transactions", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: editingId, coinAmount: coinAmountNum, price: priceNum }),
+        body: JSON.stringify({ id: editingId, coinAmount: coinAmountNum, phpAmount: phpAmountNum }),
       });
       const data = (await res.json()) as { transaction?: TransactionView; error?: string };
       if (!res.ok || !data.transaction) {
@@ -199,18 +182,14 @@ export function useTradeLogic() {
     loadError,
     type,
     setType,
-    mode,
-    setMode,
     symbol,
     setSymbol,
     phpAmount,
     setPhpAmount,
     coinAmount,
     setCoinAmount,
-    manualPrice,
-    setManualPrice,
-    manualDate,
-    setManualDate,
+    date,
+    setDate,
     submitting,
     submitError,
     lastTransaction,
@@ -220,8 +199,8 @@ export function useTradeLogic() {
     editingId,
     editCoinAmount,
     setEditCoinAmount,
-    editPrice,
-    setEditPrice,
+    editPhpAmount,
+    setEditPhpAmount,
     editError,
     editSaving,
     startEdit,

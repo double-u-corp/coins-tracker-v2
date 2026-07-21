@@ -77,7 +77,9 @@ export default function CalendarView() {
         </div>
       </div>
 
-      {!selectedSymbol && <AlertBanner variant="info" message="Select a favorite coin to see its daily high/low." />}
+      {!loading && coinOptions.length === 0 && (
+        <AlertBanner variant="info" message="No coins are being monitored yet — add one from Manage Coins." />
+      )}
       {error && <AlertBanner variant="error" message={`Failed to load calendar data: ${error}`} />}
       {loading && <AlertBanner variant="info" message="Loading calendar data…" />}
 

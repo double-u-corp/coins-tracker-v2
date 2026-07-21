@@ -43,7 +43,7 @@ function toDailyRecords(records: { price: number; high: number; low: number; cre
 async function handleSummary(res: NextApiResponse<SummaryResponse>) {
   const coins = await prisma.coin.findMany({
     include: {
-      records: { orderBy: { createdAt: "desc" }, take: 1 },
+      records: { orderBy: { createdAt: "desc" }, take: 2 }, // 2, not 1 — need the prior one for priceDirection
       priceTarget: true,
     },
     orderBy: { name: "asc" },
@@ -54,9 +54,17 @@ async function handleSummary(res: NextApiResponse<SummaryResponse>) {
   // reflects the running max/min at that point in time.
   const summaries: CoinSummary[] = coins.map((coin) => {
     const latest = coin.records[0];
+    const previous = coin.records[1];
     const currentPrice = latest?.price ?? null;
     const targetHigh = coin.priceTarget?.targetHigh ?? null;
     const targetLow = coin.priceTarget?.targetLow ?? null;
+
+    let priceDirection: "up" | "down" | "flat" | null = null;
+    if (latest && previous) {
+      if (latest.price > previous.price) priceDirection = "up";
+      else if (latest.price < previous.price) priceDirection = "down";
+      else priceDirection = "flat";
+    }
 
     return {
       id: coin.id,
@@ -69,6 +77,7 @@ async function handleSummary(res: NextApiResponse<SummaryResponse>) {
       targetLow,
       targetHighReached: targetHigh !== null && currentPrice !== null && currentPrice >= targetHigh,
       targetLowReached: targetLow !== null && currentPrice !== null && currentPrice <= targetLow,
+      priceDirection,
     };
   });
 

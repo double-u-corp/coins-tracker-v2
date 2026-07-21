@@ -51,8 +51,11 @@ async function saveNewsItem(coinId: number, cronLogId: number, signal: Generated
  * 2. For every coin in the `Coin` table (i.e. every coin added via the
  *    Manage Coins page or the seed script), fetch the current price.
  * 3. Compare it against the most recently recorded high/low.
- * 4. Persist a new Record row with the (possibly updated) high/low, flagged
- *    isNewHigh/isNewLow if this price broke the previous record.
+ * 4. Compare it against the most recently recorded high/low, and persist a
+ *    new Record row ONLY if this price is a new high or low for TODAY (or
+ *    the coin's first-ever observation) — see the inline comment in the
+ *    loop below. This caps storage growth instead of writing 6 rows/day/
+ *    coin regardless of whether the price actually moved meaningfully.
  * 5. Generate a bullish/bearish signal from that price movement (see
  *    newsApi.ts — heuristic, always runs) and match it against that run's
  *    RSS pull (free, no key, fetched once for the whole run — see step 0)
@@ -114,9 +117,30 @@ export async function runCronJob(): Promise<CronResult[]> {
       const isNewHigh = lastRecord !== null && price > previousHigh;
       const isNewLow = lastRecord !== null && price < previousLow;
 
-      await prisma.record.create({
-        data: { coinId: coin.id, price, high, low, isNewHigh, isNewLow, cronLogId: cronLog.id },
+      // Only persist a new Record row when this price is a new extreme for
+      // TODAY (or the coin's very first observation ever) — a price that's
+      // "in the middle" of today's already-established range is deliberately
+      // NOT stored, to limit database growth (matches what the Calendar page
+      // already only cares about: each day's high/low, not every snapshot).
+      // This never loses accuracy for the all-time high/low tracked above:
+      // any all-time extreme is mathematically also a today's extreme, so
+      // it's never the case that a "new high" gets silently skipped.
+      const startOfToday = new Date();
+      startOfToday.setUTCHours(0, 0, 0, 0);
+      const todaysRecords = await prisma.record.findMany({
+        where: { coinId: coin.id, createdAt: { gte: startOfToday } },
+        select: { price: true },
       });
+      const todayHighSoFar = todaysRecords.length > 0 ? Math.max(...todaysRecords.map((r) => r.price)) : null;
+      const todayLowSoFar = todaysRecords.length > 0 ? Math.min(...todaysRecords.map((r) => r.price)) : null;
+      const isNewDayHigh = todayHighSoFar === null || price > todayHighSoFar;
+      const isNewDayLow = todayLowSoFar === null || price < todayLowSoFar;
+
+      if (isNewDayHigh || isNewDayLow) {
+        await prisma.record.create({
+          data: { coinId: coin.id, price, high, low, isNewHigh, isNewLow, cronLogId: cronLog.id },
+        });
+      }
 
       const signal = generateSignalForCoin({
         symbol: coin.symbol,

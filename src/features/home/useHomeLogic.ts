@@ -2,27 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/features/auth/useAuth";
 import type { CoinSummary, NewRecordAlert } from "@/validators/recordSchema";
 
-export interface CronRunResult {
-  symbol: string;
-  price: number;
-  high: number;
-  low: number;
-  isNewHigh: boolean;
-  isNewLow: boolean;
-}
-
 interface HomeState {
   coins: CoinSummary[];
   lastCronRun: string | null;
   lastCronStatus: string | null;
   loading: boolean;
   error: string | null;
-}
-
-interface CronRunState {
-  running: boolean;
-  error: string | null;
-  results: CronRunResult[] | null;
 }
 
 export interface ReachedTarget {
@@ -48,21 +33,24 @@ export function useHomeLogic() {
     error: null,
   });
 
-  const [cronRun, setCronRun] = useState<CronRunState>({ running: false, error: null, results: null });
-
   const [alertRecords, setAlertRecords] = useState<NewRecordAlert[]>([]);
   const [alertModalOpen, setAlertModalOpen] = useState(false);
-
-  // Bumped after each successful manual cron run — passed to <NewsSection
-  // refreshSignal={newsRefreshTick} /> so it resets to page 1 and reloads,
-  // since a cron run is what generates new signals/articles. NewsSection
-  // otherwise manages its own fetching/pagination independently.
-  const [newsRefreshTick, setNewsRefreshTick] = useState(0);
 
   // Session-only dismiss for the target-reached banner: tracks which set of
   // reached targets was last dismissed, so dismissing it doesn't hide a
   // *different* coin newly reaching its target afterward.
   const [dismissedTargetsKey, setDismissedTargetsKey] = useState<string | null>(null);
+
+  // Manual price update — for coins added via Manage Coins' "Add a coin
+  // manually" flow (e.g. TH) that have no live price feed, so nothing ever
+  // updates their price automatically. This replaces the old "Run Cron Now"
+  // button now that scheduled cron (GitHub Actions) is live in production
+  // and manual triggering for testing is no longer the priority here.
+  const [priceUpdateSymbol, setPriceUpdateSymbol] = useState("");
+  const [priceUpdateValue, setPriceUpdateValue] = useState("");
+  const [priceUpdateSubmitting, setPriceUpdateSubmitting] = useState(false);
+  const [priceUpdateError, setPriceUpdateError] = useState<string | null>(null);
+  const [priceUpdateSuccess, setPriceUpdateSuccess] = useState<string | null>(null);
 
   const loadSummary = useCallback(async () => {
     try {
@@ -80,6 +68,9 @@ export function useHomeLogic() {
         loading: false,
         error: null,
       });
+      // Default the price-update dropdown to the first monitored coin —
+      // never leave it on a blank "select a coin" placeholder.
+      setPriceUpdateSymbol((prev) => prev || data.coins[0]?.symbol || "");
     } catch (err) {
       setState((prev) => ({ ...prev, loading: false, error: (err as Error).message }));
     }
@@ -141,38 +132,57 @@ export function useHomeLogic() {
     setDismissedTargetsKey(reachedTargetsKey);
   }
 
-  const runCronNow = useCallback(async () => {
-    setCronRun({ running: true, error: null, results: null });
-    try {
-      const res = await fetch("/api/cron-manual", { method: "POST" });
-      const data = (await res.json()) as
-        | { ok: true; results: CronRunResult[] }
-        | { ok: false; error: string };
-
-      if (!("ok" in data) || !data.ok) {
-        throw new Error("error" in data ? data.error : "Cron run failed");
-      }
-
-      setCronRun({ running: false, error: null, results: data.results });
-      await loadSummary(); // refresh the table + banner with the new data
-      await checkAlerts(); // this run may have set a new high/low
-      setNewsRefreshTick((prev) => prev + 1); // this run may have generated new signals/articles
-    } catch (err) {
-      setCronRun({ running: false, error: (err as Error).message, results: null });
+  async function submitPriceUpdate() {
+    setPriceUpdateError(null);
+    setPriceUpdateSuccess(null);
+    console.log(priceUpdateSymbol)
+    if (!priceUpdateSymbol) {
+      setPriceUpdateError("Select a coin first");
+      return;
     }
-  }, [loadSummary, checkAlerts]);
+    const price = Number(priceUpdateValue);
+    if (!priceUpdateValue || Number.isNaN(price) || price <= 0) {
+      setPriceUpdateError("Enter a valid price greater than 0");
+      return;
+    }
+
+    setPriceUpdateSubmitting(true);
+    try {
+      const res = await fetch("/api/records", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol: "TXPHP", price }),
+      });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        throw new Error(data.error ?? "Failed to update price");
+      }
+      setPriceUpdateSuccess(`Updated ${"TXPHP"} to ₱${price.toLocaleString()}`);
+      setPriceUpdateValue("");
+      await loadSummary();
+    } catch (err) {
+      setPriceUpdateError((err as Error).message);
+    } finally {
+      setPriceUpdateSubmitting(false);
+    }
+  }
 
   return {
     ...state,
-    cronRun,
-    runCronNow,
-    canRunCron: authenticated,
+    canUpdatePrice: authenticated,
+    priceUpdateSymbol,
+    setPriceUpdateSymbol,
+    priceUpdateValue,
+    setPriceUpdateValue,
+    priceUpdateSubmitting,
+    priceUpdateError,
+    priceUpdateSuccess,
+    submitPriceUpdate,
     alertRecords,
     alertModalOpen,
     closeAlertModal,
     reachedTargets,
     showTargetBanner,
     dismissTargetBanner,
-    newsRefreshTick,
   };
 }

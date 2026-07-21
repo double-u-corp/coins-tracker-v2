@@ -21,7 +21,11 @@ export function useCalendarLogic() {
       .then((res) => res.json())
       .then((data: { coins: CoinSummary[] }) => {
         if (!cancelled) {
-          setCoinOptions(data.coins.map((c) => ({ symbol: c.symbol, name: c.name })));
+          const options = data.coins.map((c) => ({ symbol: c.symbol, name: c.name }));
+          setCoinOptions(options);
+          // Default to the first monitored coin — never leave this on a
+          // blank "select a coin" placeholder.
+          setSelectedSymbol((prev) => prev || options[0]?.symbol || "");
         }
       })
       .catch(() => {

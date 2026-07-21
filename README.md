@@ -40,7 +40,7 @@ Visit `http://localhost:3000`.
 
 > **This round**: switched from SQLite to PostgreSQL (see § Deployment: Postgres, not SQLite above) — `datasource db { provider }` in `prisma/schema.prisma` is now `postgresql`. If you have an existing SQLite `prisma/dev.db` you want to keep, you'll need to manually migrate that data over; there's no automated SQLite→Postgres data migration in this repo, only the schema change itself. A fresh `npx prisma migrate dev --name init` against a new Postgres database is the expected path for continuing local development.
 
-To manually trigger the cron logic from the command line (the Home page also has a "Run Cron Now" button when logged in):
+To manually trigger the cron logic from the command line:
 
 ```bash
 curl "http://localhost:3000/api/cron" -H "Authorization: Bearer $CRON_SECRET"
@@ -52,24 +52,41 @@ Every price on this app — Home, Calendar, Chart, cron-recorded highs/lows — 
 
 **If you added a coin before this change** (as a `...USDT` pair), its price history was recorded in USDT terms — mixing that with PHP going forward would make the high/low numbers meaningless. The clean fix: remove it from Manage Coins and re-add it using its PHP-suffixed symbol (search for the coin, pick the result ending in `PHP`). Note this deletes that coin's `Record`/`Transaction`/target history (removing a coin cascades), so only do this if you don't need the old data — otherwise leave the old USDT-tracked coin as historical reference and add a fresh PHP-tracked one alongside it.
 
+## Data Storage: Only New Daily Highs/Lows Are Kept
+
+The cron job still checks every monitored coin's price on every scheduled run, but it only writes a new `Record` row when that price is a new high or low **for that calendar day** (or the coin's first-ever observation) — a price that falls in the middle of today's already-established range is used to keep the all-time high/low comparison accurate, but isn't persisted. In practice this means most coins get 1–3 rows/day instead of one per cron run, matching what the Calendar page already only cares about (each day's high/low, not every snapshot).
+
+One real tradeoff worth knowing: Home's "Current Price" is drawn from the latest **stored** `Record`, so on a run where nothing new happens, it shows the last stored extreme rather than that exact instant's live price. Accepted deliberately to cap storage growth.
+
 ## Data Retention
 
-Price-history rows (`Record` — the cron snapshots behind Home/Calendar/Chart) older than **5 years** are automatically deleted, pruned at the end of every cron run. This is mostly a hygiene measure, not an urgent fix: at 6 snapshots/day per coin that's only ~11,000 rows/coin over 5 years, which Postgres handles trivially either way — but unbounded growth is still worth avoiding over a long enough timeline, and 5 years is a generous window that shouldn't affect normal use of the Calendar/Chart history pages (and matches the Chart page's max 5-year range selector).
+Price-history rows (`Record` — the cron snapshots behind Home/Calendar/Chart) older than **5 years** are automatically deleted, pruned at the end of every cron run. Given the storage cap above, this is even less of an urgent concern than it already was — but unbounded growth is still worth avoiding over a long enough timeline, and 5 years is a generous window that shouldn't affect normal use of the Calendar/Chart history pages (and matches the Chart page's max 5-year range selector).
 
 **Your buy/sell history (`Transaction`) is never pruned** — that's financial record-keeping, kept forever regardless of this setting. Journal entries (`JournalEntry`) are never pruned either, for the same reason: your own written notes, not disposable data.
 
-**Market Signals (`NewsItem`) have a shorter, separate window: 6 months** (`NEWS_RETENTION_DAYS`), also pruned at the end of every cron run. Signals/articles are timely by nature — unlike price history, they're not useful reference material long after the fact, and unlike `Record`, their volume isn't capped by a fixed schedule (a consistently newsworthy coin could otherwise accumulate rows indefinitely).
+**Market Signals (`NewsItem`) have a shorter, separate window: 1 month** (`NEWS_RETENTION_DAYS`), also pruned at the end of every cron run. Signals/articles are timely by nature — unlike price history, they're not useful reference material long after the fact, and unlike `Record`, their volume isn't capped by a fixed schedule (a consistently newsworthy coin could otherwise accumulate rows indefinitely).
 
 If you want different windows, change `RECORD_RETENTION_DAYS` or `NEWS_RETENTION_DAYS` in `src/lib/retention.ts`.
 
 ## Feature Tour
 
-- **Home** (`/`, public) — price table in PHP (Current / Recorded High / Recorded Low / Target High / Target Low, read-only), last-cron-run status banner, a dismissible banner when any coin hits its target, a modal that appears when a cron run sets a new all-time high/low, and a **Market Signals** section showing auto-generated bullish/bearish signals (see § News/Signals below — these are computed, not scraped news).
-- **Calendar** (`/calendar`, public) — pick a coin, see daily high/low in a month grid.
+- **Home** (`/`, public) — price table in PHP (Current Price with a ▲/▼ direction arrow, Recorded High/Low, Target High/Low, read-only), last-cron-run status banner, a dismissible banner when any coin hits its target, a modal that appears when a cron run sets a new all-time high/low, a manual price-update control (login required — for coins with no live ticker feed), and a **Market Signals** section showing auto-generated bullish/bearish signals (see § News/Signals below — these are computed, not scraped news).
+- **Calendar** (`/calendar`, public) — the first monitored coin is pre-selected (no blank "select a coin" step); daily high/low in a month grid.
 - **Chart** (`/chart`, public) — line graph of a coin's price history: pick the coin, a range of 1–5 years, and weekly/monthly/yearly bucketing. Shows the period's high (green) and low (red). A right-hand sidebar shows/lets you log journal entries (events/notes tied to a date, optionally to a coin) — entries land on the chart as dashed 📓 markers when their date falls in a visible bucket.
-- **Buy / Sell** (`/trade`, login required) — record a live or historical buy/sell; edit or remove any logged transaction; portfolio view with holdings, average cost, current value, and realized/unrealized gain-loss.
+- **Buy / Sell** (`/trade`, login required) — record a buy or sell by entering the PHP amount and number of coins directly (no per-unit price field — see § Buy/Sell below for why); edit or remove any logged transaction; a 4-column portfolio view (Holdings, Total Spent, Current Value, Gain/Loss).
 - **Manage Coins** (`/manage`, login required) — search the full Coins.ph symbol list and add/remove monitored coins, or type an exact symbol directly (with an optional starting price) if it doesn't turn up in search; set each coin's target high/low.
-- **Login** (`/login`) — single-user session login gating Buy/Sell, Manage Coins, and the Run Cron Now button.
+- **Login** (`/login`) — single-user session login gating Buy/Sell, Manage Coins, and Home's manual price-update control.
+
+## Buy/Sell: Amount + Coins, Not a Price Field
+
+`/trade` never asks for a per-unit price — every buy/sell entry (and every correction to one) is entered as the PHP amount spent/received plus the number of coins, and the price shown anywhere is derived from those two (`phpAmount / coinAmount`). This was a deliberate choice: the exact execution price isn't always known precisely, and letting it be edited independently of the amount/quantity you actually know for certain let the numbers drift out of sync with each other.
+
+Portfolio math was simplified to match — 4 columns, not a full average-cost/realized-vs-unrealized breakdown:
+- **Holdings** — net coins held (buys minus sells)
+- **Total Spent** — net PHP still invested (buy cost minus sell proceeds)
+- **Current Value** — live price × holdings
+- **Gain/Loss** — Current Value − Total Spent
+
 
 See `CLAUDE.md` for how each of these is wired up (models, API routes, key design decisions).
 
@@ -96,10 +113,10 @@ A right-sidebar form on the Chart page lets you log a dated note — optionally 
 1. **Heuristic signals** (always on, no setup) — after each cron run prices a coin, `src/lib/newsApi.ts` computes a bullish/bearish signal from that run's own price movement (a new recorded high/low, or a ≥2% move since the last check-in) and saves it with `source: "System"`. Not a scraped article, never fabricates a headline attributed to a real outlet.
 2. **Real articles via free RSS** (always on, no setup, no API key) — each cron run also pulls from free public RSS feeds (Cointelegraph, CryptoSlate, NewsBTC), matches articles mentioning each monitored coin by name/symbol, and classifies sentiment with a plain keyword heuristic (counts bullish vs. bearish terms — not NLP/ML, and the article's summary says so). This is the real-article source and needs zero configuration.
 
-- Triggers via cron — both the scheduled `/api/cron` and the manual **Run Cron Now** button run the same `runCronJob()`, which fetches the RSS feeds once per run (not once per coin — matched against every coin from that single pull) and generates both sources as part of the same pass that fetches prices. A feed hiccup is logged but never fails the cron run itself — it's enrichment, not core functionality.
+- Triggers via cron — the scheduled `/api/cron` fetches the RSS feeds once per run (not once per coin — matched against every coin from that single pull) and generates both news sources as part of the same pass that fetches prices. A feed hiccup is logged but never fails the cron run itself — it's enrichment, not core functionality.
 - **Grouped by run**: the feed shows a divider between each cron run's batch of signals/articles, so you can tell "this is from the latest run, this is from the one before." Ordered by which run produced them, not by article publish date (a real article can be older than when this app happened to fetch it).
 - **Paginated**: loads 15 at a time with a "Load more" button, rather than the whole history at once.
-- **Retention**: signals/articles older than 6 months are automatically pruned (shorter than the 5-year window for price history — see § Data Retention below for why).
+- **Retention**: signals/articles older than 1 month are automatically pruned (shorter than the 5-year window for price history — see § Data Retention below for why).
 
 ## Cron Schedule & Timezone
 
@@ -132,4 +149,4 @@ A couple of things worth knowing about GitHub Actions schedules: they're **best-
 - Zod schemas validate all API query params, bodies, and response shapes at the boundary.
 - Business logic lives in `/lib` (server) and `/features/*/use*Logic.ts` hooks (client), kept separate from presentational components.
 - Tailwind utility classes only — no inline styles.
-- `Layout` renders once in `_app.tsx` (not per-page) so client-side navigation doesn't remount the nav/auth state — see CLAUDE.md 
+- `Layout` renders once in `_app.tsx` (not per-page) so client-side navigation doesn't remount the nav/auth state — see CLAUDE.md § Known Gotchas if you're adding a new page.
