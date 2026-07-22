@@ -89,6 +89,8 @@ Portfolio math was simplified to match — 4 columns, not a full average-cost/re
 
 Above the per-coin table, two summary figures roll up across every coin: **Total Spent** (a straight sum) and **Total Gain/Loss** (sums only the coins whose live price lookup succeeded that request — if one fails, it's excluded and called out rather than silently counted as zero, which would skew the total).
 
+**Current Value for manually-tracked coins**: if a coin has no live ticker pair (added via Manage Coins' "Add a coin manually" flow — e.g. one with no PHP trading pair), the portfolio falls back to that coin's stored price — the same one Home's "Current Price" column shows, and the same one you can set via Home's click-to-edit price modal. Without a price set there, Current Value/Gain-Loss show "—" for that coin; once you set one, the portfolio picks it up automatically.
+
 
 See `CLAUDE.md` for how each of these is wired up (models, API routes, key design decisions).
 

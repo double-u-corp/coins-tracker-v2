@@ -30,12 +30,17 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
   }));
 
   // Roll transactions up per coin: holdings = net coins (buys - sells),
-  // spent = net PHP still invested (buy cost - sell proceeds). Then fetch
-  // each coin's *current* PHP price (live, not the last cron snapshot —
-  // which may be USDT-quoted) to compute today's value and gain/loss.
-  const byCoin = new Map<string, { symbol: string; name: string; holdings: number; spent: number }>();
+  // spent = net PHP still invested (buy cost - sell proceeds). Then price
+  // each coin: try a *live* PHP price first (fresher than the last cron
+  // snapshot), and if that fails — e.g. a manually-tracked coin with no
+  // live ticker pair (see Manage Coins' "Add a coin manually" flow) —
+  // fall back to the same stored Record price Home's "Current Price"
+  // column shows, which the Home page's click-to-edit modal can update
+  // for exactly this kind of coin.
+  const byCoin = new Map<string, { coinId: number; symbol: string; name: string; holdings: number; spent: number }>();
   for (const t of transactions) {
     const existing = byCoin.get(t.coin.symbol) ?? {
+      coinId: t.coin.id,
       symbol: t.coin.symbol,
       name: t.coin.name,
       holdings: 0,
@@ -57,7 +62,16 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
       try {
         currentPrice = await fetchPrice(toPhpSymbol(entry.symbol));
       } catch {
-        currentPrice = null; // live lookup failed; still show what was spent
+        currentPrice = null; // live lookup failed — try the stored-price fallback below
+      }
+
+      if (currentPrice === null) {
+        const latestRecord = await prisma.record.findFirst({
+          where: { coinId: entry.coinId },
+          orderBy: { createdAt: "desc" },
+          select: { price: true },
+        });
+        currentPrice = latestRecord?.price ?? null;
       }
 
       const currentValue = currentPrice !== null ? currentPrice * entry.holdings : null;
