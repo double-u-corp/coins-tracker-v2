@@ -70,7 +70,7 @@ If you want different windows, change `RECORD_RETENTION_DAYS` or `NEWS_RETENTION
 
 ## Feature Tour
 
-- **Home** (`/`, public) — price table in PHP (Current Price with a ▲/▼ direction arrow, Recorded High/Low, Target High/Low, read-only), last-cron-run status banner, a dismissible banner when any coin hits its target, a modal that appears when a cron run sets a new all-time high/low, a manual price-update control (login required — for coins with no live ticker feed), and a **Market Signals** section showing auto-generated bullish/bearish signals (see § News/Signals below — these are computed, not scraped news).
+- **Home** (`/`, public) — price table in PHP (Current Price with a ▲/▼ direction arrow, Recorded High/Low, Target High/Low, read-only), last-cron-run status banner, a dismissible banner when any coin hits its target, a modal that appears when a cron run sets a new all-time high/low, and a **Market Signals** section showing auto-generated bullish/bearish signals (see § News/Signals below — these are computed, not scraped news). When logged in, click a coin's name to open a small modal and set its price manually (for coins with no live ticker feed) — logged out, that cell is plain text, nothing to click.
 - **Calendar** (`/calendar`, public) — the first monitored coin is pre-selected (no blank "select a coin" step); daily high/low in a month grid.
 - **Chart** (`/chart`, public) — line graph of a coin's price history: pick the coin, a range of 1–5 years, and weekly/monthly/yearly bucketing. Shows the period's high (green) and low (red). A right-hand sidebar shows/lets you log journal entries (events/notes tied to a date, optionally to a coin) — entries land on the chart as dashed 📓 markers when their date falls in a visible bucket.
 - **Buy / Sell** (`/trade`, login required) — record a buy or sell by entering the PHP amount and number of coins directly (no per-unit price field — see § Buy/Sell below for why); edit or remove any logged transaction; a 4-column portfolio view (Holdings, Total Spent, Current Value, Gain/Loss).
@@ -86,6 +86,8 @@ Portfolio math was simplified to match — 4 columns, not a full average-cost/re
 - **Total Spent** — net PHP still invested (buy cost minus sell proceeds)
 - **Current Value** — live price × holdings
 - **Gain/Loss** — Current Value − Total Spent
+
+Above the per-coin table, two summary figures roll up across every coin: **Total Spent** (a straight sum) and **Total Gain/Loss** (sums only the coins whose live price lookup succeeded that request — if one fails, it's excluded and called out rather than silently counted as zero, which would skew the total).
 
 
 See `CLAUDE.md` for how each of these is wired up (models, API routes, key design decisions).

@@ -3,6 +3,7 @@ import { formatPhp } from "@/lib/format";
 import { useHomeLogic } from "./useHomeLogic";
 import NewRecordModal from "./NewRecordModal";
 import NewsSection from "./NewsSection";
+import PriceUpdateModal from "./PriceUpdateModal";
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return "No cron runs recorded yet";
@@ -38,13 +39,14 @@ export default function HomeTable() {
     loading,
     error,
     canUpdatePrice,
-    priceUpdateSymbol,
-    setPriceUpdateSymbol,
+    priceUpdateCoin,
+    priceUpdateModalOpen,
     priceUpdateValue,
     setPriceUpdateValue,
     priceUpdateSubmitting,
     priceUpdateError,
-    priceUpdateSuccess,
+    openPriceUpdateModal,
+    closePriceUpdateModal,
     submitPriceUpdate,
     alertRecords,
     alertModalOpen,
@@ -57,61 +59,28 @@ export default function HomeTable() {
   return (
     <div>
       <NewRecordModal open={alertModalOpen} records={alertRecords} onClose={closeAlertModal} />
+      <PriceUpdateModal
+        open={priceUpdateModalOpen}
+        coin={priceUpdateCoin}
+        value={priceUpdateValue}
+        onValueChange={setPriceUpdateValue}
+        onSave={submitPriceUpdate}
+        saving={priceUpdateSubmitting}
+        error={priceUpdateError}
+        onClose={closePriceUpdateModal}
+      />
 
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex-1">
-          <AlertBanner
-            variant={error ? "error" : bannerVariant(lastCronStatus)}
-            message={error ? `Failed to load data: ${error}` : `Last cron run: ${formatDateTime(lastCronRun)}`}
-          />
-        </div>
-
-        {canUpdatePrice && (
-          <div className="shrink-0 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
-            <div className="mb-1 text-xs font-semibold text-gray-600">Update price manually</div>
-            <div className="flex items-center gap-2">
-              <select
-                value={priceUpdateSymbol}
-                onChange={(e) => setPriceUpdateSymbol(e.target.value)}
-                className="rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              >
-                {coins.map((c) =>
-                  c.symbol === "TXPHP" ? (
-                    <option key={c.symbol} value={c.symbol}>
-                      {c.symbol}
-                    </option>
-                  ) : null
-                )}
-              </select>
-              <input
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="any"
-                value={priceUpdateValue}
-                onChange={(e) => setPriceUpdateValue(e.target.value)}
-                placeholder="Price"
-                className="w-28 rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              />
-              <button
-                type="button"
-                onClick={submitPriceUpdate}
-                disabled={priceUpdateSubmitting}
-                className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
-              >
-                {priceUpdateSubmitting ? "…" : "Update"}
-              </button>
-            </div>
-            {priceUpdateError && <p className="mt-1 text-xs font-medium text-red-700">{priceUpdateError}</p>}
-            {priceUpdateSuccess && !priceUpdateError && (
-              <p className="mt-1 text-xs font-medium text-green-700">{priceUpdateSuccess}</p>
-            )}
-          </div>
-        )}
-      </div>
+      <AlertBanner
+        variant={error ? "error" : bannerVariant(lastCronStatus)}
+        message={error ? `Failed to load data: ${error}` : `Last cron run: ${formatDateTime(lastCronRun)}`}
+      />
 
       {showTargetBanner && (
         <AlertBanner variant="warning" message={targetBannerMessage(reachedTargets)} onDismiss={dismissTargetBanner} />
+      )}
+
+      {canUpdatePrice && (
+        <p className="mb-2 text-xs text-gray-500">Click a coin's name to update its price manually.</p>
       )}
 
       <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
@@ -156,7 +125,20 @@ export default function HomeTable() {
             {coins.map((coin) => (
               <tr key={coin.id} className="hover:bg-gray-50">
                 <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                  {coin.name} <span className="text-gray-400">({coin.symbol})</span>
+                  {canUpdatePrice ? (
+                    <button
+                      type="button"
+                      onClick={() => openPriceUpdateModal({ symbol: coin.symbol, name: coin.name })}
+                      className="underline decoration-dotted hover:text-brand-700"
+                      title="Update this coin's price"
+                    >
+                      {coin.name} <span className="text-gray-400">({coin.symbol})</span>
+                    </button>
+                  ) : (
+                    <span>
+                      {coin.name} <span className="text-gray-400">({coin.symbol})</span>
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-right text-sm text-gray-700">
                   <span className="inline-flex items-center gap-1">

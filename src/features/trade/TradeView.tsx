@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import Dropdown from "@/components/Dropdown";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp, formatCoinAmount } from "@/lib/format";
@@ -41,6 +42,20 @@ export default function TradeView() {
     cancelEdit,
     saveEdit,
   } = useTradeLogic();
+
+  // Totals across every coin — spent always sums (it's just addition), but
+  // gain/loss only sums the coins whose current price we actually have; if
+  // any coin's live price lookup failed (currentValue/gainLoss null), that
+  // coin is excluded and flagged rather than silently treated as zero,
+  // since that would understate a loss or overstate a gain.
+  const portfolioTotals = useMemo(() => {
+    const totalSpent = portfolio.reduce((sum, p) => sum + p.spent, 0);
+    const withKnownGainLoss = portfolio.filter((p) => p.gainLoss !== null);
+    const totalGainLoss =
+      withKnownGainLoss.length > 0 ? withKnownGainLoss.reduce((sum, p) => sum + (p.gainLoss as number), 0) : null;
+    const missingPriceCount = portfolio.length - withKnownGainLoss.length;
+    return { totalSpent, totalGainLoss, missingPriceCount };
+  }, [portfolio]);
 
   return (
     <div className="flex flex-col gap-8">
@@ -152,42 +167,72 @@ export default function TradeView() {
         ) : portfolio.length === 0 ? (
           <p className="text-sm text-gray-500">No trades yet.</p>
         ) : (
-          <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-500">Coin</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500">Holdings</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500">Total Spent</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500">Current Value</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500">Gain / Loss</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {portfolio.map((entry) => (
-                  <tr key={entry.symbol}>
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                      {entry.name} <span className="text-gray-400">({entry.symbol})</span>
-                    </td>
-                    <td className="px-4 py-3 text-right text-sm text-gray-700">{formatCoinAmount(entry.holdings)}</td>
-                    <td className="px-4 py-3 text-right text-sm text-gray-700">{formatPhp(entry.spent)}</td>
-                    <td className="px-4 py-3 text-right text-sm text-gray-700">
-                      {entry.currentValue !== null ? formatPhp(entry.currentValue) : "—"}
-                    </td>
-                    <td
-                      className={`px-4 py-3 text-right text-sm font-medium ${
-                        entry.gainLoss === null ? "text-gray-400" : entry.gainLoss >= 0 ? "text-green-700" : "text-red-700"
-                      }`}
-                    >
-                      {entry.gainLoss !== null
-                        ? `${entry.gainLoss >= 0 ? "+" : ""}${formatPhp(entry.gainLoss)}`
-                        : "—"}
-                    </td>
+          <>
+            <div className="mb-4 flex flex-wrap gap-4">
+              <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
+                <div className="text-xs font-semibold uppercase text-gray-500">Total Spent (all coins)</div>
+                <div className="text-lg font-semibold text-gray-900">{formatPhp(portfolioTotals.totalSpent)}</div>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
+                <div className="text-xs font-semibold uppercase text-gray-500">Total Gain / Loss (all coins)</div>
+                <div
+                  className={`text-lg font-semibold ${
+                    portfolioTotals.totalGainLoss === null
+                      ? "text-gray-400"
+                      : portfolioTotals.totalGainLoss >= 0
+                      ? "text-green-700"
+                      : "text-red-700"
+                  }`}
+                >
+                  {portfolioTotals.totalGainLoss !== null
+                    ? `${portfolioTotals.totalGainLoss >= 0 ? "+" : ""}${formatPhp(portfolioTotals.totalGainLoss)}`
+                    : "—"}
+                </div>
+                {portfolioTotals.missingPriceCount > 0 && (
+                  <div className="mt-0.5 text-xs text-gray-400">
+                    Excludes {portfolioTotals.missingPriceCount} coin(s) with no current price available
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-500">Coin</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500">Holdings</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500">Total Spent</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500">Current Value</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500">Gain / Loss</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {portfolio.map((entry) => (
+                    <tr key={entry.symbol}>
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                        {entry.name} <span className="text-gray-400">({entry.symbol})</span>
+                      </td>
+                      <td className="px-4 py-3 text-right text-sm text-gray-700">{formatCoinAmount(entry.holdings)}</td>
+                      <td className="px-4 py-3 text-right text-sm text-gray-700">{formatPhp(entry.spent)}</td>
+                      <td className="px-4 py-3 text-right text-sm text-gray-700">
+                        {entry.currentValue !== null ? formatPhp(entry.currentValue) : "—"}
+                      </td>
+                      <td
+                        className={`px-4 py-3 text-right text-sm font-medium ${
+                          entry.gainLoss === null ? "text-gray-400" : entry.gainLoss >= 0 ? "text-green-700" : "text-red-700"
+                        }`}
+                      >
+                        {entry.gainLoss !== null
+                          ? `${entry.gainLoss >= 0 ? "+" : ""}${formatPhp(entry.gainLoss)}`
+                          : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </section>
 

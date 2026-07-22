@@ -17,6 +17,11 @@ export interface ReachedTarget {
   value: number;
 }
 
+interface PriceUpdateCoin {
+  symbol: string;
+  name: string;
+}
+
 // Remembers which cron run's new-record alert the user has already
 // dismissed, so the modal doesn't reopen for the same run on every page
 // visit — but does reopen for any genuinely new run that sets a record.
@@ -41,16 +46,18 @@ export function useHomeLogic() {
   // *different* coin newly reaching its target afterward.
   const [dismissedTargetsKey, setDismissedTargetsKey] = useState<string | null>(null);
 
-  // Manual price update — for coins added via Manage Coins' "Add a coin
-  // manually" flow (e.g. TH) that have no live price feed, so nothing ever
-  // updates their price automatically. This replaces the old "Run Cron Now"
-  // button now that scheduled cron (GitHub Actions) is live in production
-  // and manual triggering for testing is no longer the priority here.
-  const [priceUpdateSymbol, setPriceUpdateSymbol] = useState("");
+  // Manual price update — click a coin's symbol in the table to open a
+  // modal with a single price input. Only reachable when logged in: the
+  // table cell isn't even a button (no onClick) when authenticated is
+  // false, so there's nothing to click into this flow from without a
+  // session. For coins added via Manage Coins' "Add a coin manually" flow
+  // (e.g. TH) that have no live price feed, this is the only way their
+  // price ever changes.
+  const [priceUpdateCoin, setPriceUpdateCoin] = useState<PriceUpdateCoin | null>(null);
+  const [priceUpdateModalOpen, setPriceUpdateModalOpen] = useState(false);
   const [priceUpdateValue, setPriceUpdateValue] = useState("");
   const [priceUpdateSubmitting, setPriceUpdateSubmitting] = useState(false);
   const [priceUpdateError, setPriceUpdateError] = useState<string | null>(null);
-  const [priceUpdateSuccess, setPriceUpdateSuccess] = useState<string | null>(null);
 
   const loadSummary = useCallback(async () => {
     try {
@@ -68,9 +75,6 @@ export function useHomeLogic() {
         loading: false,
         error: null,
       });
-      // Default the price-update dropdown to the first monitored coin —
-      // never leave it on a blank "select a coin" placeholder.
-      setPriceUpdateSymbol((prev) => prev || data.coins[0]?.symbol || "");
     } catch (err) {
       setState((prev) => ({ ...prev, loading: false, error: (err as Error).message }));
     }
@@ -132,14 +136,23 @@ export function useHomeLogic() {
     setDismissedTargetsKey(reachedTargetsKey);
   }
 
-  async function submitPriceUpdate() {
+  function openPriceUpdateModal(coin: PriceUpdateCoin) {
+    setPriceUpdateCoin(coin);
+    setPriceUpdateValue("");
     setPriceUpdateError(null);
-    setPriceUpdateSuccess(null);
-    console.log(priceUpdateSymbol)
-    if (!priceUpdateSymbol) {
-      setPriceUpdateError("Select a coin first");
-      return;
-    }
+    setPriceUpdateModalOpen(true);
+  }
+
+  function closePriceUpdateModal() {
+    setPriceUpdateModalOpen(false);
+    setPriceUpdateCoin(null);
+    setPriceUpdateError(null);
+  }
+
+  async function submitPriceUpdate() {
+    if (!priceUpdateCoin) return;
+    setPriceUpdateError(null);
+
     const price = Number(priceUpdateValue);
     if (!priceUpdateValue || Number.isNaN(price) || price <= 0) {
       setPriceUpdateError("Enter a valid price greater than 0");
@@ -151,15 +164,14 @@ export function useHomeLogic() {
       const res = await fetch("/api/records", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol: "TXPHP", price }),
+        body: JSON.stringify({ symbol: priceUpdateCoin.symbol, price }),
       });
       const data = (await res.json()) as { error?: string };
       if (!res.ok) {
         throw new Error(data.error ?? "Failed to update price");
       }
-      setPriceUpdateSuccess(`Updated ${"TXPHP"} to ₱${price.toLocaleString()}`);
-      setPriceUpdateValue("");
       await loadSummary();
+      closePriceUpdateModal();
     } catch (err) {
       setPriceUpdateError((err as Error).message);
     } finally {
@@ -170,13 +182,14 @@ export function useHomeLogic() {
   return {
     ...state,
     canUpdatePrice: authenticated,
-    priceUpdateSymbol,
-    setPriceUpdateSymbol,
+    priceUpdateCoin,
+    priceUpdateModalOpen,
     priceUpdateValue,
     setPriceUpdateValue,
     priceUpdateSubmitting,
     priceUpdateError,
-    priceUpdateSuccess,
+    openPriceUpdateModal,
+    closePriceUpdateModal,
     submitPriceUpdate,
     alertRecords,
     alertModalOpen,
