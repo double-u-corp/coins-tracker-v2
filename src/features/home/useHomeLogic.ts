@@ -22,6 +22,12 @@ interface PriceUpdateCoin {
   name: string;
 }
 
+export interface ManualRecordEntry {
+  id: number;
+  price: number;
+  createdAt: string;
+}
+
 // Remembers which cron run's new-record alert the user has already
 // dismissed, so the modal doesn't reopen for the same run on every page
 // visit — but does reopen for any genuinely new run that sets a record.
@@ -47,17 +53,28 @@ export function useHomeLogic() {
   const [dismissedTargetsKey, setDismissedTargetsKey] = useState<string | null>(null);
 
   // Manual price update — click a coin's symbol in the table to open a
-  // modal with a single price input. Only reachable when logged in: the
-  // table cell isn't even a button (no onClick) when authenticated is
-  // false, so there's nothing to click into this flow from without a
-  // session. For coins added via Manage Coins' "Add a coin manually" flow
-  // (e.g. TH) that have no live price feed, this is the only way their
-  // price ever changes.
+  // modal. Only reachable when logged in: the table cell isn't even a
+  // button (no onClick) when authenticated is false, so there's nothing to
+  // click into this flow from without a session. For coins added via
+  // Manage Coins' "Add a coin manually" flow (e.g. TH) that have no live
+  // price feed, this is the only way their price ever changes.
   const [priceUpdateCoin, setPriceUpdateCoin] = useState<PriceUpdateCoin | null>(null);
   const [priceUpdateModalOpen, setPriceUpdateModalOpen] = useState(false);
   const [priceUpdateValue, setPriceUpdateValue] = useState("");
   const [priceUpdateSubmitting, setPriceUpdateSubmitting] = useState(false);
   const [priceUpdateError, setPriceUpdateError] = useState<string | null>(null);
+
+  // The modal also lists that coin's recent manually-entered prices, so a
+  // wrong entry from yesterday (or earlier today) can be corrected in
+  // place instead of just adding another new one on top of it.
+  const [recentManualRecords, setRecentManualRecords] = useState<ManualRecordEntry[]>([]);
+  const [recentManualLoading, setRecentManualLoading] = useState(false);
+  const [recentManualError, setRecentManualError] = useState<string | null>(null);
+
+  const [editingRecordId, setEditingRecordId] = useState<number | null>(null);
+  const [editRecordValue, setEditRecordValue] = useState("");
+  const [editRecordSaving, setEditRecordSaving] = useState(false);
+  const [editRecordError, setEditRecordError] = useState<string | null>(null);
 
   const loadSummary = useCallback(async () => {
     try {
@@ -136,17 +153,37 @@ export function useHomeLogic() {
     setDismissedTargetsKey(reachedTargetsKey);
   }
 
+  const loadRecentManualRecords = useCallback(async (symbol: string) => {
+    setRecentManualLoading(true);
+    setRecentManualError(null);
+    try {
+      const res = await fetch(`/api/records?symbol=${symbol}&limit=10`);
+      if (!res.ok) throw new Error(`Failed to load recent entries (${res.status})`);
+      const data = (await res.json()) as { records: ManualRecordEntry[] };
+      setRecentManualRecords(data.records);
+    } catch (err) {
+      setRecentManualError((err as Error).message);
+    } finally {
+      setRecentManualLoading(false);
+    }
+  }, []);
+
   function openPriceUpdateModal(coin: PriceUpdateCoin) {
     setPriceUpdateCoin(coin);
     setPriceUpdateValue("");
     setPriceUpdateError(null);
+    setEditingRecordId(null);
+    setEditRecordError(null);
     setPriceUpdateModalOpen(true);
+    loadRecentManualRecords(coin.symbol);
   }
 
   function closePriceUpdateModal() {
     setPriceUpdateModalOpen(false);
     setPriceUpdateCoin(null);
     setPriceUpdateError(null);
+    setRecentManualRecords([]);
+    setEditingRecordId(null);
   }
 
   async function submitPriceUpdate() {
@@ -170,12 +207,53 @@ export function useHomeLogic() {
       if (!res.ok) {
         throw new Error(data.error ?? "Failed to update price");
       }
-      await loadSummary();
-      closePriceUpdateModal();
+      setPriceUpdateValue("");
+      await Promise.all([loadSummary(), loadRecentManualRecords(priceUpdateCoin.symbol)]);
     } catch (err) {
       setPriceUpdateError((err as Error).message);
     } finally {
       setPriceUpdateSubmitting(false);
+    }
+  }
+
+  function startEditRecord(record: ManualRecordEntry) {
+    setEditingRecordId(record.id);
+    setEditRecordValue(String(record.price));
+    setEditRecordError(null);
+  }
+
+  function cancelEditRecord() {
+    setEditingRecordId(null);
+    setEditRecordError(null);
+  }
+
+  async function saveEditRecord() {
+    if (editingRecordId === null || !priceUpdateCoin) return;
+
+    const price = Number(editRecordValue);
+    if (!editRecordValue || Number.isNaN(price) || price <= 0) {
+      setEditRecordError("Enter a valid price greater than 0");
+      return;
+    }
+
+    setEditRecordSaving(true);
+    setEditRecordError(null);
+    try {
+      const res = await fetch("/api/records", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: editingRecordId, price }),
+      });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        throw new Error(data.error ?? "Failed to update entry");
+      }
+      setEditingRecordId(null);
+      await Promise.all([loadSummary(), loadRecentManualRecords(priceUpdateCoin.symbol)]);
+    } catch (err) {
+      setEditRecordError((err as Error).message);
+    } finally {
+      setEditRecordSaving(false);
     }
   }
 
@@ -191,6 +269,17 @@ export function useHomeLogic() {
     openPriceUpdateModal,
     closePriceUpdateModal,
     submitPriceUpdate,
+    recentManualRecords,
+    recentManualLoading,
+    recentManualError,
+    editingRecordId,
+    editRecordValue,
+    setEditRecordValue,
+    editRecordSaving,
+    editRecordError,
+    startEditRecord,
+    cancelEditRecord,
+    saveEditRecord,
     alertRecords,
     alertModalOpen,
     closeAlertModal,

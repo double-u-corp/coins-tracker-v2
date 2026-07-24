@@ -58,6 +58,14 @@ The cron job still checks every monitored coin's price on every scheduled run, b
 
 One real tradeoff worth knowing: Home's "Current Price" is drawn from the latest **stored** `Record`, so on a run where nothing new happens, it shows the last stored extreme rather than that exact instant's live price. Accepted deliberately to cap storage growth.
 
+## Correcting a Wrong Manual Price Entry
+
+Typed the wrong price yesterday (or earlier today)? Click the coin's name on Home to open the price-update modal — below the "new price" input, there's a **Recent manual entries** list showing that coin's last 10 manually-entered prices with an **Edit** button per row.
+
+This only applies to manually-entered prices (the ones you typed, not ones the cron job fetched live) — correcting a live-fetched price doesn't make sense the same way, since that value came from the exchange, not a keyboard.
+
+One thing happening behind the scenes worth knowing: correcting an old entry doesn't just fix that one row. Every record for that coin carries forward a running high/low from whatever came before it, so a wrong price from three days ago could have thrown off the running high/low for every entry since. Saving a correction recalculates that chain forward automatically, so "Recorded High/Low" on Home and Calendar's daily figures stay accurate — not just the number you actually fixed.
+
 ## Data Retention
 
 Price-history rows (`Record` — the cron snapshots behind Home/Calendar/Chart) older than **5 years** are automatically deleted, pruned at the end of every cron run. Given the storage cap above, this is even less of an urgent concern than it already was — but unbounded growth is still worth avoiding over a long enough timeline, and 5 years is a generous window that shouldn't affect normal use of the Calendar/Chart history pages (and matches the Chart page's max 5-year range selector).
@@ -70,7 +78,7 @@ If you want different windows, change `RECORD_RETENTION_DAYS` or `NEWS_RETENTION
 
 ## Feature Tour
 
-- **Home** (`/`, public) — price table in PHP (Current Price with a ▲/▼ direction arrow, Recorded High/Low, Target High/Low, read-only), last-cron-run status banner, a dismissible banner when any coin hits its target, a modal that appears when a cron run sets a new all-time high/low, and a **Market Signals** section showing auto-generated bullish/bearish signals (see § News/Signals below — these are computed, not scraped news). When logged in, click a coin's name to open a small modal and set its price manually (for coins with no live ticker feed) — logged out, that cell is plain text, nothing to click.
+- **Home** (`/`, public) — price table in PHP (Current Price with a ▲/▼ direction arrow, Recorded High/Low, Target High/Low, read-only), last-cron-run status banner, a dismissible banner when any coin hits its target, a modal that appears when a cron run sets a new all-time high/low, and a **Market Signals** section showing auto-generated bullish/bearish signals (see § News/Signals below — these are computed, not scraped news). When logged in, click a coin's name to open a small modal, set its price manually (for coins with no live ticker feed), and — in the same modal — see and correct any of that coin's recent manual entries if one was typed wrong. Logged out, that cell is plain text, nothing to click.
 - **Calendar** (`/calendar`, public) — the first monitored coin is pre-selected (no blank "select a coin" step); daily high/low in a month grid.
 - **Chart** (`/chart`, public) — line graph of a coin's price history: pick the coin, a range of 1–5 years, and weekly/monthly/yearly bucketing. Shows the period's high (green) and low (red). A right-hand sidebar shows/lets you log journal entries (events/notes tied to a date, optionally to a coin) — entries land on the chart as dashed 📓 markers when their date falls in a visible bucket.
 - **Buy / Sell** (`/trade`, login required) — record a buy or sell by entering the PHP amount and number of coins directly (no per-unit price field — see § Buy/Sell below for why); edit or remove any logged transaction; a 4-column portfolio view (Holdings, Total Spent, Current Value, Gain/Loss).

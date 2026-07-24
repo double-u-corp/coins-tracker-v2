@@ -44,17 +44,23 @@ export default function TradeView() {
   } = useTradeLogic();
 
   // Totals across every coin — spent always sums (it's just addition), but
-  // gain/loss only sums the coins whose current price we actually have; if
-  // any coin's live price lookup failed (currentValue/gainLoss null), that
-  // coin is excluded and flagged rather than silently treated as zero,
-  // since that would understate a loss or overstate a gain.
+  // current value and gain/loss only sum the coins whose current price we
+  // actually have; if any coin's live price lookup failed (currentValue/
+  // gainLoss null), that coin is excluded from those two totals and
+  // flagged rather than silently treated as zero, since that would
+  // understate a loss or overstate a gain. Total Current Value − Total
+  // Spent = Total Gain/Loss, same relationship as the per-coin columns —
+  // shown as three cards specifically so that arithmetic is visible, not
+  // just the end result.
   const portfolioTotals = useMemo(() => {
     const totalSpent = portfolio.reduce((sum, p) => sum + p.spent, 0);
-    const withKnownGainLoss = portfolio.filter((p) => p.gainLoss !== null);
+    const withKnownPrice = portfolio.filter((p) => p.currentValue !== null && p.gainLoss !== null);
+    const totalCurrentValue =
+      withKnownPrice.length > 0 ? withKnownPrice.reduce((sum, p) => sum + (p.currentValue as number), 0) : null;
     const totalGainLoss =
-      withKnownGainLoss.length > 0 ? withKnownGainLoss.reduce((sum, p) => sum + (p.gainLoss as number), 0) : null;
-    const missingPriceCount = portfolio.length - withKnownGainLoss.length;
-    return { totalSpent, totalGainLoss, missingPriceCount };
+      withKnownPrice.length > 0 ? withKnownPrice.reduce((sum, p) => sum + (p.gainLoss as number), 0) : null;
+    const missingPriceCount = portfolio.length - withKnownPrice.length;
+    return { totalSpent, totalCurrentValue, totalGainLoss, missingPriceCount };
   }, [portfolio]);
 
   return (
@@ -168,10 +174,16 @@ export default function TradeView() {
           <p className="text-sm text-gray-500">No trades yet.</p>
         ) : (
           <>
-            <div className="mb-4 flex flex-wrap gap-4">
+            <div className="mb-1 flex flex-wrap gap-4">
               <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
                 <div className="text-xs font-semibold uppercase text-gray-500">Total Spent (all coins)</div>
                 <div className="text-lg font-semibold text-gray-900">{formatPhp(portfolioTotals.totalSpent)}</div>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
+                <div className="text-xs font-semibold uppercase text-gray-500">Current Value (all coins)</div>
+                <div className="text-lg font-semibold text-gray-900">
+                  {portfolioTotals.totalCurrentValue !== null ? formatPhp(portfolioTotals.totalCurrentValue) : "—"}
+                </div>
               </div>
               <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
                 <div className="text-xs font-semibold uppercase text-gray-500">Total Gain / Loss (all coins)</div>
@@ -195,6 +207,7 @@ export default function TradeView() {
                 )}
               </div>
             </div>
+            <p className="mb-4 text-xs text-gray-500">Current Value − Total Spent = Total Gain / Loss</p>
 
             <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
               <table className="min-w-full divide-y divide-gray-200">

@@ -48,6 +48,17 @@ export default function HomeTable() {
     openPriceUpdateModal,
     closePriceUpdateModal,
     submitPriceUpdate,
+    recentManualRecords,
+    recentManualLoading,
+    recentManualError,
+    editingRecordId,
+    editRecordValue,
+    setEditRecordValue,
+    editRecordSaving,
+    editRecordError,
+    startEditRecord,
+    cancelEditRecord,
+    saveEditRecord,
     alertRecords,
     alertModalOpen,
     closeAlertModal,
@@ -68,6 +79,17 @@ export default function HomeTable() {
         saving={priceUpdateSubmitting}
         error={priceUpdateError}
         onClose={closePriceUpdateModal}
+        recentRecords={recentManualRecords}
+        recentLoading={recentManualLoading}
+        recentError={recentManualError}
+        editingId={editingRecordId}
+        editValue={editRecordValue}
+        onEditValueChange={setEditRecordValue}
+        editSaving={editRecordSaving}
+        editError={editRecordError}
+        onStartEdit={startEditRecord}
+        onCancelEdit={cancelEditRecord}
+        onSaveEdit={saveEditRecord}
       />
 
       <AlertBanner
