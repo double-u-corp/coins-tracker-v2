@@ -69,18 +69,21 @@ export const transactionSchema = z.object({
 export type TransactionView = z.infer<typeof transactionSchema>;
 
 /**
- * Per-coin portfolio rollup — deliberately just 4 numbers:
+ * Per-coin portfolio rollup — 5 numbers:
  * holdings (net coins held), spent (net PHP still invested — buys minus
- * sell proceeds), current value (currentPrice × holdings), and gain/loss
- * (current value − spent). No average-cost/realized-vs-unrealized split;
- * this is an intentional simplification over an earlier, more detailed
- * version of this schema.
+ * sell proceeds), sold (gross PHP received from sells — informational,
+ * already netted into `spent`, not a separate term in the gain/loss math),
+ * current value (currentPrice × holdings), and gain/loss (current value −
+ * spent). No average-cost/realized-vs-unrealized split; this is an
+ * intentional simplification over an earlier, more detailed version of
+ * this schema.
  */
 export const portfolioEntrySchema = z.object({
   symbol: z.string(),
   name: z.string(),
   holdings: z.number(), // net coins held = totalBought - totalSold
   spent: z.number(), // net PHP invested = totalPhpSpent (buys) - totalPhpReceived (sells)
+  sold: z.number(), // gross PHP received from sells (totalPhpReceived) — already reflected in `spent`, shown separately for visibility
   currentPrice: z.number().nullable(),
   currentValue: z.number().nullable(), // currentPrice * holdings
   gainLoss: z.number().nullable(), // currentValue - spent

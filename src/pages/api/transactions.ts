@@ -30,14 +30,19 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
   }));
 
   // Roll transactions up per coin: holdings = net coins (buys - sells),
-  // spent = net PHP still invested (buy cost - sell proceeds). Then price
-  // each coin: try a *live* PHP price first (fresher than the last cron
-  // snapshot), and if that fails — e.g. a manually-tracked coin with no
-  // live ticker pair (see Manage Coins' "Add a coin manually" flow) —
-  // fall back to the same stored Record price Home's "Current Price"
-  // column shows, which the Home page's click-to-edit modal can update
-  // for exactly this kind of coin.
-  const byCoin = new Map<string, { coinId: number; symbol: string; name: string; holdings: number; spent: number }>();
+  // spent = net PHP still invested (buy cost - sell proceeds), sold = gross
+  // PHP received from sells (tracked separately from `spent` purely for
+  // visibility — it's already netted into `spent`, not a separate term in
+  // the gain/loss math). Then price each coin: try a *live* PHP price first
+  // (fresher than the last cron snapshot), and if that fails — e.g. a
+  // manually-tracked coin with no live ticker pair (see Manage Coins' "Add
+  // a coin manually" flow) — fall back to the same stored Record price
+  // Home's "Current Price" column shows, which the Home page's
+  // click-to-edit modal can update for exactly this kind of coin.
+  const byCoin = new Map<
+    string,
+    { coinId: number; symbol: string; name: string; holdings: number; spent: number; sold: number }
+  >();
   for (const t of transactions) {
     const existing = byCoin.get(t.coin.symbol) ?? {
       coinId: t.coin.id,
@@ -45,6 +50,7 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
       name: t.coin.name,
       holdings: 0,
       spent: 0,
+      sold: 0,
     };
     if (t.type === "buy") {
       existing.holdings += t.coinAmount;
@@ -52,6 +58,7 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
     } else {
       existing.holdings -= t.coinAmount;
       existing.spent -= t.phpAmount;
+      existing.sold += t.phpAmount;
     }
     byCoin.set(t.coin.symbol, existing);
   }
@@ -82,6 +89,7 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
         name: entry.name,
         holdings: entry.holdings,
         spent: entry.spent,
+        sold: entry.sold,
         currentPrice,
         currentValue,
         gainLoss,

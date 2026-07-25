@@ -43,24 +43,25 @@ export default function TradeView() {
     saveEdit,
   } = useTradeLogic();
 
-  // Totals across every coin — spent always sums (it's just addition), but
-  // current value and gain/loss only sum the coins whose current price we
-  // actually have; if any coin's live price lookup failed (currentValue/
-  // gainLoss null), that coin is excluded from those two totals and
-  // flagged rather than silently treated as zero, since that would
-  // understate a loss or overstate a gain. Total Current Value − Total
-  // Spent = Total Gain/Loss, same relationship as the per-coin columns —
-  // shown as three cards specifically so that arithmetic is visible, not
-  // just the end result.
+  // Totals across every coin — spent and sold always sum (they're just
+  // addition over transaction data, no live price involved), but current
+  // value and gain/loss only sum the coins whose current price we actually
+  // have; if any coin's live price lookup failed (currentValue/gainLoss
+  // null), that coin is excluded from those two totals and flagged rather
+  // than silently treated as zero, since that would understate a loss or
+  // overstate a gain. Total Current Value − Total Spent = Total Gain/Loss —
+  // Total Sell is shown alongside for visibility but isn't a separate term
+  // in that formula, since sell proceeds are already netted into `spent`.
   const portfolioTotals = useMemo(() => {
     const totalSpent = portfolio.reduce((sum, p) => sum + p.spent, 0);
+    const totalSold = portfolio.reduce((sum, p) => sum + p.sold, 0);
     const withKnownPrice = portfolio.filter((p) => p.currentValue !== null && p.gainLoss !== null);
     const totalCurrentValue =
       withKnownPrice.length > 0 ? withKnownPrice.reduce((sum, p) => sum + (p.currentValue as number), 0) : null;
     const totalGainLoss =
       withKnownPrice.length > 0 ? withKnownPrice.reduce((sum, p) => sum + (p.gainLoss as number), 0) : null;
     const missingPriceCount = portfolio.length - withKnownPrice.length;
-    return { totalSpent, totalCurrentValue, totalGainLoss, missingPriceCount };
+    return { totalSpent, totalSold, totalCurrentValue, totalGainLoss, missingPriceCount };
   }, [portfolio]);
 
   return (
@@ -186,6 +187,10 @@ export default function TradeView() {
                 </div>
               </div>
               <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
+                <div className="text-xs font-semibold uppercase text-gray-500">Total Sell (all coins)</div>
+                <div className="text-lg font-semibold text-gray-900">{formatPhp(portfolioTotals.totalSold)}</div>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
                 <div className="text-xs font-semibold uppercase text-gray-500">Total Gain / Loss (all coins)</div>
                 <div
                   className={`text-lg font-semibold ${
@@ -207,7 +212,10 @@ export default function TradeView() {
                 )}
               </div>
             </div>
-            <p className="mb-4 text-xs text-gray-500">Current Value − Total Spent = Total Gain / Loss</p>
+            <p className="mb-4 text-xs text-gray-500">
+              Current Value − Total Spent = Total Gain / Loss. Total Sell is shown for visibility — it's already
+              factored into Total Spent (sell proceeds reduce net spend), not a separate term in that formula.
+            </p>
 
             <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
               <table className="min-w-full divide-y divide-gray-200">
