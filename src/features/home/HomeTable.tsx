@@ -1,3 +1,4 @@
+import Link from "next/link";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
 import { useHomeLogic } from "./useHomeLogic";
@@ -101,9 +102,10 @@ export default function HomeTable() {
         <AlertBanner variant="warning" message={targetBannerMessage(reachedTargets)} onDismiss={dismissTargetBanner} />
       )}
 
-      {canUpdatePrice && (
-        <p className="mb-2 text-xs text-gray-500">Click a coin's name to update its price manually.</p>
-      )}
+      <p className="mb-2 text-xs text-gray-500">
+        Click a coin's current price to see its calendar.
+        {canUpdatePrice && " Click a coin's name to update its price manually."}
+      </p>
 
       <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
         <table className="min-w-full divide-y divide-gray-200">
@@ -163,10 +165,14 @@ export default function HomeTable() {
                   )}
                 </td>
                 <td className="px-4 py-3 text-right text-sm text-gray-700">
-                  <span className="inline-flex items-center gap-1">
+                  <Link
+                    href={`/calendar?symbol=${coin.symbol}`}
+                    className="inline-flex items-center gap-1 hover:text-brand-700 hover:underline"
+                    title={`See ${coin.symbol}'s calendar`}
+                  >
                     <PriceDirectionArrow direction={coin.priceDirection} />
                     {formatPhp(coin.currentPrice)}
-                  </span>
+                  </Link>
                 </td>
                 <td className="px-4 py-3 text-right text-sm text-green-700">{formatPhp(coin.recordedHigh)}</td>
                 <td className="px-4 py-3 text-right text-sm text-red-700">{formatPhp(coin.recordedLow)}</td>

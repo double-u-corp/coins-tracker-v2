@@ -21,17 +21,34 @@ type DeleteResponse = { ok: true };
 type ErrorResponse = { error: string };
 
 /** Groups a list of Records into one high/low entry per calendar day (UTC date). Used by the Calendar page. */
-function toDailyRecords(records: { price: number; high: number; low: number; createdAt: Date }[]): DailyRecord[] {
+/**
+ * Groups a list of Records into one high/low entry per calendar day (UTC
+ * date), for the Calendar page. Uses each record's actual `price` — NOT
+ * `record.high`/`record.low`, which are cumulative *all-time* running
+ * values (each new row carries the prior max/min forward). Using the
+ * cumulative fields here was a bug: a manually-entered price for a given
+ * day only affected the day's shown high/low if it happened to also be a
+ * new ALL-TIME extreme — a lower price from an earlier day would leave the
+ * cumulative `low` unchanged, so Calendar kept showing a stale historical
+ * value instead of what was actually entered for that day. Computing the
+ * day's max/min directly from `price` also happens to be the right
+ * complement to the day-based storage cap in cronLogic.ts: the (sparse)
+ * set of Records stored for a given day already ARE that day's extremes,
+ * so taking max/min of their `price` values reconstructs the day's actual
+ * range correctly. Chart already did this the right way (see its own
+ * bucketing); Calendar just hadn't been fixed to match.
+ */
+function toDailyRecords(records: { price: number; createdAt: Date }[]): DailyRecord[] {
   const byDate = new Map<string, { high: number; low: number }>();
 
   for (const record of records) {
     const dateKey = record.createdAt.toISOString().slice(0, 10); // YYYY-MM-DD
     const existing = byDate.get(dateKey);
     if (!existing) {
-      byDate.set(dateKey, { high: record.high, low: record.low });
+      byDate.set(dateKey, { high: record.price, low: record.price });
     } else {
-      existing.high = Math.max(existing.high, record.high);
-      existing.low = Math.min(existing.low, record.low);
+      existing.high = Math.max(existing.high, record.price);
+      existing.low = Math.min(existing.low, record.price);
     }
   }
 
@@ -138,7 +155,7 @@ async function handleCalendar(
 
   const records = await prisma.record.findMany({
     where: { coinId: coin.id, createdAt: { gte: startOfMonth, lt: startOfNextMonth } },
-    select: { price: true, high: true, low: true, createdAt: true },
+    select: { price: true, createdAt: true },
   });
 
   res.status(200).json({ days: toDailyRecords(records) });

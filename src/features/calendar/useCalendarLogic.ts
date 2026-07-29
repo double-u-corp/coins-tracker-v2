@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/router";
 import type { CoinSummary, DailyRecord } from "@/validators/recordSchema";
 
 interface CoinOption {
@@ -7,8 +8,11 @@ interface CoinOption {
 }
 
 export function useCalendarLogic() {
+  const router = useRouter();
+
   const [coinOptions, setCoinOptions] = useState<CoinOption[]>([]);
   const [selectedSymbol, setSelectedSymbol] = useState<string>("");
+  const [hasAppliedInitialSymbol, setHasAppliedInitialSymbol] = useState(false);
   const [monthCursor, setMonthCursor] = useState<Date>(() => new Date());
   const [days, setDays] = useState<DailyRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -21,11 +25,7 @@ export function useCalendarLogic() {
       .then((res) => res.json())
       .then((data: { coins: CoinSummary[] }) => {
         if (!cancelled) {
-          const options = data.coins.map((c) => ({ symbol: c.symbol, name: c.name }));
-          setCoinOptions(options);
-          // Default to the first monitored coin — never leave this on a
-          // blank "select a coin" placeholder.
-          setSelectedSymbol((prev) => prev || options[0]?.symbol || "");
+          setCoinOptions(data.coins.map((c) => ({ symbol: c.symbol, name: c.name })));
         }
       })
       .catch(() => {
@@ -35,6 +35,23 @@ export function useCalendarLogic() {
       cancelled = true;
     };
   }, []);
+
+  // Picks the initial selected coin once both the coin list AND the router
+  // query are ready — prefers a `?symbol=` param (e.g. clicked through from
+  // Home's Current Price) over the first monitored coin, and never leaves
+  // this on a blank "select a coin" placeholder either way. Runs only once
+  // (guarded by hasAppliedInitialSymbol) so it doesn't clobber a later
+  // manual dropdown change with the URL param again.
+  useEffect(() => {
+    if (hasAppliedInitialSymbol) return;
+    if (!router.isReady) return;
+    if (coinOptions.length === 0) return;
+
+    const queriedSymbol = typeof router.query.symbol === "string" ? router.query.symbol.toUpperCase() : "";
+    const matched = coinOptions.find((c) => c.symbol === queriedSymbol);
+    setSelectedSymbol(matched?.symbol ?? coinOptions[0].symbol);
+    setHasAppliedInitialSymbol(true);
+  }, [router.isReady, router.query.symbol, coinOptions, hasAppliedInitialSymbol]);
 
   const monthParam = useMemo(() => {
     const y = monthCursor.getFullYear();
