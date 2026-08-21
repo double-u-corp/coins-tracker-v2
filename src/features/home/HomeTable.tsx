@@ -52,32 +52,47 @@ interface CoinCardProps {
 function CoinCard({ coin, canUpdatePrice, onUpdatePriceClick }: CoinCardProps) {
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-      <div className="mb-3 flex items-start justify-between gap-2">
-        {canUpdatePrice ? (
-          <button
-            type="button"
-            onClick={() => onUpdatePriceClick({ symbol: coin.symbol, name: coin.name })}
-            className="text-left text-sm font-semibold text-gray-900 underline decoration-dotted hover:text-brand-700"
-            title="Update this coin's price"
+      {/* Coin Title and Action Buttons */}
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <span className="text-sm font-semibold text-gray-900">
+          {coin.name} <span className="font-normal text-gray-400">({coin.symbol})</span>
+        </span>
+
+        <div className="flex items-center gap-1.5">
+          {canUpdatePrice && (
+            <button
+              type="button"
+              onClick={() => onUpdatePriceClick({ symbol: coin.symbol, name: coin.name })}
+              className="rounded bg-brand-50 border border-brand-200 px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 transition-colors"
+              title="Update this coin's price manually"
+            >
+              Update
+            </button>
+          )}
+          <Link
+            href={`/calendar?symbol=${coin.symbol}`}
+            className="rounded bg-gray-100 border border-gray-200 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-200 transition-colors"
+            title={`See ${coin.symbol}'s calendar`}
           >
-            {coin.name} <span className="font-normal text-gray-400">({coin.symbol})</span>
-          </button>
-        ) : (
-          <span className="text-sm font-semibold text-gray-900">
-            {coin.name} <span className="font-normal text-gray-400">({coin.symbol})</span>
-          </span>
-        )}
+            Calendar
+          </Link>
+          <Link
+            href={`/chart?symbol=${coin.symbol}`}
+            className="rounded bg-gray-100 border border-gray-200 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-200 transition-colors"
+            title={`See ${coin.symbol}'s chart`}
+          >
+            Chart
+          </Link>
+        </div>
       </div>
 
-      <Link
-        href={`/calendar?symbol=${coin.symbol}`}
-        className="mb-4 flex items-baseline gap-1.5 hover:text-brand-700"
-        title={`See ${coin.symbol}'s calendar`}
-      >
-        <span className="text-xl font-bold text-gray-900 hover:underline">{formatPhp(coin.currentPrice)}</span>
+      {/* Current Price Display */}
+      <div className="mb-4 flex items-baseline gap-1.5">
+        <span className="text-xl font-bold text-gray-900">{formatPhp(coin.currentPrice)}</span>
         <PriceDirectionArrow direction={coin.priceDirection} />
-      </Link>
+      </div>
 
+      {/* Recorded High and Low Targets */}
       <div className="grid grid-cols-2 gap-x-3 gap-y-3 border-t border-gray-100 pt-3 text-sm">
         <div>
           <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">High</div>
@@ -165,8 +180,7 @@ export default function HomeTable() {
       )}
 
       <p className="mb-3 text-xs text-gray-500">
-        Click a coin's price to see its calendar.
-        {canUpdatePrice && " Click a coin's name to update its price manually."}
+        Use the card action buttons to view calendar schedules, interactive charts, or manually log coin prices.
       </p>
 
       {loading ? (

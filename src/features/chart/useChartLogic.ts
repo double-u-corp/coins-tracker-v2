@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/router";
 import { useAuth } from "@/features/auth/useAuth";
 import { chartBucketKey } from "@/lib/chartBucket";
 import type { CoinSummary, ChartPoint } from "@/validators/recordSchema";
@@ -12,10 +13,12 @@ interface CoinOption {
 export type Granularity = "weekly" | "monthly" | "yearly";
 
 export function useChartLogic() {
+  const router = useRouter();
   const { authenticated } = useAuth();
 
   const [coinOptions, setCoinOptions] = useState<CoinOption[]>([]);
   const [symbol, setSymbol] = useState("");
+  const [hasAppliedInitialSymbol, setHasAppliedInitialSymbol] = useState(false);
   const [years, setYears] = useState(1);
   const [granularity, setGranularity] = useState<Granularity>("weekly");
 
@@ -29,17 +32,33 @@ export function useChartLogic() {
 
   // Load the coin list once, for the dropdown.
   useEffect(() => {
+    let cancelled = false;
     fetch("/api/coins")
       .then((res) => res.json())
       .then((data: { coins: CoinSummary[] }) => {
-        setCoinOptions(data.coins.map((c) => ({ symbol: c.symbol, name: c.name })));
-        // Default to the first monitored coin so the chart isn't empty on load.
-        setSymbol((prev) => prev || data.coins[0]?.symbol || "");
+        if (!cancelled) {
+          setCoinOptions(data.coins.map((c) => ({ symbol: c.symbol, name: c.name })));
+        }
       })
       .catch(() => {
         /* dropdown just stays empty on failure */
       });
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  // Picks the initial selected coin once both coin options AND router query are ready
+  useEffect(() => {
+    if (hasAppliedInitialSymbol) return;
+    if (!router.isReady) return;
+    if (coinOptions.length === 0) return;
+
+    const queriedSymbol = typeof router.query.symbol === "string" ? router.query.symbol.toUpperCase() : "";
+    const matched = coinOptions.find((c) => c.symbol === queriedSymbol);
+    setSymbol(matched?.symbol ?? coinOptions[0].symbol);
+    setHasAppliedInitialSymbol(true);
+  }, [router.isReady, router.query.symbol, coinOptions, hasAppliedInitialSymbol]);
 
   const rangeStart = useMemo(() => {
     const d = new Date();
@@ -90,9 +109,6 @@ export function useChartLogic() {
     loadJournal();
   }, [loadJournal]);
 
-  // Aligns each journal entry to the same bucket the chart uses, so
-  // markers on the chart land on an x-axis label that actually exists in
-  // the data — this is the "connects to the graph" link between the two.
   const journalLabelsInView = useMemo(() => {
     const labels = new Set<string>();
     for (const entry of entries) {
