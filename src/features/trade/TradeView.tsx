@@ -327,7 +327,7 @@ export default function TradeView() {
                       </span>
                       <span className="text-gray-500">
                         {" "}
-                        — {formatCoinAmount(t.coinAmount)} for {formatPhp(t.phpAmount)}
+                        — {formatCoinAmount(t.coinAmount)} for {formatPhp(t.phpAmount)} ({formatPhp(t.price)}/coin)
                       </span>
                       <div className="text-xs text-gray-400">{formatDateTime(t.transactedAt)}</div>
                     </div>

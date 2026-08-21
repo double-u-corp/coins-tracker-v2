@@ -31,6 +31,7 @@
  */
 
 import { XMLParser } from "fast-xml-parser";
+import { formatPhp } from "./format";
 
 export type Sentiment = "bullish" | "bearish" | "neutral";
 
@@ -118,10 +119,6 @@ export function generateSignalForCoin(params: {
   }
 
   return null; // change too small to be worth a signal
-}
-
-function formatPhp(value: number): string {
-  return value.toLocaleString(undefined, { style: "currency", currency: "PHP", maximumFractionDigits: 2 });
 }
 
 // ---------------------------------------------------------------------------
