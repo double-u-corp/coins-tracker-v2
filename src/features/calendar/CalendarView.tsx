@@ -24,9 +24,16 @@ export default function CalendarView() {
   });
 
   // Filter out days that have no data or missing values
-  const recordsWithData = days.filter(
-    (d) => d.high !== undefined && d.low !== undefined && d.high !== null && d.low !== null
-  );
+const recordsWithData = days
+  .filter(
+    (d) =>
+      d.high !== undefined &&
+      d.low !== undefined &&
+      d.high !== null &&
+      d.low !== null
+  )
+  .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
 
   return (
     <div className="flex flex-col gap-6">
