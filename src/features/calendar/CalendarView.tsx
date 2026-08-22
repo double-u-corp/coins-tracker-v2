@@ -1,3 +1,4 @@
+import Link from "next/link";
 import Dropdown from "@/components/Dropdown";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
@@ -29,6 +30,17 @@ export default function CalendarView() {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* NEW: Back to Home Button */}
+      <div>
+        <Link 
+          href="/" 
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors"
+        >
+          <span>←</span>
+          <span>Back to Home</span>
+        </Link>
+      </div>
+
       {/* Top Controls */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <Dropdown
@@ -42,7 +54,7 @@ export default function CalendarView() {
           }))}
         />
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between gap-3 sm:justify-start">
           <button
             type="button"
             onClick={goToPreviousMonth}
@@ -50,7 +62,7 @@ export default function CalendarView() {
           >
             ← Prev
           </button>
-          <span className="min-w-[10rem] text-center text-sm font-semibold text-gray-900">
+          <span className="min-w-[8rem] text-center text-sm font-semibold text-gray-900">
             {monthLabel}
           </span>
           <button

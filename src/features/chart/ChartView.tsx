@@ -1,4 +1,5 @@
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import Dropdown from "@/components/Dropdown";
 import AlertBanner from "@/components/AlertBanner";
 import JournalSidebar from "./JournalSidebar";
@@ -41,6 +42,17 @@ export default function ChartView() {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* NEW: Back to Home Button */}
+      <div>
+        <Link 
+          href="/" 
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors"
+        >
+          <span>←</span>
+          <span>Back to Home</span>
+        </Link>
+      </div>
+
       <div className="flex flex-wrap items-end gap-4">
         <Dropdown
           label="Coin"
