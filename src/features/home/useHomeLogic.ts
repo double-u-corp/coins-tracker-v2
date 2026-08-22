@@ -28,9 +28,6 @@ export interface ManualRecordEntry {
   createdAt: string;
 }
 
-// Remembers which cron run's new-record alert the user has already
-// dismissed, so the modal doesn't reopen for the same run on every page
-// visit — but does reopen for any genuinely new run that sets a record.
 const DISMISSED_KEY = "coins-tracker:dismissed-alert-cron-log-id";
 
 export function useHomeLogic() {
@@ -44,29 +41,20 @@ export function useHomeLogic() {
     error: null,
   });
 
+  // --- NEW: Filter State ---
+  const [selectedCoins, setSelectedCoins] = useState<string[]>([]);
+
   const [alertRecords, setAlertRecords] = useState<NewRecordAlert[]>([]);
   const [alertModalOpen, setAlertModalOpen] = useState(false);
 
-  // Session-only dismiss for the target-reached banner: tracks which set of
-  // reached targets was last dismissed, so dismissing it doesn't hide a
-  // *different* coin newly reaching its target afterward.
   const [dismissedTargetsKey, setDismissedTargetsKey] = useState<string | null>(null);
 
-  // Manual price update — click a coin's symbol in the table to open a
-  // modal. Only reachable when logged in: the table cell isn't even a
-  // button (no onClick) when authenticated is false, so there's nothing to
-  // click into this flow from without a session. For coins added via
-  // Manage Coins' "Add a coin manually" flow (e.g. TH) that have no live
-  // price feed, this is the only way their price ever changes.
   const [priceUpdateCoin, setPriceUpdateCoin] = useState<PriceUpdateCoin | null>(null);
   const [priceUpdateModalOpen, setPriceUpdateModalOpen] = useState(false);
   const [priceUpdateValue, setPriceUpdateValue] = useState("");
   const [priceUpdateSubmitting, setPriceUpdateSubmitting] = useState(false);
   const [priceUpdateError, setPriceUpdateError] = useState<string | null>(null);
 
-  // The modal also lists that coin's recent manually-entered prices, so a
-  // wrong entry from yesterday (or earlier today) can be corrected in
-  // place instead of just adding another new one on top of it.
   const [recentManualRecords, setRecentManualRecords] = useState<ManualRecordEntry[]>([]);
   const [recentManualLoading, setRecentManualLoading] = useState(false);
   const [recentManualError, setRecentManualError] = useState<string | null>(null);
@@ -110,7 +98,7 @@ export function useHomeLogic() {
       setAlertRecords(data.newRecords);
       setAlertModalOpen(true);
     } catch {
-      // Non-critical — silently skip the alert check on failure.
+      // Non-critical
     }
   }, []);
 
@@ -128,10 +116,14 @@ export function useHomeLogic() {
           window.localStorage.setItem(DISMISSED_KEY, String(data.cronLogId));
         }
       })
-      .catch(() => {
-        /* non-critical */
-      });
+      .catch(() => {});
   }
+
+  // --- NEW: Filtered Coins Logic ---
+  const filteredCoins = useMemo(() => {
+    if (selectedCoins.length === 0) return state.coins;
+    return state.coins.filter((coin) => selectedCoins.includes(coin.symbol));
+  }, [state.coins, selectedCoins]);
 
   const reachedTargets: ReachedTarget[] = useMemo(() => {
     const entries: ReachedTarget[] = [];
@@ -259,6 +251,10 @@ export function useHomeLogic() {
 
   return {
     ...state,
+    allCoins: state.coins, // Original unfiltered list for the dropdown
+    coins: filteredCoins,  // Overrides the state.coins with the filtered list
+    selectedCoins,
+    setSelectedCoins,
     canUpdatePrice: authenticated,
     priceUpdateCoin,
     priceUpdateModalOpen,

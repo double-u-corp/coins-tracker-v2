@@ -27,9 +27,10 @@ function targetBannerMessage(reachedTargets: { symbol: string; type: "high" | "l
   return `🎯 Target reached: ${parts.join(", ")}`;
 }
 
-function PriceDirectionArrow({ direction }: { direction: "up" | "down" | "flat" | null }) {
-  if (direction === "up") return <span className="text-green-600">▲</span>;
-  if (direction === "down") return <span className="text-red-600">▼</span>;
+// Added an optional 'inverse' prop for better contrast when a chip is selected
+function PriceDirectionArrow({ direction, inverse = false }: { direction: "up" | "down" | "flat" | null; inverse?: boolean }) {
+  if (direction === "up") return <span className={inverse ? "text-green-300" : "text-green-600"}>▲</span>;
+  if (direction === "down") return <span className={inverse ? "text-red-300" : "text-red-600"}>▼</span>;
   return null; // flat or unknown — no arrow
 }
 
@@ -39,20 +40,9 @@ interface CoinCardProps {
   onUpdatePriceClick: (coin: { symbol: string; name: string }) => void;
 }
 
-/**
- * One card per coin, replacing the old table. Long/precise prices (a cheap
- * altcoin can be ₱0.0000025) don't fit a table row's fixed-width cells
- * without either truncating the coin name column or forcing horizontal
- * scroll — a card gives each price room to be shown in full, stacked
- * vertically instead of squeezed sideways. High and Low each pair the
- * Recorded value with the Target value directly underneath, so you're
- * comparing "where it's been" against "where you want it" at a glance
- * instead of scanning across separate table columns.
- */
 function CoinCard({ coin, canUpdatePrice, onUpdatePriceClick }: CoinCardProps) {
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-      {/* Coin Title and Action Buttons */}
       <div className="mb-3 flex items-center justify-between gap-2">
         <span className="text-sm font-semibold text-gray-900">
           {coin.name} <span className="font-normal text-gray-400">({coin.symbol})</span>
@@ -86,13 +76,12 @@ function CoinCard({ coin, canUpdatePrice, onUpdatePriceClick }: CoinCardProps) {
         </div>
       </div>
 
-      {/* Current Price Display */}
       <div className="mb-4 flex items-baseline gap-1.5">
         <span className="text-xl font-bold text-gray-900">{formatPhp(coin.currentPrice)}</span>
+        {/* Defaults to inverse=false in the card */}
         <PriceDirectionArrow direction={coin.priceDirection} />
       </div>
 
-      {/* Recorded High and Low Targets */}
       <div className="grid grid-cols-2 gap-x-3 gap-y-3 border-t border-gray-100 pt-3 text-sm">
         <div>
           <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">High</div>
@@ -112,6 +101,9 @@ function CoinCard({ coin, canUpdatePrice, onUpdatePriceClick }: CoinCardProps) {
 export default function HomeTable() {
   const {
     coins,
+    allCoins,
+    selectedCoins,
+    setSelectedCoins,
     lastCronRun,
     lastCronStatus,
     loading,
@@ -179,6 +171,58 @@ export default function HomeTable() {
         <AlertBanner variant="warning" message={targetBannerMessage(reachedTargets)} onDismiss={dismissTargetBanner} />
       )}
 
+      {/* NEW: Automatically visible mobile chip filter */}
+      {!loading && allCoins.length > 0 && (
+        <div className="mb-6">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-medium text-gray-700">
+              Filter Coins {selectedCoins.length > 0 ? `(${selectedCoins.length} selected)` : ""}
+            </span>
+            {selectedCoins.length > 0 && (
+              <button
+                onClick={() => setSelectedCoins([])}
+                className="text-xs font-medium text-gray-500 hover:text-gray-900 underline"
+              >
+                Clear All
+              </button>
+            )}
+          </div>
+          
+          <div className="flex flex-wrap gap-2">
+            {allCoins.map((coin) => {
+              const isSelected = selectedCoins.includes(coin.symbol);
+              return (
+                <button
+                  key={coin.symbol}
+                  onClick={() => {
+                    if (isSelected) {
+                      setSelectedCoins(selectedCoins.filter((c) => c !== coin.symbol));
+                    } else {
+                      setSelectedCoins([...selectedCoins, coin.symbol]);
+                    }
+                  }}
+                  className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium border transition-colors shadow-sm ${
+                    isSelected
+                      ? "bg-brand-600 border-brand-600 text-white"
+                      : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
+                  }`}
+                >
+                  <span>{coin.symbol}</span>
+                  <span className={isSelected ? "text-brand-300" : "text-gray-300"}>|</span>
+                  <span>{formatPhp(coin.currentPrice)}</span>
+                  
+                  {/* Shows the Arrow icon directly inside the chip */}
+                  <PriceDirectionArrow 
+                    direction={coin.priceDirection} 
+                    inverse={isSelected} 
+                  />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <p className="mb-3 text-xs text-gray-500">
         Use the card action buttons to view calendar schedules, interactive charts, or manually log coin prices.
       </p>
@@ -189,7 +233,9 @@ export default function HomeTable() {
         </p>
       ) : coins.length === 0 && !error ? (
         <p className="rounded-lg border border-gray-200 bg-white px-4 py-6 text-center text-sm text-gray-500 shadow-sm">
-          No coins recorded yet. Add a coin from Manage Coins and wait for the next scheduled cron run.
+          {selectedCoins.length > 0
+            ? "No coins match your filter."
+            : "No coins recorded yet. Add a coin from Manage Coins and wait for the next scheduled cron run."}
         </p>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
