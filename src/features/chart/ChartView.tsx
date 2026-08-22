@@ -4,11 +4,10 @@ import Link from "next/link";
 import Dropdown from "@/components/Dropdown";
 import AlertBanner from "@/components/AlertBanner";
 import JournalSidebar from "./JournalSidebar";
-import type { ChartGranularity } from "@/lib/chartBucket";
 import { useChartLogic } from "./useChartLogic";
+import type { ChartGranularity } from "@/lib/chartBucket";
+import TradingInsightCard from "./TradingInsightCard";
 
-// recharts' ResponsiveContainer needs real DOM measurements, so the chart
-// itself is only ever rendered client-side.
 const PriceLineChart = dynamic(() => import("./PriceLineChart"), {
   ssr: false,
   loading: () => <div className="flex h-96 items-center justify-center text-sm text-gray-500">Loading chart…</div>,
@@ -43,9 +42,11 @@ export default function ChartView() {
     authenticated,
   } = useChartLogic();
 
-  // Show/Hide toggles for support/resistance analysis
+  // Display toggles
   const [showHigh, setShowHigh] = useState(true);
   const [showLow, setShowLow] = useState(true);
+  const [showSma, setShowSma] = useState(false);
+  const [showKeyLevels, setShowKeyLevels] = useState(true);
 
   return (
     <div className="flex flex-col gap-6">
@@ -101,9 +102,9 @@ export default function ChartView() {
           </div>
         </div>
 
-        {/* Display Toggles for Support & Resistance Analysis */}
+        {/* Display Toggles for Support, Resistance, & Indicators */}
         <div className="flex flex-col gap-1 text-sm font-medium text-gray-700">
-          <span>Display Lines</span>
+          <span>Analysis Overlays</span>
           <div className="inline-flex rounded-md border border-gray-200 p-1 gap-1">
             <button
               type="button"
@@ -123,12 +124,30 @@ export default function ChartView() {
             >
               Low
             </button>
+            <button
+              type="button"
+              onClick={() => setShowKeyLevels(!showKeyLevels)}
+              className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                showKeyLevels ? "bg-purple-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              Key Levels
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowSma(!showSma)}
+              className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                showSma ? "bg-amber-500 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              20 SMA
+            </button>
           </div>
         </div>
       </div>
 
       <div className="flex flex-col gap-6 lg:flex-row">
-        <div className="flex-1">
+        <div className="flex-1 space-y-4">
           {!symbol && <AlertBanner variant="info" message="Select a coin to see its price history." />}
           {chartError && <AlertBanner variant="error" message={`Failed to load chart: ${chartError}`} />}
 
@@ -141,13 +160,30 @@ export default function ChartView() {
                 journalLabels={journalLabelsInView}
                 showHigh={showHigh}
                 showLow={showLow}
+                showSma={showSma}
+                showKeyLevels={showKeyLevels}
               />
             )}
           </div>
-          <p className="mt-2 text-xs text-gray-500">
-            Each point is the highest and lowest price recorded within that {granularity} —
-            not the running all-time high/low shown on Home. 📓 markers show where a journal entry falls.
+
+          <p className="text-xs text-gray-500">
+            Each point represents prices recorded within that {granularity} period. Toggle <strong>Key Levels</strong> to see timeframe support/resistance floors, or <strong>20 SMA</strong> for dynamic trend support.
           </p>
+
+          <TradingInsightCard points={points} symbol={symbol} />
+
+          {/* How-to Trading Entry Decision Guide */}
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-xs text-gray-700 shadow-sm">
+            <h4 className="font-semibold text-gray-900 mb-2 text-sm">How These Additions Help Your Entry Decisions</h4>
+            <ul className="space-y-2 list-disc list-inside text-gray-600">
+              <li>
+                <strong className="text-gray-800">Key Support &amp; Resistance Lines:</strong> Automatically finds and draws horizontal reference lines for the overall low (Support Floor) and overall high (Resistance Ceiling) in your selected timeframe. When daily price dips close to the lower green line, it signals potential value for ladder buys.
+              </li>
+              <li>
+                <strong className="text-gray-800">20 SMA (Moving Average):</strong> Calculates a rolling average of price action. When the low price tests the 20 SMA line during an uptrend, it often acts as dynamic support.
+              </li>
+            </ul>
+          </div>
         </div>
 
         <JournalSidebar
