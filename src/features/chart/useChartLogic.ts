@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import { useAuth } from "@/features/auth/useAuth";
-import { chartBucketKey } from "@/lib/chartBucket";
+import { chartBucketKey, type ChartGranularity } from "@/lib/chartBucket";
 import type { CoinSummary, ChartPoint } from "@/validators/recordSchema";
 import type { JournalEntryView } from "@/validators/journalSchema";
 
@@ -10,7 +10,6 @@ interface CoinOption {
   name: string;
 }
 
-export type Granularity = "weekly" | "monthly" | "yearly";
 
 export function useChartLogic() {
   const router = useRouter();
@@ -20,7 +19,7 @@ export function useChartLogic() {
   const [symbol, setSymbol] = useState("");
   const [hasAppliedInitialSymbol, setHasAppliedInitialSymbol] = useState(false);
   const [years, setYears] = useState(1);
-  const [granularity, setGranularity] = useState<Granularity>("weekly");
+  const [granularity, setGranularity] = useState<ChartGranularity>("daily"); // Defaulting to daily for closer dip analysis
 
   const [points, setPoints] = useState<ChartPoint[]>([]);
   const [chartLoading, setChartLoading] = useState(false);

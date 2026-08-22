@@ -67,5 +67,5 @@ export const monthQuerySchema = z
 export const chartYearsQuerySchema = z.coerce.number().int().min(1).max(5);
 
 /** Validates the `granularity` query param for the chart page. */
-export const chartGranularitySchema = z.enum(["weekly", "monthly", "yearly"]);
+export const chartGranularitySchema = z.enum(["daily", "weekly", "monthly", "yearly"]);
 export type ChartGranularity = z.infer<typeof chartGranularitySchema>;

@@ -1,9 +1,11 @@
+import { useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import Dropdown from "@/components/Dropdown";
 import AlertBanner from "@/components/AlertBanner";
 import JournalSidebar from "./JournalSidebar";
-import { useChartLogic, type Granularity } from "./useChartLogic";
+import type { ChartGranularity } from "@/lib/chartBucket";
+import { useChartLogic } from "./useChartLogic";
 
 // recharts' ResponsiveContainer needs real DOM measurements, so the chart
 // itself is only ever rendered client-side.
@@ -13,7 +15,8 @@ const PriceLineChart = dynamic(() => import("./PriceLineChart"), {
 });
 
 const YEAR_OPTIONS = [1, 2, 3, 4, 5].map((y) => ({ label: `${y} year${y > 1 ? "s" : ""}`, value: String(y) }));
-const GRANULARITY_OPTIONS: { label: string; value: Granularity }[] = [
+const GRANULARITY_OPTIONS: { label: string; value: ChartGranularity }[] = [
+  { label: "Daily", value: "daily" },
   { label: "Weekly", value: "weekly" },
   { label: "Monthly", value: "monthly" },
   { label: "Yearly", value: "yearly" },
@@ -40,9 +43,12 @@ export default function ChartView() {
     authenticated,
   } = useChartLogic();
 
+  // Show/Hide toggles for support/resistance analysis
+  const [showHigh, setShowHigh] = useState(true);
+  const [showLow, setShowLow] = useState(true);
+
   return (
     <div className="flex flex-col gap-6">
-      {/* NEW: Back to Home Button */}
       <div>
         <Link 
           href="/" 
@@ -94,6 +100,31 @@ export default function ChartView() {
             ))}
           </div>
         </div>
+
+        {/* Display Toggles for Support & Resistance Analysis */}
+        <div className="flex flex-col gap-1 text-sm font-medium text-gray-700">
+          <span>Display Lines</span>
+          <div className="inline-flex rounded-md border border-gray-200 p-1 gap-1">
+            <button
+              type="button"
+              onClick={() => setShowHigh(!showHigh)}
+              className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                showHigh ? "bg-green-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              High
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowLow(!showLow)}
+              className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                showLow ? "bg-red-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              Low
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="flex flex-col gap-6 lg:flex-row">
@@ -105,11 +136,16 @@ export default function ChartView() {
             {chartLoading ? (
               <div className="flex h-96 items-center justify-center text-sm text-gray-500">Loading chart…</div>
             ) : (
-              <PriceLineChart points={points} journalLabels={journalLabelsInView} />
+              <PriceLineChart
+                points={points}
+                journalLabels={journalLabelsInView}
+                showHigh={showHigh}
+                showLow={showLow}
+              />
             )}
           </div>
           <p className="mt-2 text-xs text-gray-500">
-            Each point is the highest and lowest price recorded within that {granularity.replace("ly", "")} —
+            Each point is the highest and lowest price recorded within that {granularity} —
             not the running all-time high/low shown on Home. 📓 markers show where a journal entry falls.
           </p>
         </div>

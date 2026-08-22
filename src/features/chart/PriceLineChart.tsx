@@ -15,6 +15,8 @@ import type { ChartPoint } from "@/validators/recordSchema";
 interface PriceLineChartProps {
   points: ChartPoint[];
   journalLabels: Set<string>;
+  showHigh: boolean;
+  showLow: boolean;
 }
 
 /**
@@ -23,7 +25,7 @@ interface PriceLineChartProps {
  * ResponsiveContainer needs real DOM measurements and doesn't play well
  * with Next's server-side render pass.
  */
-export default function PriceLineChart({ points, journalLabels }: PriceLineChartProps) {
+export default function PriceLineChart({ points, journalLabels, showHigh, showLow }: PriceLineChartProps) {
   if (points.length === 0) {
     return (
       <div className="flex h-96 items-center justify-center text-sm text-gray-500">
@@ -59,8 +61,12 @@ export default function PriceLineChart({ points, journalLabels }: PriceLineChart
             label={{ value: "📓", position: "top", fontSize: 12 }}
           />
         ))}
-        <Line type="monotone" dataKey="high" stroke="#16a34a" strokeWidth={2} dot={false} name="high" />
-        <Line type="monotone" dataKey="low" stroke="#dc2626" strokeWidth={2} dot={false} name="low" />
+        {showHigh && (
+          <Line type="monotone" dataKey="high" stroke="#16a34a" strokeWidth={2} dot={false} name="high" />
+        )}
+        {showLow && (
+          <Line type="monotone" dataKey="low" stroke="#dc2626" strokeWidth={2} dot={false} name="low" />
+        )}
       </LineChart>
     </ResponsiveContainer>
   );
