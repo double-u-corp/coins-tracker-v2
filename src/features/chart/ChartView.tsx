@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import Dropdown from "@/components/Dropdown";
 import AlertBanner from "@/components/AlertBanner";
 import JournalSidebar from "./JournalSidebar";
-import { useChartLogic } from "./useChartLogic";
-import type { ChartGranularity } from "@/lib/chartBucket";
 import TradingInsightCard from "./TradingInsightCard";
+import { useChartLogic } from "./useChartLogic";
+import { formatPhp } from "@/lib/format";
+import type { ChartGranularity } from "@/lib/chartBucket";
 
 const PriceLineChart = dynamic(() => import("./PriceLineChart"), {
   ssr: false,
@@ -47,6 +48,42 @@ export default function ChartView() {
   const [showLow, setShowLow] = useState(true);
   const [showSma, setShowSma] = useState(false);
   const [showKeyLevels, setShowKeyLevels] = useState(true);
+  const [showBreakEven, setShowBreakEven] = useState(true);
+
+  // Manual or quick-set average buy price input (PHP)
+  const [avgEntryInput, setAvgEntryInput] = useState<string>("");
+
+// Auto-compute average entry from journal notes/titles
+const breakEvenPrice = useMemo(() => {
+  if (!symbol || !entries || entries.length === 0) return null;
+
+  // Filter entries for current active coin
+  const coinEntries = entries.filter((e) => e.symbol === symbol);
+  if (coinEntries.length === 0) return null;
+
+  let totalQuantity = 0;
+  let totalCost = 0;
+
+  // Regex matches formats like: "10 @ 7350", "10 at 7350", "Qty: 10 Price: 7350"
+  const buyPattern = /(?:bought|buy)?\s*([\d.]+)\s*(?:@|at|coins?|tokens?)\s*₱?\s*([\d.,]+)/i;
+
+  for (const entry of coinEntries) {
+    const text = `${entry.title} ${entry.notes}`;
+    const match = text.match(buyPattern);
+
+    if (match) {
+      const qty = parseFloat(match[1]);
+      const price = parseFloat(match[2].replace(/,/g, ""));
+
+      if (!isNaN(qty) && !isNaN(price) && qty > 0 && price > 0) {
+        totalQuantity += qty;
+        totalCost += qty * price;
+      }
+    }
+  }
+
+  return totalQuantity > 0 ? totalCost / totalQuantity : null;
+}, [entries, symbol]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -102,48 +139,61 @@ export default function ChartView() {
           </div>
         </div>
 
-        {/* Display Toggles for Support, Resistance, & Indicators */}
-        <div className="flex flex-col gap-1 text-sm font-medium text-gray-700">
-          <span>Analysis Overlays</span>
-          <div className="inline-flex rounded-md border border-gray-200 p-1 gap-1">
-            <button
-              type="button"
-              onClick={() => setShowHigh(!showHigh)}
-              className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
-                showHigh ? "bg-green-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-              }`}
-            >
-              High
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowLow(!showLow)}
-              className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
-                showLow ? "bg-red-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-              }`}
-            >
-              Low
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowKeyLevels(!showKeyLevels)}
-              className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
-                showKeyLevels ? "bg-purple-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-              }`}
-            >
-              Key Levels
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowSma(!showSma)}
-              className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
-                showSma ? "bg-amber-500 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-              }`}
-            >
-              20 SMA
-            </button>
-          </div>
-        </div>
+ {/* Display Toggles for Support, Resistance, SMA, & Auto Break-Even */}
+<div className="flex flex-col gap-1 text-sm font-medium text-gray-700">
+  <span>Analysis Overlays</span>
+  <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-gray-200 p-1 bg-white">
+    <button
+      type="button"
+      onClick={() => setShowHigh(!showHigh)}
+      className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+        showHigh ? "bg-green-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+      }`}
+    >
+      High
+    </button>
+    <button
+      type="button"
+      onClick={() => setShowLow(!showLow)}
+      className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+        showLow ? "bg-red-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+      }`}
+    >
+      Low
+    </button>
+    <button
+      type="button"
+      onClick={() => setShowKeyLevels(!showKeyLevels)}
+      className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+        showKeyLevels ? "bg-purple-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+      }`}
+    >
+      Key Levels
+    </button>
+    <button
+      type="button"
+      onClick={() => setShowSma(!showSma)}
+      className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+        showSma ? "bg-amber-500 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+      }`}
+    >
+      20 SMA
+    </button>
+
+    {/* Toggle button appears automatically whenever journal buy entries exist for the coin */}
+    {breakEvenPrice !== null && (
+      <button
+        type="button"
+        onClick={() => setShowBreakEven(!showBreakEven)}
+        className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+          showBreakEven ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+        }`}
+      >
+        Avg Entry ({formatPhp(breakEvenPrice)})
+      </button>
+    )}
+  </div>
+</div>
       </div>
 
       <div className="flex flex-col gap-6 lg:flex-row">
@@ -162,40 +212,31 @@ export default function ChartView() {
                 showLow={showLow}
                 showSma={showSma}
                 showKeyLevels={showKeyLevels}
+                showBreakEven={showBreakEven}
+                breakEvenPrice={breakEvenPrice}
               />
             )}
           </div>
 
           <p className="text-xs text-gray-500">
-            Each point represents prices recorded within that {granularity} period. Toggle <strong>Key Levels</strong> to see timeframe support/resistance floors, or <strong>20 SMA</strong> for dynamic trend support.
+            Each point represents prices recorded within that {granularity} period.
+            {breakEvenPrice !== null && (
+              <span> Blue dashed line indicates your target average entry price.</span>
+            )}
           </p>
 
           <TradingInsightCard points={points} symbol={symbol} />
-
-          {/* How-to Trading Entry Decision Guide */}
-          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-xs text-gray-700 shadow-sm">
-            <h4 className="font-semibold text-gray-900 mb-2 text-sm">How These Additions Help Your Entry Decisions</h4>
-            <ul className="space-y-2 list-disc list-inside text-gray-600">
-              <li>
-                <strong className="text-gray-800">Key Support &amp; Resistance Lines:</strong> Automatically finds and draws horizontal reference lines for the overall low (Support Floor) and overall high (Resistance Ceiling) in your selected timeframe. When daily price dips close to the lower green line, it signals potential value for ladder buys.
-              </li>
-              <li>
-                <strong className="text-gray-800">20 SMA (Moving Average):</strong> Calculates a rolling average of price action. When the low price tests the 20 SMA line during an uptrend, it often acts as dynamic support.
-              </li>
-            </ul>
-          </div>
         </div>
 
-        <JournalSidebar
-          entries={entries}
-          loading={journalLoading}
-          error={journalError}
-          coinOptions={coinOptions}
-          defaultSymbol={symbol}
-          authenticated={authenticated}
-          onAdd={addJournalEntry}
-          onDelete={deleteJournalEntry}
-        />
+<JournalSidebar
+  entries={entries}
+  loading={journalLoading}
+  error={journalError}
+  defaultSymbol={symbol}
+  authenticated={authenticated}
+  onAdd={addJournalEntry}
+  onDelete={deleteJournalEntry}
+/>
       </div>
     </div>
   );

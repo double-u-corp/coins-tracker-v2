@@ -1,21 +1,13 @@
 import { useState, type FormEvent } from "react";
-import Dropdown from "@/components/Dropdown";
 import AlertBanner from "@/components/AlertBanner";
 
-interface CoinOption {
-  symbol: string;
-  name: string;
-}
-
 interface JournalFormProps {
-  coinOptions: CoinOption[];
   defaultSymbol: string;
   onSubmit: (input: { symbol: string | null; entryDate: string; title: string; notes: string }) => Promise<void>;
 }
 
-export default function JournalForm({ coinOptions, defaultSymbol, onSubmit }: JournalFormProps) {
+export default function JournalForm({ defaultSymbol, onSubmit }: JournalFormProps) {
   const [entryDate, setEntryDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [coinSymbol, setCoinSymbol] = useState(defaultSymbol);
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -25,22 +17,22 @@ export default function JournalForm({ coinOptions, defaultSymbol, onSubmit }: Jo
     e.preventDefault();
     setError(null);
 
-    if (!title.trim()) {
-      setError("Enter a title");
+    const trimmedNotes = notes.trim();
+    if (!trimmedNotes) {
+      setError("Please enter some notes");
       return;
     }
-    if (!notes.trim()) {
-      setError("Enter some notes");
-      return;
-    }
+
+    const fallbackTitle = defaultSymbol ? `${defaultSymbol} Log` : "Trade Log";
+    const finalTitle = title.trim() || fallbackTitle;
 
     setSubmitting(true);
     try {
       await onSubmit({
-        symbol: coinSymbol || null,
+        symbol: defaultSymbol || null,
         entryDate: new Date(entryDate).toISOString(),
-        title: title.trim(),
-        notes: notes.trim(),
+        title: finalTitle,
+        notes: trimmedNotes,
       });
       setTitle("");
       setNotes("");
@@ -53,7 +45,12 @@ export default function JournalForm({ coinOptions, defaultSymbol, onSubmit }: Jo
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-      <h3 className="text-sm font-semibold text-gray-900">Log an event</h3>
+      <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+        <h3 className="text-sm font-semibold text-gray-900">Log an event</h3>
+        <span className="rounded bg-brand-50 px-2 py-0.5 text-xs font-semibold text-brand-700">
+          {defaultSymbol || "General"}
+        </span>
+      </div>
 
       {error && <AlertBanner variant="error" message={error} />}
 
@@ -68,33 +65,26 @@ export default function JournalForm({ coinOptions, defaultSymbol, onSubmit }: Jo
         />
       </label>
 
-      <Dropdown
-        label="Coin (optional — leave blank for a general note)"
-        placeholder="General (no specific coin)"
-        value={coinSymbol}
-        onChange={setCoinSymbol}
-        options={coinOptions.map((c) => ({ label: `${c.name} (${c.symbol})`, value: c.symbol }))}
-      />
-
       <label className="flex flex-col gap-1 text-xs font-medium text-gray-600">
-        <span>Title</span>
+        <span>Title <span className="text-gray-400 font-normal">(optional)</span></span>
         <input
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder="e.g. Sold half my position"
+          placeholder={`e.g. Bought DIP (Defaults to ${defaultSymbol || "Trade Log"})`}
           className="rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
       </label>
 
       <label className="flex flex-col gap-1 text-xs font-medium text-gray-600">
-        <span>Notes</span>
+        <span>Notes <span className="text-red-500">*</span></span>
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           rows={3}
-          placeholder="What happened, and why it mattered"
+          placeholder="e.g. 10 @ 7350 ladder entry near key support"
           className="rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          required
         />
       </label>
 

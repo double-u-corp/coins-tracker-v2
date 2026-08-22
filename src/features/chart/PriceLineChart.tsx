@@ -20,6 +20,8 @@ interface PriceLineChartProps {
   showLow: boolean;
   showSma: boolean;
   showKeyLevels: boolean;
+  showBreakEven: boolean;
+  breakEvenPrice: number | null;
 }
 
 export default function PriceLineChart({
@@ -29,8 +31,9 @@ export default function PriceLineChart({
   showLow,
   showSma,
   showKeyLevels,
+  showBreakEven,
+  breakEvenPrice,
 }: PriceLineChartProps) {
-  // Enrich points with a 20-period Simple Moving Average (SMA) calculated purely on client side
   const chartData = useMemo(() => {
     return points.map((pt, idx, arr) => {
       if (idx < 19) return { ...pt, sma20: null };
@@ -40,7 +43,6 @@ export default function PriceLineChart({
     });
   }, [points]);
 
-  // Find min support (lowest low) and max resistance (highest high) in the current view
   const { minLow, maxHigh } = useMemo(() => {
     if (points.length === 0) return { minLow: null, maxHigh: null };
     let min = points[0].low;
@@ -91,7 +93,7 @@ export default function PriceLineChart({
           }}
         />
 
-        {/* Journal Markers */}
+        {/* Journal Entry Date Markers */}
         {Array.from(journalLabels).map((label) => (
           <ReferenceLine
             key={label}
@@ -103,7 +105,7 @@ export default function PriceLineChart({
           />
         ))}
 
-        {/* Key Support & Resistance Reference Lines */}
+        {/* Support Floor */}
         {showKeyLevels && minLow !== null && (
           <ReferenceLine
             y={minLow}
@@ -113,6 +115,8 @@ export default function PriceLineChart({
             label={{ value: `Support: ${formatPhp(minLow)}`, position: "insideBottomLeft", fill: "#16a34a", fontSize: 11 }}
           />
         )}
+
+        {/* Resistance Ceiling */}
         {showKeyLevels && maxHigh !== null && (
           <ReferenceLine
             y={maxHigh}
@@ -120,6 +124,24 @@ export default function PriceLineChart({
             strokeDasharray="3 3"
             strokeWidth={1.5}
             label={{ value: `Resistance: ${formatPhp(maxHigh)}`, position: "insideTopLeft", fill: "#dc2626", fontSize: 11 }}
+          />
+        )}
+
+        {/* Personal Break-Even Entry Line */}
+        {showBreakEven && breakEvenPrice !== null && (
+          <ReferenceLine
+            y={breakEvenPrice}
+            stroke="#2563eb"
+            strokeDasharray="6 6"
+            strokeWidth={2}
+            ifOverflow="extendDomain"
+            label={{
+              value: `Avg Entry: ${formatPhp(breakEvenPrice)}`,
+              position: "insideTopRight",
+              fill: "#2563eb",
+              fontSize: 11,
+              fontWeight: 600,
+            }}
           />
         )}
 
@@ -131,7 +153,7 @@ export default function PriceLineChart({
           <Line type="monotone" dataKey="low" stroke="#dc2626" strokeWidth={2} dot={false} name="low" />
         )}
 
-        {/* 20 Simple Moving Average */}
+        {/* 20 SMA */}
         {showSma && (
           <Line type="monotone" dataKey="sma20" stroke="#f59e0b" strokeWidth={2} dot={false} name="sma20" />
         )}

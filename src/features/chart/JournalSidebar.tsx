@@ -3,16 +3,10 @@ import AlertBanner from "@/components/AlertBanner";
 import JournalForm from "./JournalForm";
 import type { JournalEntryView } from "@/validators/journalSchema";
 
-interface CoinOption {
-  symbol: string;
-  name: string;
-}
-
 interface JournalSidebarProps {
   entries: JournalEntryView[];
   loading: boolean;
   error: string | null;
-  coinOptions: CoinOption[];
   defaultSymbol: string;
   authenticated: boolean;
   onAdd: (input: { symbol: string | null; entryDate: string; title: string; notes: string }) => Promise<void>;
@@ -27,7 +21,6 @@ export default function JournalSidebar({
   entries,
   loading,
   error,
-  coinOptions,
   defaultSymbol,
   authenticated,
   onAdd,
@@ -51,7 +44,7 @@ export default function JournalSidebar({
   return (
     <aside className="flex w-full flex-col gap-4 lg:w-80 lg:shrink-0">
       {authenticated ? (
-        <JournalForm coinOptions={coinOptions} defaultSymbol={defaultSymbol} onSubmit={onAdd} />
+        <JournalForm defaultSymbol={defaultSymbol} onSubmit={onAdd} />
       ) : (
         <div className="rounded-lg border border-gray-200 bg-white p-4 text-xs text-gray-500 shadow-sm">
           Log in to add journal entries.
