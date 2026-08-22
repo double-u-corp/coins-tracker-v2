@@ -121,7 +121,7 @@ export function useHomeLogic() {
 
   // --- NEW: Filtered Coins Logic ---
   const filteredCoins = useMemo(() => {
-    if (selectedCoins.length === 0) return state.coins;
+    // if (selectedCoins.length === 0) return state.coins;
     return state.coins.filter((coin) => selectedCoins.includes(coin.symbol));
   }, [state.coins, selectedCoins]);
 

@@ -223,26 +223,26 @@ export default function HomeTable() {
         </div>
       )}
 
-      <p className="mb-3 text-xs text-gray-500">
-        Use the card action buttons to view calendar schedules, interactive charts, or manually log coin prices.
-      </p>
 
       {loading ? (
         <p className="rounded-lg border border-gray-200 bg-white px-4 py-6 text-center text-sm text-gray-500 shadow-sm">
           Loading coins…
         </p>
       ) : coins.length === 0 && !error ? (
-        <p className="rounded-lg border border-gray-200 bg-white px-4 py-6 text-center text-sm text-gray-500 shadow-sm">
-          {selectedCoins.length > 0
-            ? "No coins match your filter."
-            : "No coins recorded yet. Add a coin from Manage Coins and wait for the next scheduled cron run."}
-        </p>
+          <>
+          {selectedCoins.length > 0 && (<p className="rounded-lg border border-gray-200 bg-white px-4 py-6 text-center text-sm text-gray-500 shadow-sm">No coins match your filter.</p> )}
+          </>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {coins.map((coin) => (
-            <CoinCard key={coin.id} coin={coin} canUpdatePrice={canUpdatePrice} onUpdatePriceClick={openPriceUpdateModal} />
-          ))}
-        </div>
+        <>      
+          <p className="mb-3 text-xs text-gray-500">
+            Use the card action buttons to view calendar schedules, interactive charts, or manually log coin prices.
+          </p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {coins.map((coin) => (
+              <CoinCard key={coin.id} coin={coin} canUpdatePrice={canUpdatePrice} onUpdatePriceClick={openPriceUpdateModal} />
+            ))}
+          </div>
+        </>
       )}
 
       <p className="mt-2 text-xs text-gray-500">Target prices are set from the Manage Coins page.</p>
