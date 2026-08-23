@@ -3,34 +3,51 @@ import { z } from "zod";
 /**
  * Validates the payload for POST /api/transactions.
  *
- * `type`: "buy" or "sell". Every entry always supplies BOTH `phpAmount`
- * (the peso amount spent on a buy, or received from a sell) AND
- * `coinAmount` (how many coins were bought/sold) — no per-unit price
- * input. `price` is derived server-side as phpAmount / coinAmount, purely
- * for display/reference; it's never something the user types directly,
- * since the exact execution price isn't always known precisely and
- * differs from what a live ticker would show at lookup time.
+ * `type`: "buy", "sell", "deposit", or "withdraw".
+ * For cash transactions ("deposit", "withdraw"), `symbol` and `coinAmount` are optional.
+ * For coin trades ("buy", "sell"), both `symbol` and `coinAmount` are enforced.
  */
-export const createTransactionSchema = z.object({
-  symbol: z
-    .string()
-    .trim()
-    .min(1, "Coin is required")
-    .transform((val) => val.toUpperCase()),
-  type: z.enum(["buy", "sell"]),
-  phpAmount: z.coerce
-    .number({ invalid_type_error: "Enter a valid PHP amount" })
-    .positive("PHP amount must be greater than 0")
-    .max(100_000_000, "That amount looks too large"),
-  coinAmount: z.coerce
-    .number({ invalid_type_error: "Enter a valid coin amount" })
-    .positive("Coin amount must be greater than 0"),
-  transactedAt: z
-    .string()
-    .refine((val) => !Number.isNaN(Date.parse(val)), "Enter a valid date")
-    .refine((val) => Date.parse(val) <= Date.now(), "Date can't be in the future")
-    .optional(),
-});
+export const createTransactionSchema = z
+  .object({
+    symbol: z
+      .string()
+      .trim()
+      .transform((val) => val.toUpperCase())
+      .optional()
+      .nullable(),
+    type: z.enum(["buy", "sell", "deposit", "withdraw"]),
+    phpAmount: z.coerce
+      .number({ invalid_type_error: "Enter a valid PHP amount" })
+      .positive("PHP amount must be greater than 0")
+      .max(100_000_000, "That amount looks too large"),
+    coinAmount: z.coerce
+      .number({ invalid_type_error: "Enter a valid coin amount" })
+      .optional()
+      .nullable(),
+    transactedAt: z
+      .string()
+      .refine((val) => !Number.isNaN(Date.parse(val)), "Enter a valid date")
+      .refine((val) => Date.parse(val) <= Date.now(), "Date can't be in the future")
+      .optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.type === "buy" || data.type === "sell") {
+      if (!data.symbol || data.symbol.trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Coin is required for trades",
+          path: ["symbol"],
+        });
+      }
+      if (data.coinAmount === undefined || data.coinAmount === null || data.coinAmount <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Coin amount must be greater than 0",
+          path: ["coinAmount"],
+        });
+      }
+    }
+  });
 
 export type CreateTransactionInput = z.infer<typeof createTransactionSchema>;
 
@@ -41,14 +58,18 @@ export const deleteTransactionSchema = z.object({
 
 /**
  * Validates the payload for PATCH /api/transactions — correcting the coin
- * amount and/or PHP amount of an existing entry. `price` is recomputed
- * from these (phpAmount / coinAmount), not editable directly — same
- * reasoning as createTransactionSchema above.
+ * amount and/or PHP amount of an existing entry.
  */
 export const updateTransactionSchema = z.object({
   id: z.coerce.number().int().positive("A valid transaction id is required"),
-  coinAmount: z.coerce.number({ invalid_type_error: "Enter a valid coin amount" }).positive("Coin amount must be greater than 0"),
-  phpAmount: z.coerce.number({ invalid_type_error: "Enter a valid PHP amount" }).positive("PHP amount must be greater than 0"),
+  coinAmount: z.coerce
+    .number({ invalid_type_error: "Enter a valid coin amount" })
+    .nonnegative("Coin amount must be non-negative")
+    .optional(),
+  phpAmount: z.coerce
+    .number({ invalid_type_error: "Enter a valid PHP amount" })
+    .positive("PHP amount must be greater than 0")
+    .optional(),
 });
 
 export type UpdateTransactionInput = z.infer<typeof updateTransactionSchema>;
@@ -58,7 +79,7 @@ export const transactionSchema = z.object({
   id: z.number().int().positive(),
   symbol: z.string(),
   name: z.string(),
-  type: z.enum(["buy", "sell"]),
+  type: z.enum(["buy", "sell", "deposit", "withdraw"]),
   phpAmount: z.number(),
   price: z.number(),
   coinAmount: z.number(),
@@ -74,16 +95,14 @@ export type TransactionView = z.infer<typeof transactionSchema>;
  * sell proceeds), sold (gross PHP received from sells — informational,
  * already netted into `spent`, not a separate term in the gain/loss math),
  * current value (currentPrice × holdings), and gain/loss (current value −
- * spent). No average-cost/realized-vs-unrealized split; this is an
- * intentional simplification over an earlier, more detailed version of
- * this schema.
+ * spent).
  */
 export const portfolioEntrySchema = z.object({
   symbol: z.string(),
   name: z.string(),
   holdings: z.number(), // net coins held = totalBought - totalSold
   spent: z.number(), // net PHP invested = totalPhpSpent (buys) - totalPhpReceived (sells)
-  sold: z.number(), // gross PHP received from sells (totalPhpReceived) — already reflected in `spent`, shown separately for visibility
+  sold: z.number(), // gross PHP received from sells (totalPhpReceived)
   currentPrice: z.number().nullable(),
   currentValue: z.number().nullable(), // currentPrice * holdings
   gainLoss: z.number().nullable(), // currentValue - spent

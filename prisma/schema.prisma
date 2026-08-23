@@ -45,15 +45,15 @@ model Record {
 // for a trade they made before using this app). Sells reduce holdings —
 // see /api/transactions for the "can't sell more than you hold" check.
 model Transaction {
-  id             Int      @id @default(autoincrement())
-  coinId         Int
-  coin           Coin     @relation(fields: [coinId], references: [id])
-  type           String // "buy" | "sell"
-  phpAmount      Float // PHP spent (buy) or PHP received (sell)
-  price          Float // PHP price per unit at the time of the transaction
-  coinAmount     Float // quantity of the coin bought or sold
-  isManual       Boolean  @default(false) // true if logged retroactively with a user-supplied price/date
-  transactedAt   DateTime @default(now())
+  id           Int      @id @default(autoincrement())
+  coinId       Int?     // Made optional for cash deposits/withdrawals
+  coin         Coin?    @relation(fields: [coinId], references: [id])
+  type         String   // "buy" | "sell" | "deposit" | "withdraw"
+  phpAmount    Float    // PHP spent, received, deposited, or withdrawn
+  price        Float    // PHP price per unit (0 for cash)
+  coinAmount   Float    // Quantity of coin (0 for cash)
+  isManual     Boolean  @default(false)
+  transactedAt DateTime @default(now())
 
   @@index([coinId, transactedAt])
 }

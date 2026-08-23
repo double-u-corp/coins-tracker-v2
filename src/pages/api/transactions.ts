@@ -1,8 +1,13 @@
 import type { NextApiRequest, NextApiResponse } from "next";
+import { Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { fetchPrice, toPhpSymbol } from "@/lib/coinsApi";
 import { isAuthenticatedRequest } from "@/lib/auth";
-import { createTransactionSchema, deleteTransactionSchema, updateTransactionSchema } from "@/validators/transactionSchema";
+import {
+  createTransactionSchema,
+  deleteTransactionSchema,
+  updateTransactionSchema,
+} from "@/validators/transactionSchema";
 import type { PortfolioEntry, TransactionView } from "@/validators/transactionSchema";
 
 type ListResponse = { transactions: TransactionView[]; portfolio: PortfolioEntry[] };
@@ -19,9 +24,9 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
 
   const transactionViews: TransactionView[] = transactions.map((t) => ({
     id: t.id,
-    symbol: t.coin.symbol,
-    name: t.coin.name,
-    type: t.type as "buy" | "sell",
+    symbol: t.coin?.symbol ?? "PHP",
+    name: t.coin?.name ?? "Cash Flow",
+    type: t.type as "buy" | "sell" | "deposit" | "withdraw",
     phpAmount: t.phpAmount,
     price: t.price,
     coinAmount: t.coinAmount,
@@ -29,21 +34,15 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
     transactedAt: t.transactedAt.toISOString(),
   }));
 
-  // Roll transactions up per coin: holdings = net coins (buys - sells),
-  // spent = net PHP still invested (buy cost - sell proceeds), sold = gross
-  // PHP received from sells (tracked separately from `spent` purely for
-  // visibility — it's already netted into `spent`, not a separate term in
-  // the gain/loss math). Then price each coin: try a *live* PHP price first
-  // (fresher than the last cron snapshot), and if that fails — e.g. a
-  // manually-tracked coin with no live ticker pair (see Manage Coins' "Add
-  // a coin manually" flow) — fall back to the same stored Record price
-  // Home's "Current Price" column shows, which the Home page's
-  // click-to-edit modal can update for exactly this kind of coin.
+  // Roll transactions up per coin (excluding cash deposits/withdrawals)
   const byCoin = new Map<
     string,
     { coinId: number; symbol: string; name: string; holdings: number; spent: number; sold: number }
   >();
+
   for (const t of transactions) {
+    if (!t.coin) continue; // Skip pure cash deposits/withdrawals
+
     const existing = byCoin.get(t.coin.symbol) ?? {
       coinId: t.coin.id,
       symbol: t.coin.symbol,
@@ -52,10 +51,11 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
       spent: 0,
       sold: 0,
     };
+
     if (t.type === "buy") {
       existing.holdings += t.coinAmount;
       existing.spent += t.phpAmount;
-    } else {
+    } else if (t.type === "sell") {
       existing.holdings -= t.coinAmount;
       existing.spent -= t.phpAmount;
       existing.sold += t.phpAmount;
@@ -69,7 +69,7 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
       try {
         currentPrice = await fetchPrice(toPhpSymbol(entry.symbol));
       } catch {
-        currentPrice = null; // live lookup failed — try the stored-price fallback below
+        currentPrice = null;
       }
 
       if (currentPrice === null) {
@@ -101,11 +101,7 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
 }
 
 /**
- * POST /api/transactions — buy or sell.
- * Always takes both `phpAmount` (spent on a buy, received from a sell) and
- * `coinAmount` (quantity) directly from the user — no live price lookup,
- * no per-unit price input. `price` is stored purely as a derived
- * phpAmount/coinAmount reference value.
+ * POST /api/transactions — handles buy, sell, deposit, and withdraw.
  */
 async function handleCreate(req: NextApiRequest, res: NextApiResponse<CreateResponse | ErrorResponse>) {
   const parsed = createTransactionSchema.safeParse(req.body);
@@ -115,45 +111,84 @@ async function handleCreate(req: NextApiRequest, res: NextApiResponse<CreateResp
 
   const { symbol, type, phpAmount, coinAmount, transactedAt: manualDate } = parsed.data;
 
-  const coin = await prisma.coin.findUnique({ where: { symbol } });
-  if (!coin) {
-    return res.status(404).json({ error: `${symbol} is not a monitored coin. Add it from Manage Coins first.` });
+  // 1. Calculate live available PHP cash balance
+  const allTxs = await prisma.transaction.findMany({ select: { type: true, phpAmount: true } });
+  let cashBalance = 0;
+  for (const tx of allTxs) {
+    if (tx.type === "deposit" || tx.type === "sell") cashBalance += tx.phpAmount;
+    if (tx.type === "withdraw" || tx.type === "buy") cashBalance -= tx.phpAmount;
   }
 
-  if (type === "sell") {
-    // Can't sell more than currently held. This checks *current* net
-    // holdings regardless of the transaction's date — logging a historical
-    // sell out of chronological order isn't validated against the balance
-    // at that point in time, only against the total as it stands today.
-    const existing = await prisma.transaction.findMany({ where: { coinId: coin.id }, select: { type: true, coinAmount: true } });
-    const currentlyHeld = existing.reduce((sum, t) => sum + (t.type === "buy" ? t.coinAmount : -t.coinAmount), 0);
-    if (coinAmount > currentlyHeld) {
-      return res.status(400).json({
-        error: `You only hold ${currentlyHeld.toLocaleString(undefined, { maximumFractionDigits: 8 })} ${symbol}, can't sell ${coinAmount}.`,
-      });
+  // 2. Validate sufficient cash balance for buys or withdrawals
+  if ((type === "buy" || type === "withdraw") && phpAmount > cashBalance) {
+    return res.status(400).json({
+      error: `Insufficient cash balance. Available: ₱${cashBalance.toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}. Tried to ${type}: ₱${phpAmount.toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}.`,
+    });
+  }
+
+  const isCashFlow = type === "deposit" || type === "withdraw";
+
+  let coinId: number | null = null;
+  let finalCoinAmount = coinAmount ?? 0;
+  let price = 0;
+
+  if (!isCashFlow) {
+    if (!symbol) {
+      return res.status(400).json({ error: "Symbol is required for coin trades." });
     }
+
+    const coin = await prisma.coin.findUnique({ where: { symbol } });
+    if (!coin) {
+      return res.status(404).json({ error: `${symbol} is not a monitored coin. Add it from Manage Coins first.` });
+    }
+    coinId = coin.id;
+
+    if (type === "sell") {
+      const existing = await prisma.transaction.findMany({
+        where: { coinId: coin.id },
+        select: { type: true, coinAmount: true },
+      });
+      const currentlyHeld = existing.reduce(
+        (sum, t) => sum + (t.type === "buy" ? t.coinAmount : t.type === "sell" ? -t.coinAmount : 0),
+        0
+      );
+      if (finalCoinAmount > currentlyHeld) {
+        return res.status(400).json({
+          error: `You only hold ${currentlyHeld.toLocaleString(undefined, { maximumFractionDigits: 8 })} ${symbol}, can't sell ${finalCoinAmount}.`,
+        });
+      }
+    }
+
+    price = phpAmount / (finalCoinAmount || 1);
   }
 
-  const price = phpAmount / coinAmount;
+  const createPayload = {
+    type,
+    phpAmount,
+    price: isCashFlow ? 0 : price,
+    coinAmount: isCashFlow ? 0 : finalCoinAmount,
+    isManual: true,
+    ...(coinId !== null ? { coinId } : {}),
+    ...(manualDate ? { transactedAt: new Date(manualDate) } : {}),
+  };
 
   const transaction = await prisma.transaction.create({
-    data: {
-      coinId: coin.id,
-      type,
-      phpAmount,
-      price,
-      coinAmount,
-      isManual: true,
-      ...(manualDate ? { transactedAt: new Date(manualDate) } : {}),
-    },
+    data: createPayload as any,
+    include: { coin: true },
   });
 
   return res.status(201).json({
     transaction: {
       id: transaction.id,
-      symbol: coin.symbol,
-      name: coin.name,
-      type: transaction.type as "buy" | "sell",
+      symbol: transaction.coin?.symbol ?? "PHP",
+      name: transaction.coin?.name ?? "Cash Flow",
+      type: transaction.type as "buy" | "sell" | "deposit" | "withdraw",
       phpAmount: transaction.phpAmount,
       price: transaction.price,
       coinAmount: transaction.coinAmount,
@@ -164,12 +199,7 @@ async function handleCreate(req: NextApiRequest, res: NextApiResponse<CreateResp
 }
 
 /**
- * PATCH /api/transactions — correct the coin amount and/or PHP amount of
- * an existing entry. `price` is always recomputed as phpAmount / coinAmount
- * — never edited directly, since the exact per-unit execution price isn't
- * reliably known (that's the whole reason this field isn't user-facing).
- * For a sell, re-validates that the corrected amount still doesn't exceed
- * holdings (excluding this transaction's own original amount).
+ * PATCH /api/transactions — correct existing transaction.
  */
 async function handleUpdate(req: NextApiRequest, res: NextApiResponse<UpdateResponse | ErrorResponse>) {
   const parsed = updateTransactionSchema.safeParse(req.body);
@@ -184,35 +214,47 @@ async function handleUpdate(req: NextApiRequest, res: NextApiResponse<UpdateResp
     return res.status(404).json({ error: "Transaction not found" });
   }
 
-  if (existing.type === "sell") {
+  if (existing.type === "sell" && existing.coinId) {
     const others = await prisma.transaction.findMany({
       where: { coinId: existing.coinId, id: { not: id } },
       select: { type: true, coinAmount: true },
     });
-    const heldExcludingThis = others.reduce((sum, t) => sum + (t.type === "buy" ? t.coinAmount : -t.coinAmount), 0);
-    if (coinAmount > heldExcludingThis) {
+    const heldExcludingThis = others.reduce(
+      (sum, t) => sum + (t.type === "buy" ? t.coinAmount : t.type === "sell" ? -t.coinAmount : 0),
+      0
+    );
+    const updatedCoinAmount = coinAmount ?? existing.coinAmount;
+    if (updatedCoinAmount > heldExcludingThis) {
       return res.status(400).json({
         error: `That would sell more than you hold: ${heldExcludingThis.toLocaleString(undefined, {
           maximumFractionDigits: 8,
-        })} ${existing.coin.symbol} available.`,
+        })} ${existing.coin?.symbol ?? ""} available.`,
       });
     }
   }
 
-  const price = phpAmount / coinAmount;
+  const updatedPhp = phpAmount ?? existing.phpAmount;
+  const updatedCoins = coinAmount ?? existing.coinAmount;
+  const isCashFlow = existing.type === "deposit" || existing.type === "withdraw";
+  const price = isCashFlow ? 0 : updatedCoins > 0 ? updatedPhp / updatedCoins : existing.price;
 
   const updated = await prisma.transaction.update({
     where: { id },
-    data: { coinAmount, price, phpAmount, isManual: true },
+    data: {
+      coinAmount: isCashFlow ? 0 : updatedCoins,
+      price,
+      phpAmount: updatedPhp,
+      isManual: true,
+    },
     include: { coin: true },
   });
 
   return res.status(200).json({
     transaction: {
       id: updated.id,
-      symbol: updated.coin.symbol,
-      name: updated.coin.name,
-      type: updated.type as "buy" | "sell",
+      symbol: updated.coin?.symbol ?? "PHP",
+      name: updated.coin?.name ?? "Cash Flow",
+      type: updated.type as "buy" | "sell" | "deposit" | "withdraw",
       phpAmount: updated.phpAmount,
       price: updated.price,
       coinAmount: updated.coinAmount,
