@@ -41,12 +41,9 @@ export function useHomeLogic() {
     error: null,
   });
 
-  // --- NEW: Filter State ---
   const [selectedCoins, setSelectedCoins] = useState<string[]>([]);
-
   const [alertRecords, setAlertRecords] = useState<NewRecordAlert[]>([]);
   const [alertModalOpen, setAlertModalOpen] = useState(false);
-
   const [dismissedTargetsKey, setDismissedTargetsKey] = useState<string | null>(null);
 
   const [priceUpdateCoin, setPriceUpdateCoin] = useState<PriceUpdateCoin | null>(null);
@@ -63,6 +60,9 @@ export function useHomeLogic() {
   const [editRecordValue, setEditRecordValue] = useState("");
   const [editRecordSaving, setEditRecordSaving] = useState(false);
   const [editRecordError, setEditRecordError] = useState<string | null>(null);
+
+  // NEW: Portfolio state for chip highlighting
+  const [portfolio, setPortfolio] = useState<any[]>([]);
 
   const loadSummary = useCallback(async () => {
     try {
@@ -107,6 +107,22 @@ export function useHomeLogic() {
     checkAlerts();
   }, [loadSummary, checkAlerts]);
 
+  // NEW: Fetch portfolio holdings
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/transactions")
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to load transactions");
+        return res.json();
+      })
+      .then((data) => {
+        if (!cancelled) setPortfolio(data.portfolio || []);
+      })
+      .catch((err) => console.error(err));
+      
+    return () => { cancelled = true; };
+  }, []);
+
   function closeAlertModal() {
     setAlertModalOpen(false);
     fetch("/api/coins?type=alerts")
@@ -119,9 +135,7 @@ export function useHomeLogic() {
       .catch(() => {});
   }
 
-  // --- NEW: Filtered Coins Logic ---
   const filteredCoins = useMemo(() => {
-    // if (selectedCoins.length === 0) return state.coins;
     return state.coins.filter((coin) => selectedCoins.includes(coin.symbol));
   }, [state.coins, selectedCoins]);
 
@@ -251,10 +265,11 @@ export function useHomeLogic() {
 
   return {
     ...state,
-    allCoins: state.coins, // Original unfiltered list for the dropdown
-    coins: filteredCoins,  // Overrides the state.coins with the filtered list
+    allCoins: state.coins, 
+    coins: filteredCoins,  
     selectedCoins,
     setSelectedCoins,
+    portfolio, // NEW: Exported portfolio state
     canUpdatePrice: authenticated,
     priceUpdateCoin,
     priceUpdateModalOpen,

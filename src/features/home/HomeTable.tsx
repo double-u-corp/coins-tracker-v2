@@ -27,11 +27,10 @@ function targetBannerMessage(reachedTargets: { symbol: string; type: "high" | "l
   return `🎯 Target reached: ${parts.join(", ")}`;
 }
 
-// Added an optional 'inverse' prop for better contrast when a chip is selected
 function PriceDirectionArrow({ direction, inverse = false }: { direction: "up" | "down" | "flat" | null; inverse?: boolean }) {
   if (direction === "up") return <span className={inverse ? "text-green-300" : "text-green-600"}>▲</span>;
   if (direction === "down") return <span className={inverse ? "text-red-300" : "text-red-600"}>▼</span>;
-  return null; // flat or unknown — no arrow
+  return null; 
 }
 
 interface CoinCardProps {
@@ -78,7 +77,6 @@ function CoinCard({ coin, canUpdatePrice, onUpdatePriceClick }: CoinCardProps) {
 
       <div className="mb-4 flex items-baseline gap-1.5">
         <span className="text-xl font-bold text-gray-900">{formatPhp(coin.currentPrice)}</span>
-        {/* Defaults to inverse=false in the card */}
         <PriceDirectionArrow direction={coin.priceDirection} />
       </div>
 
@@ -104,6 +102,7 @@ export default function HomeTable() {
     allCoins,
     selectedCoins,
     setSelectedCoins,
+    portfolio,
     lastCronRun,
     lastCronStatus,
     loading,
@@ -171,7 +170,7 @@ export default function HomeTable() {
         <AlertBanner variant="warning" message={targetBannerMessage(reachedTargets)} onDismiss={dismissTargetBanner} />
       )}
 
-      {/* NEW: Automatically visible mobile chip filter */}
+      {/* Automatically visible mobile chip filter */}
       {!loading && allCoins.length > 0 && (
         <div className="mb-6">
           <div className="mb-2 flex items-center justify-between">
@@ -191,6 +190,19 @@ export default function HomeTable() {
           <div className="flex flex-wrap gap-2">
             {allCoins.map((coin) => {
               const isSelected = selectedCoins.includes(coin.symbol);
+              
+              const activePortfolio = portfolio?.find((p) => p.symbol === coin.symbol);
+              const hasHoldings = activePortfolio && activePortfolio.holdings > 0;
+
+              let chipClasses = "";
+              if (isSelected) {
+                chipClasses = "bg-brand-600 border-brand-600 text-white";
+              } else if (hasHoldings) {
+                chipClasses = "bg-indigo-50 border-indigo-300 text-indigo-800 hover:bg-indigo-100 shadow-sm font-bold";
+              } else {
+                chipClasses = "bg-white border-gray-300 text-gray-700 hover:bg-gray-50 shadow-sm";
+              }
+
               return (
                 <button
                   key={coin.symbol}
@@ -200,7 +212,6 @@ export default function HomeTable() {
                     } else {
                       setSelectedCoins([...selectedCoins, coin.symbol]);
                       
-                      // Auto-scroll to the newly selected card for mobile users
                       setTimeout(() => {
                         document.getElementById(`coin-card-${coin.symbol}`)?.scrollIntoView({ 
                           behavior: "smooth", 
@@ -209,17 +220,14 @@ export default function HomeTable() {
                       }, 150); 
                     }
                   }}
-                  className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium border transition-colors shadow-sm ${
-                    isSelected
-                      ? "bg-brand-600 border-brand-600 text-white"
-                      : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
-                  }`}
+                  className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition-colors border ${chipClasses}`}
                 >
+                  {hasHoldings && !isSelected && <span className="text-indigo-500">●</span>}
+                  
                   <span>{coin.symbol}</span>
-                  <span className={isSelected ? "text-brand-300" : "text-gray-300"}>|</span>
+                  <span className={isSelected ? "text-brand-300" : hasHoldings ? "text-indigo-300" : "text-gray-300"}>|</span>
                   <span>{formatPhp(coin.currentPrice)}</span>
                   
-                  {/* Shows the Arrow icon directly inside the chip */}
                   <PriceDirectionArrow 
                     direction={coin.priceDirection} 
                     inverse={isSelected} 
