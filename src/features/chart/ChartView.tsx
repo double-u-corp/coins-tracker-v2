@@ -25,6 +25,7 @@ const GRANULARITY_OPTIONS: { label: string; value: ChartGranularity }[] = [
 export default function ChartView() {
   const {
     coinOptions,
+    allCoins,
     symbol,
     setSymbol,
     years,
@@ -50,13 +51,11 @@ export default function ChartView() {
   const [showSma, setShowSma] = useState(false);
   const [showKeyLevels, setShowKeyLevels] = useState(true);
 
-  // 1. Get active portfolio data for the selected coin
   const activePortfolio = useMemo(() => {
     if (!symbol || !portfolio) return null;
     return portfolio.find((p) => p.symbol === symbol) || null;
   }, [symbol, portfolio]);
 
-  // 2. Filter transaction history for the selected coin
   const coinTransactions = useMemo(() => {
     if (!symbol || !transactions) return [];
     return transactions
@@ -64,7 +63,6 @@ export default function ChartView() {
       .sort((a, b) => new Date(b.transactedAt).getTime() - new Date(a.transactedAt).getTime());
   }, [symbol, transactions]);
 
-  // 3. Calculate Technical Levels (Support & Resistance over last 30 periods)
   const technicals = useMemo(() => {
     if (points.length === 0) return { support: null, resistance: null };
     
@@ -75,6 +73,53 @@ export default function ChartView() {
     return { support, resistance };
   }, [points]);
 
+// NEW: Nearing Targets Scanner Logic calculating 5% threshold
+  const nearingTargets = useMemo(() => {
+    if (!allCoins || allCoins.length === 0) return [];
+    
+    const targets = [];
+    
+    for (const coin of allCoins) {
+      // 1. Tell TypeScript to skip if price is null (narrowing the type to number)
+      if (coin.currentPrice === null) continue;
+      
+      // 2. Safe to use math because we ensure targets are not null
+      const isNearHigh = coin.targetHigh !== null && coin.currentPrice >= coin.targetHigh * 0.95;
+      const isNearLow = coin.targetLow !== null && coin.currentPrice <= coin.targetLow * 1.05;
+      
+      if (isNearHigh || isNearLow) {
+        let status = "";
+        let distance = 0;
+        let targetType: "high" | "low" | null = null;
+        let targetPrice = 0;
+        
+        if (isNearHigh && coin.targetHigh !== null) {
+          targetType = "high";
+          targetPrice = coin.targetHigh;
+          distance = ((coin.targetHigh - coin.currentPrice) / coin.targetHigh) * 100;
+          status = distance <= 0 ? "Target Reached!" : `Within ${distance.toFixed(1)}% of High`;
+        } else if (isNearLow && coin.targetLow !== null) {
+          targetType = "low";
+          targetPrice = coin.targetLow;
+          distance = ((coin.currentPrice - coin.targetLow) / coin.targetLow) * 100;
+          status = distance <= 0 ? "Target Reached!" : `Within ${distance.toFixed(1)}% of Low`;
+        }
+        
+        targets.push({
+          ...coin,
+          targetType,
+          targetPrice,
+          status,
+          distance: distance <= 0 ? 0 : distance,
+          // Guarantee it is typed as a number for the JSX below
+          currentPrice: coin.currentPrice 
+        });
+      }
+    }
+    
+    return targets.sort((a, b) => a.distance - b.distance); 
+  }, [allCoins]);
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -84,7 +129,6 @@ export default function ChartView() {
         </Link>
       </div>
 
-      {/* Main Toolbar */}
       <div className="flex flex-wrap items-end gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
         <Dropdown label="Coin" placeholder="Select a coin to analyse" value={symbol} onChange={setSymbol} options={coinOptions.map((c) => ({ label: `${c.name} (${c.symbol})`, value: c.symbol }))} />
 
@@ -116,10 +160,74 @@ export default function ChartView() {
       </div>
 
       {!symbol ? (
-        <div className="flex min-h-[400px] flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-8 text-center">
-          <div className="text-4xl mb-4">📈</div>
-          <h2 className="text-lg font-bold text-gray-900 mb-2">No Coin Selected</h2>
-          <p className="text-sm text-gray-500 max-w-sm">Use the dropdown above to select a cryptocurrency to view its chart history, technical insights, and your trade logs.</p>
+        <div className="space-y-6">
+          <div className="flex min-h-[250px] flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-8 text-center">
+            <div className="text-4xl mb-4">📈</div>
+            <h2 className="text-lg font-bold text-gray-900 mb-2">No Coin Selected</h2>
+            <p className="text-sm text-gray-500 max-w-sm">Use the dropdown above to select a cryptocurrency to view its chart history, technical insights, and your trade logs.</p>
+          </div>
+
+          {/* NEW: Scanner Dashboard showing Coins Near Targets */}
+          {allCoins && allCoins.length > 0 && (
+            <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-semibold text-gray-900">🚨 Nearing Targets Scanner</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">Coins within 5% of their configured limit targets.</p>
+                </div>
+              </div>
+              
+              {nearingTargets.length === 0 ? (
+                <div className="rounded border border-gray-100 bg-gray-50 p-6 text-center text-sm text-gray-500">
+                  No coins are currently within 5% of their set target highs or lows.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {nearingTargets.map((coin) => (
+                    <div
+                      key={coin.symbol}
+                      className={`rounded-lg border p-4 transition-all hover:shadow-md cursor-pointer ${
+                        coin.targetType === "high"
+                          ? "border-green-200 bg-green-50/30"
+                          : "border-red-200 bg-red-50/30"
+                      }`}
+                      onClick={() => setSymbol(coin.symbol)}
+                    >
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="font-bold text-gray-900">{coin.symbol}</span>
+                        <span
+                          className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                            coin.distance === 0
+                              ? "bg-brand-600 text-white"
+                              : coin.targetType === "high"
+                              ? "bg-green-100 text-green-800"
+                              : "bg-red-100 text-red-800"
+                          }`}
+                        >
+                          {coin.status}
+                        </span>
+                      </div>
+                      
+                      <div className="flex items-end justify-between">
+                        <div>
+                          <div className="text-[11px] font-semibold uppercase text-gray-500">Current Price</div>
+                          <div className="text-sm font-medium text-gray-900">{formatPhp(coin.currentPrice)}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className={`text-[11px] font-semibold uppercase ${coin.targetType === "high" ? "text-green-700" : "text-red-700"}`}>
+                            Target {coin.targetType}
+                          </div>
+                          <div className={`text-sm font-medium ${coin.targetType === "high" ? "text-green-700" : "text-red-700"}`}>
+                            {formatPhp(coin.targetPrice)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       ) : (
         <>
@@ -150,7 +258,6 @@ export default function ChartView() {
                 )}
               </div>
 
-              {/* Single Unified Insight Card */}
               <TradingInsightCard 
                 points={points} 
                 symbol={symbol} 

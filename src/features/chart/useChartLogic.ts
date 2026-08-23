@@ -33,6 +33,7 @@ export function useChartLogic() {
   const { authenticated } = useAuth();
 
   const [coinOptions, setCoinOptions] = useState<{ symbol: string; name: string }[]>([]);
+  const [allCoins, setAllCoins] = useState<CoinSummary[]>([]);
   const [symbol, setSymbol] = useState("");
   const [hasAppliedInitialSymbol, setHasAppliedInitialSymbol] = useState(false);
   const [years, setYears] = useState(1);
@@ -46,7 +47,6 @@ export function useChartLogic() {
   const [journalLoading, setJournalLoading] = useState(false);
   const [journalError, setJournalError] = useState<string | null>(null);
 
-  // New state for API transactions & portfolio
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [portfolio, setPortfolio] = useState<PortfolioItem[]>([]);
   const [txLoading, setTxLoading] = useState(false);
@@ -57,14 +57,13 @@ export function useChartLogic() {
       .then((res) => res.json())
       .then((data: { coins: CoinSummary[] }) => {
         if (!cancelled) {
+          setAllCoins(data.coins);
           setCoinOptions(data.coins.map((c) => ({ symbol: c.symbol, name: c.name })));
         }
       })
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
-
-// Inside useChartLogic.ts
 
   useEffect(() => {
     if (hasAppliedInitialSymbol) return;
@@ -74,7 +73,6 @@ export function useChartLogic() {
     const queriedSymbol = typeof router.query.symbol === "string" ? router.query.symbol.toUpperCase() : "";
     const matched = coinOptions.find((c) => c.symbol === queriedSymbol);
     
-    // Default to an empty string instead of coinOptions[0].symbol
     setSymbol(matched?.symbol ?? ""); 
     setHasAppliedInitialSymbol(true);
   }, [router.isReady, router.query.symbol, coinOptions, hasAppliedInitialSymbol]);
@@ -114,7 +112,6 @@ export function useChartLogic() {
       .finally(() => setJournalLoading(false));
   }, [symbol, rangeStart]);
 
-  // Fetch Transactions and Portfolio
   const loadTransactions = useCallback(() => {
     setTxLoading(true);
     fetch("/api/transactions")
@@ -164,9 +161,9 @@ export function useChartLogic() {
   }
 
   return {
-    coinOptions, symbol, setSymbol, years, setYears, granularity, setGranularity,
+    coinOptions, allCoins, symbol, setSymbol, years, setYears, granularity, setGranularity,
     points, chartLoading, chartError, entries, journalLoading, journalError,
     journalLabelsInView, addJournalEntry, deleteJournalEntry, authenticated,
-    transactions, portfolio, txLoading // Exported new properties
+    transactions, portfolio, txLoading
   };
 }
