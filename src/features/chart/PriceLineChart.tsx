@@ -33,18 +33,40 @@ export default function PriceLineChart({
   showKeyLevels,
   showBreakEven,
   breakEvenPrice,
-  support,
-  resistance,
+  support: externalSupport,
+  resistance: externalResistance,
 }: PriceLineChartProps) {
-  // Format data points for Recharts
-  const chartData = points.map((p) => ({
-    period: p.period,
-    label: p.label,
-    high: p.high,
-    low: p.low,
-    sma: "sma" in p ? (p as any).sma : undefined,
-    keyLevel: "keyLevel" in p ? (p as any).keyLevel : undefined,
-  }));
+  // 1. Calculate local extremes and the 50% Equilibrium Key Level if not provided
+  const recentData = points.slice(-Math.min(30, points.length));
+  const calculatedSupport = Math.min(...recentData.map((p) => p.low));
+  const calculatedResistance = Math.max(...recentData.map((p) => p.high));
+  
+  // The Key Level is set as the 50% midpoint equilibrium of the current view range
+  const equilibriumKeyLevel = (calculatedSupport + calculatedResistance) / 2;
+
+  // 2. Compute chart data, rolling 20 SMA, and Key Levels on the fly
+  const chartData = points.map((p, index, arr) => {
+    let smaValue: number | undefined = undefined;
+    if (index >= 19) {
+      let sum = 0;
+      for (let i = index - 19; i <= index; i++) {
+        sum += (arr[i].high + arr[i].low) / 2;
+      }
+      smaValue = sum / 20;
+    }
+
+    return {
+      period: p.period,
+      label: p.label,
+      high: p.high,
+      low: p.low,
+      sma: "sma" in p && (p as any).sma !== undefined ? (p as any).sma : smaValue,
+      keyLevel: "keyLevel" in p && (p as any).keyLevel !== undefined ? (p as any).keyLevel : equilibriumKeyLevel,
+    };
+  });
+
+  const support = externalSupport !== undefined && externalSupport !== null ? externalSupport : calculatedSupport;
+  const resistance = externalResistance !== undefined && externalResistance !== null ? externalResistance : calculatedResistance;
 
   return (
     <div className="h-96 w-full">
@@ -61,7 +83,7 @@ export default function PriceLineChart({
           />
           <Tooltip
             formatter={(value: any, name: string) => [
-              formatPhp(Number(value)),
+              value !== undefined ? formatPhp(Number(value)) : "N/A",
               name.toUpperCase(),
             ]}
             labelStyle={{ color: "#374151", fontWeight: "bold" }}
@@ -80,7 +102,7 @@ export default function PriceLineChart({
           )}
 
           {showKeyLevels && (
-            <Line type="monotone" dataKey="keyLevel" stroke="#9333ea" strokeWidth={1.5} strokeDasharray="4 4" dot={false} name="Key Level" />
+            <Line type="monotone" dataKey="keyLevel" stroke="#9333ea" strokeWidth={1.5} strokeDasharray="4 4" dot={false} name="Key Level (Equilibrium)" />
           )}
 
           {/* Average Cost / Break-even Reference Line */}

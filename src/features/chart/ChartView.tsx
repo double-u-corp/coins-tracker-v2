@@ -66,53 +66,14 @@ export default function ChartView() {
 
   // 3. Calculate Technical Levels (Support & Resistance over last 30 periods)
   const technicals = useMemo(() => {
-    if (points.length === 0) return { support: null, resistance: null, currentPrice: null, positionInRange: null };
+    if (points.length === 0) return { support: null, resistance: null };
     
     const recentData = points.slice(-Math.min(30, points.length));
-    const lastPoint = points[points.length - 1];
-    
-    const currentPrice = (lastPoint.high + lastPoint.low) / 2;
     const support = Math.min(...recentData.map((p) => p.low));
     const resistance = Math.max(...recentData.map((p) => p.high));
     
-    const range = resistance - support;
-    const positionInRange = range > 0 ? (currentPrice - support) / range : 0.5;
-
-    return { support, resistance, currentPrice, positionInRange };
+    return { support, resistance };
   }, [points]);
-
-  // 4. Generate dynamic action suggestion based on BOTH Portfolio and Technical Analysis
-  const actionSuggestion = useMemo(() => {
-    if (!symbol || points.length === 0 || technicals.currentPrice === null) return null;
-
-    const { currentPrice, positionInRange } = technicals;
-    const hasHoldings = activePortfolio && activePortfolio.holdings > 0;
-
-    // --- Scenario A: User is HOLDING the coin ---
-    if (hasHoldings) {
-      const avgCost = activePortfolio.spent / activePortfolio.holdings;
-      const profitMargin = (currentPrice - avgCost) / avgCost;
-
-      if (profitMargin >= 0.3) return { action: "Take Profit Zone", text: "Significant gains realized. Consider a partial spot sell to secure profits while it's trending high.", color: "text-emerald-700 bg-emerald-50 border-emerald-200", stat: "In Profit" };
-      if (profitMargin >= 0.05) {
-        if (positionInRange! > 0.8) return { action: "Approaching Resistance", text: "You are in profit, but the price is testing recent resistance. Monitor for rejection; a partial sell might be wise.", color: "text-green-700 bg-green-50 border-green-200", stat: "In Profit" };
-        return { action: "Holding Steady", text: "Position is safely in profit. Let the trend develop or trail your stop loss.", color: "text-green-700 bg-green-50 border-green-200", stat: "In Profit" };
-      }
-      if (profitMargin < -0.1) {
-        if (positionInRange! < 0.2) return { action: "Support Hit (Drawdown)", text: "Price is discounted and testing support. This is a potential setup to wait for the dip and ladder buy to lower your average.", color: "text-blue-700 bg-blue-50 border-blue-200", stat: "Drawdown" };
-        return { action: "Drawdown", text: "Price is below your entry average. Watch support levels carefully before attempting to scale in further.", color: "text-amber-700 bg-amber-50 border-amber-200", stat: "Drawdown" };
-      }
-      return { action: "Chopping Near Entry", text: "Price is hovering around your average cost basis. Wait for a clearer swing direction.", color: "text-gray-700 bg-gray-50 border-gray-200", stat: "Break Even" };
-    }
-
-    // --- Scenario B: NO HOLDINGS (Pure Technical Analysis) ---
-    if (positionInRange! <= 0.15) return { action: "Support Hit", text: "Price is resting at recent support levels. Excellent area to watch for a bounce and plan a ladder buy entry.", color: "text-blue-700 bg-blue-50 border-blue-200", stat: "Wait for the Dip" };
-    if (positionInRange! >= 0.85) return { action: "Resistance Tested", text: "Price is heavily extended and testing resistance. High risk of rejection. Avoid buying and wait for a clear pullback.", color: "text-red-700 bg-red-50 border-red-200", stat: "High Risk" };
-    if (positionInRange! < 0.5) return { action: "Lower Range Swing", text: "Trending in the lower half of its recent swing. You can scale in lightly or wait for a deeper dip to key support.", color: "text-indigo-700 bg-indigo-50 border-indigo-200", stat: "Consolidating" };
-    
-    return { action: "Upper Range Swing", text: "Price is pushing toward the upper half of its range. Risk-to-reward for new spot buys is moderate. Wait for a dip.", color: "text-amber-700 bg-amber-50 border-amber-200", stat: "Consolidating" };
-
-  }, [activePortfolio, points, symbol, technicals]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -123,6 +84,7 @@ export default function ChartView() {
         </Link>
       </div>
 
+      {/* Main Toolbar */}
       <div className="flex flex-wrap items-end gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
         <Dropdown label="Coin" placeholder="Select a coin to analyse" value={symbol} onChange={setSymbol} options={coinOptions.map((c) => ({ label: `${c.name} (${c.symbol})`, value: c.symbol }))} />
 
@@ -161,21 +123,6 @@ export default function ChartView() {
         </div>
       ) : (
         <>
-          {actionSuggestion && !chartLoading && points.length > 0 && (
-            <div className={`rounded-lg border p-4 shadow-sm ${actionSuggestion.color}`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-sm font-bold uppercase tracking-wide">{actionSuggestion.action}</h4>
-                  <p className="mt-1 text-sm">{actionSuggestion.text}</p>
-                </div>
-                <div className="text-right shrink-0 ml-4">
-                  <p className="text-xs opacity-75">Status</p>
-                  <p className="text-base font-bold">{actionSuggestion.stat}</p>
-                </div>
-              </div>
-            </div>
-          )}
-
           <div className="flex flex-col gap-6 lg:flex-row">
             <div className="flex-1 space-y-4">
               {chartError && <AlertBanner variant="error" message={`Failed to load chart: ${chartError}`} />}
@@ -203,7 +150,14 @@ export default function ChartView() {
                 )}
               </div>
 
-              <TradingInsightCard points={points} symbol={symbol} />
+              {/* Single Unified Insight Card */}
+              <TradingInsightCard 
+                points={points} 
+                symbol={symbol} 
+                activePortfolio={activePortfolio}
+                support={technicals.support}
+                resistance={technicals.resistance}
+              />
 
               <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
                 <h3 className="mb-3 text-sm font-semibold text-gray-900">Transaction History <span className="text-brand-600">({symbol})</span></h3>
