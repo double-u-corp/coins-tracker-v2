@@ -42,7 +42,7 @@ interface CoinCardProps {
 
 function CoinCard({ coin, canUpdatePrice, onUpdatePriceClick }: CoinCardProps) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+    <div id={`coin-card-${coin.symbol}`} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
       <div className="mb-3 flex items-center justify-between gap-2">
         <span className="text-sm font-semibold text-gray-900">
           {coin.name} <span className="font-normal text-gray-400">({coin.symbol})</span>
@@ -199,6 +199,14 @@ export default function HomeTable() {
                       setSelectedCoins(selectedCoins.filter((c) => c !== coin.symbol));
                     } else {
                       setSelectedCoins([...selectedCoins, coin.symbol]);
+                      
+                      // Auto-scroll to the newly selected card for mobile users
+                      setTimeout(() => {
+                        document.getElementById(`coin-card-${coin.symbol}`)?.scrollIntoView({ 
+                          behavior: "smooth", 
+                          block: "start" 
+                        });
+                      }, 150); 
                     }
                   }}
                   className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium border transition-colors shadow-sm ${
@@ -222,7 +230,6 @@ export default function HomeTable() {
           </div>
         </div>
       )}
-
 
       {loading ? (
         <p className="rounded-lg border border-gray-200 bg-white px-4 py-6 text-center text-sm text-gray-500 shadow-sm">
