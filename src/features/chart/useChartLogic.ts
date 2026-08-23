@@ -5,21 +5,38 @@ import { chartBucketKey, type ChartGranularity } from "@/lib/chartBucket";
 import type { CoinSummary, ChartPoint } from "@/validators/recordSchema";
 import type { JournalEntryView } from "@/validators/journalSchema";
 
-interface CoinOption {
+export interface Transaction {
+  id: number;
   symbol: string;
   name: string;
+  type: "buy" | "sell";
+  phpAmount: number;
+  price: number;
+  coinAmount: number;
+  isManual: boolean;
+  transactedAt: string;
 }
 
+export interface PortfolioItem {
+  symbol: string;
+  name: string;
+  holdings: number;
+  spent: number;
+  sold: number;
+  currentPrice: number;
+  currentValue: number;
+  gainLoss: number;
+}
 
 export function useChartLogic() {
   const router = useRouter();
   const { authenticated } = useAuth();
 
-  const [coinOptions, setCoinOptions] = useState<CoinOption[]>([]);
+  const [coinOptions, setCoinOptions] = useState<{ symbol: string; name: string }[]>([]);
   const [symbol, setSymbol] = useState("");
   const [hasAppliedInitialSymbol, setHasAppliedInitialSymbol] = useState(false);
   const [years, setYears] = useState(1);
-  const [granularity, setGranularity] = useState<ChartGranularity>("daily"); // Defaulting to daily for closer dip analysis
+  const [granularity, setGranularity] = useState<ChartGranularity>("daily");
 
   const [points, setPoints] = useState<ChartPoint[]>([]);
   const [chartLoading, setChartLoading] = useState(false);
@@ -29,7 +46,11 @@ export function useChartLogic() {
   const [journalLoading, setJournalLoading] = useState(false);
   const [journalError, setJournalError] = useState<string | null>(null);
 
-  // Load the coin list once, for the dropdown.
+  // New state for API transactions & portfolio
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [portfolio, setPortfolio] = useState<PortfolioItem[]>([]);
+  const [txLoading, setTxLoading] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     fetch("/api/coins")
@@ -39,15 +60,12 @@ export function useChartLogic() {
           setCoinOptions(data.coins.map((c) => ({ symbol: c.symbol, name: c.name })));
         }
       })
-      .catch(() => {
-        /* dropdown just stays empty on failure */
-      });
-    return () => {
-      cancelled = true;
-    };
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
-  // Picks the initial selected coin once both coin options AND router query are ready
+// Inside useChartLogic.ts
+
   useEffect(() => {
     if (hasAppliedInitialSymbol) return;
     if (!router.isReady) return;
@@ -55,7 +73,9 @@ export function useChartLogic() {
 
     const queriedSymbol = typeof router.query.symbol === "string" ? router.query.symbol.toUpperCase() : "";
     const matched = coinOptions.find((c) => c.symbol === queriedSymbol);
-    setSymbol(matched?.symbol ?? coinOptions[0].symbol);
+    
+    // Default to an empty string instead of coinOptions[0].symbol
+    setSymbol(matched?.symbol ?? ""); 
     setHasAppliedInitialSymbol(true);
   }, [router.isReady, router.query.symbol, coinOptions, hasAppliedInitialSymbol]);
 
@@ -66,10 +86,7 @@ export function useChartLogic() {
   }, [years]);
 
   const loadChart = useCallback(() => {
-    if (!symbol) {
-      setPoints([]);
-      return;
-    }
+    if (!symbol) return;
     setChartLoading(true);
     setChartError(null);
     fetch(`/api/coins?type=chart&symbol=${symbol}&years=${years}&granularity=${granularity}`)
@@ -83,16 +100,13 @@ export function useChartLogic() {
   }, [symbol, years, granularity]);
 
   const loadJournal = useCallback(() => {
-    if (!symbol) {
-      setEntries([]);
-      return;
-    }
+    if (!symbol) return;
     setJournalLoading(true);
     setJournalError(null);
     const from = rangeStart.toISOString().slice(0, 10);
     fetch(`/api/journal?symbol=${symbol}&from=${from}`)
       .then((res) => {
-        if (!res.ok) throw new Error(`Failed to load journal entries (${res.status})`);
+        if (!res.ok) throw new Error(`Failed to load journal (${res.status})`);
         return res.json();
       })
       .then((data: { entries: JournalEntryView[] }) => setEntries(data.entries))
@@ -100,21 +114,31 @@ export function useChartLogic() {
       .finally(() => setJournalLoading(false));
   }, [symbol, rangeStart]);
 
-  useEffect(() => {
-    loadChart();
-  }, [loadChart]);
+  // Fetch Transactions and Portfolio
+  const loadTransactions = useCallback(() => {
+    setTxLoading(true);
+    fetch("/api/transactions")
+      .then((res) => {
+        if (!res.ok) throw new Error(`Failed to load transactions (${res.status})`);
+        return res.json();
+      })
+      .then((data) => {
+        setTransactions(data.transactions || []);
+        setPortfolio(data.portfolio || []);
+      })
+      .catch((err) => console.error(err))
+      .finally(() => setTxLoading(false));
+  }, []);
 
-  useEffect(() => {
-    loadJournal();
-  }, [loadJournal]);
+  useEffect(() => { loadChart(); }, [loadChart]);
+  useEffect(() => { loadJournal(); }, [loadJournal]);
+  useEffect(() => { loadTransactions(); }, [loadTransactions]);
 
   const journalLabelsInView = useMemo(() => {
     const labels = new Set<string>();
     for (const entry of entries) {
       const { label } = chartBucketKey(new Date(entry.entryDate), granularity);
-      if (points.some((p) => p.label === label)) {
-        labels.add(label);
-      }
+      if (points.some((p) => p.label === label)) labels.add(label);
     }
     return labels;
   }, [entries, granularity, points]);
@@ -125,10 +149,7 @@ export function useChartLogic() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
     });
-    const data = (await res.json()) as { entry?: JournalEntryView; error?: string };
-    if (!res.ok || !data.entry) {
-      throw new Error(data.error ?? "Failed to save journal entry");
-    }
+    if (!res.ok) throw new Error("Failed to save journal entry");
     loadJournal();
   }
 
@@ -138,30 +159,14 @@ export function useChartLogic() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id }),
     });
-    if (!res.ok) {
-      const data = (await res.json()) as { error?: string };
-      throw new Error(data.error ?? "Failed to delete journal entry");
-    }
+    if (!res.ok) throw new Error("Failed to delete journal entry");
     loadJournal();
   }
 
   return {
-    coinOptions,
-    symbol,
-    setSymbol,
-    years,
-    setYears,
-    granularity,
-    setGranularity,
-    points,
-    chartLoading,
-    chartError,
-    entries,
-    journalLoading,
-    journalError,
-    journalLabelsInView,
-    addJournalEntry,
-    deleteJournalEntry,
-    authenticated,
+    coinOptions, symbol, setSymbol, years, setYears, granularity, setGranularity,
+    points, chartLoading, chartError, entries, journalLoading, journalError,
+    journalLabelsInView, addJournalEntry, deleteJournalEntry, authenticated,
+    transactions, portfolio, txLoading // Exported new properties
   };
 }

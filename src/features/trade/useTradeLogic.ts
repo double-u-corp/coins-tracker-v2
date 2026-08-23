@@ -40,6 +40,7 @@ export function useTradeLogic() {
       const [coinsRes, txRes] = await Promise.all([fetch("/api/coins"), fetch("/api/transactions")]);
       if (!coinsRes.ok) throw new Error(`Failed to load coins (${coinsRes.status})`);
       if (!txRes.ok) throw new Error(`Failed to load transactions (${txRes.status})`);
+      console.log(txRes)
 
       const coinsData = (await coinsRes.json()) as { coins: CoinSummary[] };
       const txData = (await txRes.json()) as { transactions: TransactionView[]; portfolio: PortfolioEntry[] };

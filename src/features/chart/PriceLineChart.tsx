@@ -1,19 +1,17 @@
-import { useMemo } from "react";
 import {
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ReferenceLine,
   ResponsiveContainer,
-  Tooltip,
+  ComposedChart,
+  Line,
   XAxis,
   YAxis,
+  Tooltip,
+  CartesianGrid,
+  ReferenceLine,
 } from "recharts";
-import { formatPhp } from "@/lib/format";
 import type { ChartPoint } from "@/validators/recordSchema";
+import { formatPhp } from "@/lib/format";
 
-interface PriceLineChartProps {
+export interface PriceLineChartProps {
   points: ChartPoint[];
   journalLabels: Set<string>;
   showHigh: boolean;
@@ -22,6 +20,8 @@ interface PriceLineChartProps {
   showKeyLevels: boolean;
   showBreakEven: boolean;
   breakEvenPrice: number | null;
+  support?: number | null;
+  resistance?: number | null;
 }
 
 export default function PriceLineChart({
@@ -33,131 +33,102 @@ export default function PriceLineChart({
   showKeyLevels,
   showBreakEven,
   breakEvenPrice,
+  support,
+  resistance,
 }: PriceLineChartProps) {
-  const chartData = useMemo(() => {
-    return points.map((pt, idx, arr) => {
-      if (idx < 19) return { ...pt, sma20: null };
-      const window = arr.slice(idx - 19, idx + 1);
-      const avg = window.reduce((sum, p) => sum + (p.high + p.low) / 2, 0) / 20;
-      return { ...pt, sma20: avg };
-    });
-  }, [points]);
-
-  const { minLow, maxHigh } = useMemo(() => {
-    if (points.length === 0) return { minLow: null, maxHigh: null };
-    let min = points[0].low;
-    let max = points[0].high;
-    for (const p of points) {
-      if (p.low < min) min = p.low;
-      if (p.high > max) max = p.high;
-    }
-    return { minLow: min, maxHigh: max };
-  }, [points]);
-
-  if (points.length === 0) {
-    return (
-      <div className="flex h-96 items-center justify-center text-sm text-gray-500">
-        No price history in this range yet.
-      </div>
-    );
-  }
+  // Format data points for Recharts
+  const chartData = points.map((p) => ({
+    period: p.period,
+    label: p.label,
+    high: p.high,
+    low: p.low,
+    sma: "sma" in p ? (p as any).sma : undefined,
+    keyLevel: "keyLevel" in p ? (p as any).keyLevel : undefined,
+  }));
 
   return (
-    <ResponsiveContainer width="100%" height={384}>
-      <LineChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 10 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-        <XAxis dataKey="label" tick={{ fontSize: 11 }} minTickGap={20} />
-        <YAxis
-          tick={{ fontSize: 11 }}
-          width={80}
-          tickFormatter={(value: number) =>
-            value.toLocaleString(undefined, { notation: "compact", maximumFractionDigits: 1 })
-          }
-        />
-        <Tooltip
-          formatter={(value: number, name: string) => {
-            let labelName = name;
-            if (name === "high") labelName = "High";
-            if (name === "low") labelName = "Low";
-            if (name === "sma20") labelName = "20 SMA";
-            return [formatPhp(value), labelName];
-          }}
-          labelFormatter={(label: string) => label}
-        />
-        <Legend
-          formatter={(value) => {
-            if (value === "high") return "High";
-            if (value === "low") return "Low";
-            if (value === "sma20") return "20 SMA";
-            return value;
-          }}
-        />
-
-        {/* Journal Entry Date Markers */}
-        {Array.from(journalLabels).map((label) => (
-          <ReferenceLine
-            key={label}
-            x={label}
-            stroke="#9333ea"
-            strokeDasharray="4 4"
-            ifOverflow="extendDomain"
-            label={{ value: "📓", position: "top", fontSize: 12 }}
+    <div className="h-96 w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+          <XAxis dataKey="label" stroke="#9ca3af" fontSize={12} tickLine={false} />
+          <YAxis
+            stroke="#9ca3af"
+            fontSize={12}
+            tickLine={false}
+            tickFormatter={(val) => formatPhp(val)}
+            domain={["auto", "auto"]}
           />
-        ))}
-
-        {/* Support Floor */}
-        {showKeyLevels && minLow !== null && (
-          <ReferenceLine
-            y={minLow}
-            stroke="#16a34a"
-            strokeDasharray="3 3"
-            strokeWidth={1.5}
-            label={{ value: `Support: ${formatPhp(minLow)}`, position: "insideBottomLeft", fill: "#16a34a", fontSize: 11 }}
+          <Tooltip
+            formatter={(value: any, name: string) => [
+              formatPhp(Number(value)),
+              name.toUpperCase(),
+            ]}
+            labelStyle={{ color: "#374151", fontWeight: "bold" }}
           />
-        )}
 
-        {/* Resistance Ceiling */}
-        {showKeyLevels && maxHigh !== null && (
-          <ReferenceLine
-            y={maxHigh}
-            stroke="#dc2626"
-            strokeDasharray="3 3"
-            strokeWidth={1.5}
-            label={{ value: `Resistance: ${formatPhp(maxHigh)}`, position: "insideTopLeft", fill: "#dc2626", fontSize: 11 }}
-          />
-        )}
+          {showHigh && (
+            <Line type="monotone" dataKey="high" stroke="#16a34a" strokeWidth={2} dot={false} name="High" />
+          )}
 
-        {/* Personal Break-Even Entry Line */}
-        {showBreakEven && breakEvenPrice !== null && (
-          <ReferenceLine
-            y={breakEvenPrice}
-            stroke="#2563eb"
-            strokeDasharray="6 6"
-            strokeWidth={2}
-            ifOverflow="extendDomain"
-            label={{
-              value: `Avg Entry: ${formatPhp(breakEvenPrice)}`,
-              position: "insideTopRight",
-              fill: "#2563eb",
-              fontSize: 11,
-              fontWeight: 600,
-            }}
-          />
-        )}
+          {showLow && (
+            <Line type="monotone" dataKey="low" stroke="#dc2626" strokeWidth={2} dot={false} name="Low" />
+          )}
 
-        {/* Price Lines */}
-        {showHigh && (
-          <Line type="monotone" dataKey="high" stroke="#16a34a" strokeWidth={2} dot={false} name="high" />
-        )}
-        {showLow && (
-          <Line type="monotone" dataKey="low" stroke="#dc2626" strokeWidth={2} dot={false} name="low" />
-        )}
+          {showSma && (
+            <Line type="monotone" dataKey="sma" stroke="#f59e0b" strokeWidth={1.5} dot={false} name="20 SMA" />
+          )}
 
-        {/* 20 SMA */}
-        {showSma && (
-          <Line type="monotone" dataKey="sma20" stroke="#f59e0b" strokeWidth={2} dot={false} name="sma20" />
-        )}
-      </LineChart>
-    </ResponsiveContainer>
+          {showKeyLevels && (
+            <Line type="monotone" dataKey="keyLevel" stroke="#9333ea" strokeWidth={1.5} strokeDasharray="4 4" dot={false} name="Key Level" />
+          )}
+
+          {/* Average Cost / Break-even Reference Line */}
+          {showBreakEven && breakEvenPrice !== null && (
+            <ReferenceLine
+              y={breakEvenPrice}
+              stroke="#2563eb"
+              strokeDasharray="3 3"
+              label={{
+                value: `Avg Entry: ${formatPhp(breakEvenPrice)}`,
+                fill: "#2563eb",
+                fontSize: 12,
+                position: "insideTopRight",
+              }}
+            />
+          )}
+
+          {/* Resistance Line */}
+          {resistance !== undefined && resistance !== null && (
+            <ReferenceLine
+              y={resistance}
+              stroke="#ef4444"
+              strokeDasharray="4 4"
+              label={{
+                value: `Resistance`,
+                fill: "#ef4444",
+                fontSize: 12,
+                position: "insideTopLeft",
+              }}
+            />
+          )}
+
+          {/* Support Line */}
+          {support !== undefined && support !== null && (
+            <ReferenceLine
+              y={support}
+              stroke="#10b981"
+              strokeDasharray="4 4"
+              label={{
+                value: `Support`,
+                fill: "#10b981",
+                fontSize: 12,
+                position: "insideBottomLeft",
+              }}
+            />
+          )}
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
