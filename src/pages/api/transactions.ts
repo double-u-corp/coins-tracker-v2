@@ -1,5 +1,4 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { fetchPrice, toPhpSymbol } from "@/lib/coinsApi";
 import { isAuthenticatedRequest } from "@/lib/auth";
@@ -10,38 +9,89 @@ import {
 } from "@/validators/transactionSchema";
 import type { PortfolioEntry, TransactionView } from "@/validators/transactionSchema";
 
-type ListResponse = { transactions: TransactionView[]; portfolio: PortfolioEntry[] };
+type ListResponse = { 
+  transactions: TransactionView[]; 
+  portfolio: PortfolioEntry[];
+  cashOnHand: number;
+  totalDeposited: number;
+  totalWithdrawn: number;
+};
 type CreateResponse = { transaction: TransactionView };
 type UpdateResponse = { transaction: TransactionView };
 type DeleteResponse = { ok: true };
 type ErrorResponse = { error: string };
 
+// Helper to prevent slow external price APIs from stalling the backend response
+async function fetchPriceWithTimeout(symbol: string, timeoutMs = 2000): Promise<number | null> {
+  try {
+    const pricePromise = fetchPrice(toPhpSymbol(symbol));
+    const timeoutPromise = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), timeoutMs)
+    );
+    return await Promise.race([pricePromise, timeoutPromise]);
+  } catch {
+    return null;
+  }
+}
+
 async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
+  // Fetch only strictly required fields
   const transactions = await prisma.transaction.findMany({
-    include: { coin: true },
+    select: {
+      id: true,
+      type: true,
+      phpAmount: true,
+      price: true,
+      coinAmount: true,
+      isManual: true,
+      transactedAt: true,
+      coinId: true,
+      coin: {
+        select: { id: true, symbol: true, name: true },
+      },
+    },
     orderBy: { transactedAt: "desc" },
   });
+
+  let totalDeposited = 0;
+  let totalWithdrawn = 0;
+
+  const cashOnHand = transactions.reduce((acc, t) => {
+    const type = t.type.toLowerCase();
+    const amt = Number(t.phpAmount) || 0;
+
+    if (type === "deposit") {
+      totalDeposited += amt;
+      return acc + amt;
+    }
+    if (type === "sell") return acc + amt;
+    if (type === "withdraw") {
+      totalWithdrawn += amt;
+      return acc - amt;
+    }
+    if (type === "buy") return acc - amt;
+    return acc;
+  }, 0);
 
   const transactionViews: TransactionView[] = transactions.map((t) => ({
     id: t.id,
     symbol: t.coin?.symbol ?? "PHP",
     name: t.coin?.name ?? "Cash Flow",
-    type: t.type as "buy" | "sell" | "deposit" | "withdraw",
-    phpAmount: t.phpAmount,
-    price: t.price,
-    coinAmount: t.coinAmount,
+    type: t.type.toLowerCase() as "buy" | "sell" | "deposit" | "withdraw",
+    phpAmount: Number(t.phpAmount),
+    price: Number(t.price),
+    coinAmount: Number(t.coinAmount),
     isManual: t.isManual,
     transactedAt: t.transactedAt.toISOString(),
   }));
 
-  // Roll transactions up per coin (excluding cash deposits/withdrawals)
   const byCoin = new Map<
     string,
     { coinId: number; symbol: string; name: string; holdings: number; spent: number; sold: number }
   >();
 
   for (const t of transactions) {
-    if (!t.coin) continue; // Skip pure cash deposits/withdrawals
+    if (!t.coin) continue;
 
     const existing = byCoin.get(t.coin.symbol) ?? {
       coinId: t.coin.id,
@@ -52,57 +102,77 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
       sold: 0,
     };
 
-    if (t.type === "buy") {
-      existing.holdings += t.coinAmount;
-      existing.spent += t.phpAmount;
-    } else if (t.type === "sell") {
-      existing.holdings -= t.coinAmount;
-      existing.spent -= t.phpAmount;
-      existing.sold += t.phpAmount;
+    const type = t.type.toLowerCase();
+    const coinAmt = Number(t.coinAmount) || 0;
+    const phpAmt = Number(t.phpAmount) || 0;
+
+    if (type === "buy") {
+      existing.holdings += coinAmt;
+      existing.spent += phpAmt;
+    } else if (type === "sell") {
+      existing.holdings -= coinAmt;
+      existing.sold += phpAmt;
     }
     byCoin.set(t.coin.symbol, existing);
   }
 
-  const portfolio: PortfolioEntry[] = await Promise.all(
-    Array.from(byCoin.values()).map(async (entry) => {
-      let currentPrice: number | null = null;
-      try {
-        currentPrice = await fetchPrice(toPhpSymbol(entry.symbol));
-      } catch {
-        currentPrice = null;
-      }
+  const entries = Array.from(byCoin.values());
+  const coinIds = entries.map((e) => e.coinId);
 
-      if (currentPrice === null) {
-        const latestRecord = await prisma.record.findFirst({
-          where: { coinId: entry.coinId },
-          orderBy: { createdAt: "desc" },
-          select: { price: true },
-        });
-        currentPrice = latestRecord?.price ?? null;
-      }
+  // Batch query latest fallback prices from DB in a single call
+  const fallbackRecords = coinIds.length > 0
+    ? await prisma.record.findMany({
+        where: { coinId: { in: coinIds } },
+        orderBy: { createdAt: "desc" },
+        select: { coinId: true, price: true },
+      })
+    : [];
 
-      const currentValue = currentPrice !== null ? currentPrice * entry.holdings : null;
-      const gainLoss = currentValue !== null ? currentValue - entry.spent : null;
+  const latestPriceMap = new Map<number, number>();
+  for (const rec of fallbackRecords) {
+    if (!latestPriceMap.has(rec.coinId)) {
+      latestPriceMap.set(rec.coinId, Number(rec.price));
+    }
+  }
 
-      return {
-        symbol: entry.symbol,
-        name: entry.name,
-        holdings: entry.holdings,
-        spent: entry.spent,
-        sold: entry.sold,
-        currentPrice,
-        currentValue,
-        gainLoss,
-      };
-    })
+  // Fetch external live prices in parallel
+  const livePrices = await Promise.all(
+    entries.map((entry) => fetchPriceWithTimeout(entry.symbol))
   );
 
-  res.status(200).json({ transactions: transactionViews, portfolio });
+  const portfolio: PortfolioEntry[] = entries.map((entry, index) => {
+    let currentPrice = livePrices[index];
+
+    if (currentPrice === null) {
+      currentPrice = latestPriceMap.get(entry.coinId) ?? null;
+    }
+
+    const currentValue = currentPrice !== null ? currentPrice * entry.holdings : null;
+    const netSpent = entry.spent - entry.sold;
+    const gainLoss = currentValue !== null ? currentValue - netSpent : null;
+
+    return {
+      symbol: entry.symbol,
+      name: entry.name,
+      holdings: entry.holdings,
+      bought: entry.spent,
+      spent: netSpent,
+      sold: entry.sold,
+      currentPrice,
+      currentValue,
+      gainLoss,
+    } as PortfolioEntry;
+  });
+
+  res.status(200).json({ 
+    transactions: transactionViews, 
+    portfolio, 
+    cashOnHand,
+    totalDeposited,
+    totalWithdrawn,
+  });
 }
 
-/**
- * POST /api/transactions — handles buy, sell, deposit, and withdraw.
- */
 async function handleCreate(req: NextApiRequest, res: NextApiResponse<CreateResponse | ErrorResponse>) {
   const parsed = createTransactionSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -110,29 +180,30 @@ async function handleCreate(req: NextApiRequest, res: NextApiResponse<CreateResp
   }
 
   const { symbol, type, phpAmount, coinAmount, transactedAt: manualDate } = parsed.data;
+  const typeLower = type.toLowerCase();
 
-  // 1. Calculate live available PHP cash balance
   const allTxs = await prisma.transaction.findMany({ select: { type: true, phpAmount: true } });
   let cashBalance = 0;
   for (const tx of allTxs) {
-    if (tx.type === "deposit" || tx.type === "sell") cashBalance += tx.phpAmount;
-    if (tx.type === "withdraw" || tx.type === "buy") cashBalance -= tx.phpAmount;
+    const tType = tx.type.toLowerCase();
+    const amt = Number(tx.phpAmount) || 0;
+    if (tType === "deposit" || tType === "sell") cashBalance += amt;
+    if (tType === "withdraw" || tType === "buy") cashBalance -= amt;
   }
 
-  // 2. Validate sufficient cash balance for buys or withdrawals
-  if ((type === "buy" || type === "withdraw") && phpAmount > cashBalance) {
+  if ((typeLower === "buy" || typeLower === "withdraw") && phpAmount > cashBalance) {
     return res.status(400).json({
       error: `Insufficient cash balance. Available: ₱${cashBalance.toLocaleString("en-US", {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
-      })}. Tried to ${type}: ₱${phpAmount.toLocaleString("en-US", {
+      })}. Tried to ${typeLower}: ₱${phpAmount.toLocaleString("en-US", {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       })}.`,
     });
   }
 
-  const isCashFlow = type === "deposit" || type === "withdraw";
+  const isCashFlow = typeLower === "deposit" || typeLower === "withdraw";
 
   let coinId: number | null = null;
   let finalCoinAmount = coinAmount ?? 0;
@@ -149,13 +220,13 @@ async function handleCreate(req: NextApiRequest, res: NextApiResponse<CreateResp
     }
     coinId = coin.id;
 
-    if (type === "sell") {
+    if (typeLower === "sell") {
       const existing = await prisma.transaction.findMany({
         where: { coinId: coin.id },
         select: { type: true, coinAmount: true },
       });
       const currentlyHeld = existing.reduce(
-        (sum, t) => sum + (t.type === "buy" ? t.coinAmount : t.type === "sell" ? -t.coinAmount : 0),
+        (sum, t) => sum + (t.type.toLowerCase() === "buy" ? Number(t.coinAmount) : t.type.toLowerCase() === "sell" ? -Number(t.coinAmount) : 0),
         0
       );
       if (finalCoinAmount > currentlyHeld) {
@@ -169,7 +240,7 @@ async function handleCreate(req: NextApiRequest, res: NextApiResponse<CreateResp
   }
 
   const createPayload = {
-    type,
+    type: typeLower,
     phpAmount,
     price: isCashFlow ? 0 : price,
     coinAmount: isCashFlow ? 0 : finalCoinAmount,
@@ -188,19 +259,16 @@ async function handleCreate(req: NextApiRequest, res: NextApiResponse<CreateResp
       id: transaction.id,
       symbol: transaction.coin?.symbol ?? "PHP",
       name: transaction.coin?.name ?? "Cash Flow",
-      type: transaction.type as "buy" | "sell" | "deposit" | "withdraw",
-      phpAmount: transaction.phpAmount,
-      price: transaction.price,
-      coinAmount: transaction.coinAmount,
+      type: transaction.type.toLowerCase() as "buy" | "sell" | "deposit" | "withdraw",
+      phpAmount: Number(transaction.phpAmount),
+      price: Number(transaction.price),
+      coinAmount: Number(transaction.coinAmount),
       isManual: transaction.isManual,
       transactedAt: transaction.transactedAt.toISOString(),
     },
   });
 }
 
-/**
- * PATCH /api/transactions — correct existing transaction.
- */
 async function handleUpdate(req: NextApiRequest, res: NextApiResponse<UpdateResponse | ErrorResponse>) {
   const parsed = updateTransactionSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -214,16 +282,18 @@ async function handleUpdate(req: NextApiRequest, res: NextApiResponse<UpdateResp
     return res.status(404).json({ error: "Transaction not found" });
   }
 
-  if (existing.type === "sell" && existing.coinId) {
+  const existingType = existing.type.toLowerCase();
+
+  if (existingType === "sell" && existing.coinId) {
     const others = await prisma.transaction.findMany({
       where: { coinId: existing.coinId, id: { not: id } },
       select: { type: true, coinAmount: true },
     });
     const heldExcludingThis = others.reduce(
-      (sum, t) => sum + (t.type === "buy" ? t.coinAmount : t.type === "sell" ? -t.coinAmount : 0),
+      (sum, t) => sum + (t.type.toLowerCase() === "buy" ? Number(t.coinAmount) : t.type.toLowerCase() === "sell" ? -Number(t.coinAmount) : 0),
       0
     );
-    const updatedCoinAmount = coinAmount ?? existing.coinAmount;
+    const updatedCoinAmount = coinAmount ?? Number(existing.coinAmount);
     if (updatedCoinAmount > heldExcludingThis) {
       return res.status(400).json({
         error: `That would sell more than you hold: ${heldExcludingThis.toLocaleString(undefined, {
@@ -233,10 +303,10 @@ async function handleUpdate(req: NextApiRequest, res: NextApiResponse<UpdateResp
     }
   }
 
-  const updatedPhp = phpAmount ?? existing.phpAmount;
-  const updatedCoins = coinAmount ?? existing.coinAmount;
-  const isCashFlow = existing.type === "deposit" || existing.type === "withdraw";
-  const price = isCashFlow ? 0 : updatedCoins > 0 ? updatedPhp / updatedCoins : existing.price;
+  const updatedPhp = phpAmount ?? Number(existing.phpAmount);
+  const updatedCoins = coinAmount ?? Number(existing.coinAmount);
+  const isCashFlow = existingType === "deposit" || existingType === "withdraw";
+  const price = isCashFlow ? 0 : updatedCoins > 0 ? updatedPhp / updatedCoins : Number(existing.price);
 
   const updated = await prisma.transaction.update({
     where: { id },
@@ -254,10 +324,10 @@ async function handleUpdate(req: NextApiRequest, res: NextApiResponse<UpdateResp
       id: updated.id,
       symbol: updated.coin?.symbol ?? "PHP",
       name: updated.coin?.name ?? "Cash Flow",
-      type: updated.type as "buy" | "sell" | "deposit" | "withdraw",
-      phpAmount: updated.phpAmount,
-      price: updated.price,
-      coinAmount: updated.coinAmount,
+      type: updated.type.toLowerCase() as "buy" | "sell" | "deposit" | "withdraw",
+      phpAmount: Number(updated.phpAmount),
+      price: Number(updated.price),
+      coinAmount: Number(updated.coinAmount),
       isManual: updated.isManual,
       transactedAt: updated.transactedAt.toISOString(),
     },
@@ -288,15 +358,9 @@ export default async function handler(
   }
 
   try {
-    if (req.method === "POST") {
-      return await handleCreate(req, res as NextApiResponse<CreateResponse | ErrorResponse>);
-    }
-    if (req.method === "PATCH") {
-      return await handleUpdate(req, res as NextApiResponse<UpdateResponse | ErrorResponse>);
-    }
-    if (req.method === "DELETE") {
-      return await handleDelete(req, res as NextApiResponse<DeleteResponse | ErrorResponse>);
-    }
+    if (req.method === "POST") return await handleCreate(req, res as NextApiResponse<CreateResponse | ErrorResponse>);
+    if (req.method === "PATCH") return await handleUpdate(req, res as NextApiResponse<UpdateResponse | ErrorResponse>);
+    if (req.method === "DELETE") return await handleDelete(req, res as NextApiResponse<DeleteResponse | ErrorResponse>);
     if (req.method !== "GET") {
       res.setHeader("Allow", "GET, POST, PATCH, DELETE");
       return res.status(405).json({ error: "Method not allowed" });
