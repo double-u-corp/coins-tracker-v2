@@ -18,6 +18,7 @@ export interface InsightResult {
   tradeBias: "LONG" | "SHORT" | "NEUTRAL";
   biasColor: string;
   dcaAction: string;
+  directiveDescription: string; // <-- Added meaning explanation
   targetLow: number | null;
   targetHigh: number | null;
 }
@@ -39,6 +40,7 @@ export default function TradingInsightCard({
         tradeBias: "NEUTRAL",
         biasColor: "bg-gray-100 text-gray-600 border-gray-200",
         dcaAction: "Awaiting Selection",
+        directiveDescription: "Select a coin from the dropdown above to begin tracking.",
         targetLow: null,
         targetHigh: null,
       };
@@ -48,7 +50,7 @@ export default function TradingInsightCard({
     const lastPoint = points[points.length - 1];
     const currentPrice = (lastPoint.high + lastPoint.low) / 2;
 
-    // 1. Calculate 20 SMA (Midpoint based)
+    // 1. Calculate 20 SMA
     let sma20 = null;
     if (points.length >= 20) {
       let sum = 0;
@@ -72,7 +74,7 @@ export default function TradingInsightCard({
     const range = localResistance - localSupport;
     const positionInRange = range > 0 ? (currentPrice - localSupport) / range : 0.5;
 
-    // 3. Determine Long vs Short Trade Bias
+    // 3. Trade Bias Logic
     let tradeBias: "LONG" | "SHORT" | "NEUTRAL" = "NEUTRAL";
     let biasColor = "bg-gray-100 text-gray-700 border-gray-300";
 
@@ -84,7 +86,7 @@ export default function TradingInsightCard({
       biasColor = "bg-rose-100 text-rose-800 border-rose-300";
     }
 
-    // 4. Generate Strategy Guidelines
+    // 4. Generate Strategy Guidelines with Built-In Explanations
     if (hasHoldings && avgEntry !== null) {
       const profitMargin = (currentPrice - avgEntry) / avgEntry;
 
@@ -97,6 +99,7 @@ export default function TradingInsightCard({
           tradeBias: "SHORT",
           biasColor: "bg-rose-100 text-rose-800 border-rose-300",
           dcaAction: "Pause DCA / Take Profits",
+          directiveDescription: "Stop regular buying. Sell a portion of your holdings to lock in cash gains.",
           targetLow,
           targetHigh,
         };
@@ -110,6 +113,7 @@ export default function TradingInsightCard({
           tradeBias: "SHORT",
           biasColor: "bg-rose-100 text-rose-800 border-rose-300",
           dcaAction: "Hold Cash (Do Not Buy)",
+          directiveDescription: "Stay on the sidelines. The price is overextended near the top of its range.",
           targetLow,
           targetHigh,
         };
@@ -123,6 +127,7 @@ export default function TradingInsightCard({
           tradeBias: "LONG",
           biasColor: "bg-emerald-100 text-emerald-800 border-emerald-300",
           dcaAction: "Deploy Full Tranche (Aggressive Buy)",
+          directiveDescription: "Use your full planned allocation. The heavy discount helps lower your average entry price.",
           targetLow,
           targetHigh,
         };
@@ -135,6 +140,9 @@ export default function TradingInsightCard({
         tradeBias,
         biasColor,
         dcaAction: isAboveSma ? "Standard Tranche DCA OK" : "Wait for Dip Before DCA",
+        directiveDescription: isAboveSma 
+          ? "Market is stable above the 20 SMA. Safe to execute your routine scheduled buy." 
+          : "Price is below the 20 SMA. Hold off buying until it drops closer to support.",
         targetLow,
         targetHigh,
       };
@@ -150,6 +158,7 @@ export default function TradingInsightCard({
         tradeBias: "LONG",
         biasColor: "bg-emerald-100 text-emerald-800 border-emerald-300",
         dcaAction: "Deploy Full Tranche (Prime Entry)",
+        directiveDescription: "Prime buying territory. Price is sitting directly on multi-week macro support.",
         targetLow,
         targetHigh,
       };
@@ -163,6 +172,7 @@ export default function TradingInsightCard({
         tradeBias: "SHORT",
         biasColor: "bg-rose-100 text-rose-800 border-rose-300",
         dcaAction: "Hold Cash (Skip DCA)",
+        directiveDescription: "Do not chase green candles. Price is hitting major resistance; save your PHP cash.",
         targetLow,
         targetHigh,
       };
@@ -188,6 +198,7 @@ export default function TradingInsightCard({
       tradeBias,
       biasColor,
       dcaAction: "Light DCA or Wait for Pullback",
+      directiveDescription: "Momentum is moderate. Buy in small conservative amounts or wait for a clearer dip.",
       targetLow,
       targetHigh,
     };
@@ -200,7 +211,6 @@ export default function TradingInsightCard({
           Spot Trading Insights {symbol && <span className="text-brand-600">({symbol}/PHP)</span>}
         </h3>
         <div className="flex items-center gap-2">
-          {/* Trade Bias Indicator Badge */}
           <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold ${insights.biasColor}`}>
             BIAS: {insights.tradeBias}
           </span>
@@ -211,21 +221,24 @@ export default function TradingInsightCard({
       </div>
 
       <div className="space-y-3">
-        {/* Main Strategy Guide */}
         <div className="rounded-md bg-gray-50 p-3">
           <h4 className="mb-1 text-sm font-medium text-gray-800">{insights.title}</h4>
           <p className="text-sm leading-relaxed text-gray-600">{insights.description}</p>
         </div>
 
-        {/* DCA Action Directive Banner */}
-        <div className="rounded-md border border-brand-200 bg-brand-50/50 p-2.5 flex items-center justify-between">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-brand-800">DCA Allocation Directive</div>
-          <div className="text-xs font-bold text-brand-900 bg-brand-100 px-2 py-0.5 rounded">
-            {insights.dcaAction}
+        {/* DCA Action Directive Banner with Explanatory Subtitle */}
+        <div className="rounded-md border border-brand-200 bg-brand-50/50 p-3">
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-brand-800">DCA Allocation Directive</div>
+            <div className="text-xs font-bold text-brand-900 bg-brand-100 px-2 py-0.5 rounded">
+              {insights.dcaAction}
+            </div>
           </div>
+          <p className="text-xs text-brand-900/80 font-medium leading-normal mt-1">
+            💡 <span className="underline decoration-brand-300 underline-offset-2">Meaning</span>: {insights.directiveDescription}
+          </p>
         </div>
 
-        {/* Target Alert Levels Block */}
         {insights.targetLow !== null && insights.targetHigh !== null && (
           <div className="grid grid-cols-2 gap-3 pt-1">
             <div className="rounded-md border border-emerald-200 bg-emerald-50/50 p-2.5">
