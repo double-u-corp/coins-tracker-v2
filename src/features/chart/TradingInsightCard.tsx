@@ -10,6 +10,18 @@ interface TradingInsightCardProps {
   resistance?: number | null;
 }
 
+export interface InsightResult {
+  title: string;
+  description: string;
+  statusText: string;
+  statusColor: string;
+  tradeBias: "LONG" | "SHORT" | "NEUTRAL";
+  biasColor: string;
+  dcaAction: string;
+  targetLow: number | null;
+  targetHigh: number | null;
+}
+
 export default function TradingInsightCard({
   points,
   symbol,
@@ -17,13 +29,15 @@ export default function TradingInsightCard({
   support,
   resistance,
 }: TradingInsightCardProps) {
-  const insights = useMemo(() => {
+  const insights = useMemo<InsightResult>(() => {
     if (!symbol || points.length === 0) {
       return {
         title: "Spot Strategy Guide",
         description: "Select a coin to view dynamic spot trading insights.",
         statusText: "Awaiting Data",
         statusColor: "text-gray-500 bg-gray-100",
+        tradeBias: "NEUTRAL",
+        biasColor: "bg-gray-100 text-gray-600 border-gray-200",
         dcaAction: "Awaiting Selection",
         targetLow: null,
         targetHigh: null,
@@ -34,7 +48,7 @@ export default function TradingInsightCard({
     const lastPoint = points[points.length - 1];
     const currentPrice = (lastPoint.high + lastPoint.low) / 2;
 
-    // 1. Calculate 20 SMA
+    // 1. Calculate 20 SMA (Midpoint based)
     let sma20 = null;
     if (points.length >= 20) {
       let sum = 0;
@@ -44,14 +58,13 @@ export default function TradingInsightCard({
       sma20 = sum / 20;
     }
 
-    // 2. Determine Levels
+    // 2. Technical Range & Levels
     const localSupport = support !== undefined && support !== null ? support : Math.min(...recentData.map((p) => p.low));
     const localResistance = resistance !== undefined && resistance !== null ? resistance : Math.max(...recentData.map((p) => p.high));
     
     const targetLow = localSupport;
     const targetHigh = localResistance;
 
-    // 3. User Holding Data
     const hasHoldings = activePortfolio && activePortfolio.holdings > 0;
     const avgEntry = hasHoldings ? activePortfolio.spent / activePortfolio.holdings : null;
 
@@ -59,7 +72,19 @@ export default function TradingInsightCard({
     const range = localResistance - localSupport;
     const positionInRange = range > 0 ? (currentPrice - localSupport) / range : 0.5;
 
-    // 4. Generate Unified Insight & Flexible DCA Action
+    // 3. Determine Long vs Short Trade Bias
+    let tradeBias: "LONG" | "SHORT" | "NEUTRAL" = "NEUTRAL";
+    let biasColor = "bg-gray-100 text-gray-700 border-gray-300";
+
+    if (positionInRange <= 0.25 || (isAboveSma && positionInRange <= 0.45)) {
+      tradeBias = "LONG";
+      biasColor = "bg-emerald-100 text-emerald-800 border-emerald-300";
+    } else if (positionInRange >= 0.75 || (!isAboveSma && positionInRange >= 0.55)) {
+      tradeBias = "SHORT";
+      biasColor = "bg-rose-100 text-rose-800 border-rose-300";
+    }
+
+    // 4. Generate Strategy Guidelines
     if (hasHoldings && avgEntry !== null) {
       const profitMargin = (currentPrice - avgEntry) / avgEntry;
 
@@ -69,6 +94,8 @@ export default function TradingInsightCard({
           description: "Significant gains realized. Consider a partial spot sell to secure profits while it's trending high.",
           statusText: "In Profit",
           statusColor: "text-emerald-700 bg-emerald-100",
+          tradeBias: "SHORT",
+          biasColor: "bg-rose-100 text-rose-800 border-rose-300",
           dcaAction: "Pause DCA / Take Profits",
           targetLow,
           targetHigh,
@@ -77,9 +104,11 @@ export default function TradingInsightCard({
       if (positionInRange >= 0.85) {
         return {
           title: "Approaching Resistance",
-          description: `Price is testing heavy resistance (${formatPhp(localResistance)}). High risk of rejection. Hold your cash reserves and wait for a pullback.`,
+          description: `Price is testing heavy resistance (${formatPhp(localResistance)}). High risk of rejection. Hold your cash reserves.`,
           statusText: "High Risk",
           statusColor: "text-amber-700 bg-amber-100",
+          tradeBias: "SHORT",
+          biasColor: "bg-rose-100 text-rose-800 border-rose-300",
           dcaAction: "Hold Cash (Do Not Buy)",
           targetLow,
           targetHigh,
@@ -88,9 +117,11 @@ export default function TradingInsightCard({
       if (profitMargin < -0.1 && positionInRange <= 0.15) {
         return {
           title: "Support Hit (Drawdown)",
-          description: `Price is discounted near support (${formatPhp(localSupport)}). Excellent zone to deploy a full tranche ladder buy to lower your average of ${formatPhp(avgEntry)}.`,
+          description: `Price is discounted near support (${formatPhp(localSupport)}). Prime zone to deploy a full tranche ladder buy to lower average of ${formatPhp(avgEntry)}.`,
           statusText: "Drawdown",
           statusColor: "text-blue-700 bg-blue-100",
+          tradeBias: "LONG",
+          biasColor: "bg-emerald-100 text-emerald-800 border-emerald-300",
           dcaAction: "Deploy Full Tranche (Aggressive Buy)",
           targetLow,
           targetHigh,
@@ -98,22 +129,26 @@ export default function TradingInsightCard({
       }
       return {
         title: "Holding Position",
-        description: `Position is active around ${formatPhp(currentPrice)}. Price is navigating relative to the 20 SMA.`,
+        description: `Position active around ${formatPhp(currentPrice)}. Navigating relative to 20 SMA.`,
         statusText: profitMargin >= 0 ? "In Profit" : "Drawdown",
         statusColor: profitMargin >= 0 ? "text-green-700 bg-green-100" : "text-gray-700 bg-gray-100",
+        tradeBias,
+        biasColor,
         dcaAction: isAboveSma ? "Standard Tranche DCA OK" : "Wait for Dip Before DCA",
         targetLow,
         targetHigh,
       };
     }
 
-    // --- NO HOLDINGS (Pure Technical Analysis) ---
+    // --- NO HOLDINGS SETUP ---
     if (positionInRange <= 0.15) {
       return {
         title: "Support Hit",
         description: `Price is resting at macro support (${formatPhp(localSupport)}). Ideal risk-to-reward setup for a new spot position.`,
-        statusText: "Wait for the Dip",
+        statusText: "Wait for Dip",
         statusColor: "text-blue-700 bg-blue-100",
+        tradeBias: "LONG",
+        biasColor: "bg-emerald-100 text-emerald-800 border-emerald-300",
         dcaAction: "Deploy Full Tranche (Prime Entry)",
         targetLow,
         targetHigh,
@@ -122,9 +157,11 @@ export default function TradingInsightCard({
     if (positionInRange >= 0.85) {
       return {
         title: "Resistance Tested",
-        description: `Price is heavily extended and testing resistance (${formatPhp(localResistance)}). Avoid buying the top.`,
+        description: `Price is heavily extended near resistance (${formatPhp(localResistance)}). Avoid buying the top.`,
         statusText: "High Risk",
         statusColor: "text-red-700 bg-red-100",
+        tradeBias: "SHORT",
+        biasColor: "bg-rose-100 text-rose-800 border-rose-300",
         dcaAction: "Hold Cash (Skip DCA)",
         targetLow,
         targetHigh,
@@ -133,9 +170,11 @@ export default function TradingInsightCard({
     if (!isAboveSma && positionInRange < 0.5) {
       return {
         title: "Lower Range Swing",
-        description: `Trending in the lower half of its swing below the 20 SMA. Scale in lightly or wait for a flush to support.`,
+        description: `Trending below 20 SMA in lower half of swing. Scale in lightly or wait for flush to support.`,
         statusText: "Consolidating",
         statusColor: "text-indigo-700 bg-indigo-100",
+        tradeBias: "LONG",
+        biasColor: "bg-emerald-100 text-emerald-800 border-emerald-300",
         dcaAction: "Split Allocation into Ladder Tranches",
         targetLow,
         targetHigh,
@@ -143,9 +182,11 @@ export default function TradingInsightCard({
     }
     return {
       title: "Upper Range Swing",
-      description: `Price is pushing toward the upper half of its range. Risk-to-reward for new spot buys is moderate.`,
+      description: `Price pushing toward upper half of range. Risk-to-reward for new spot buys is moderate.`,
       statusText: "Consolidating",
       statusColor: "text-amber-700 bg-amber-100",
+      tradeBias,
+      biasColor,
       dcaAction: "Light DCA or Wait for Pullback",
       targetLow,
       targetHigh,
@@ -158,9 +199,15 @@ export default function TradingInsightCard({
         <h3 className="text-sm font-semibold text-gray-900">
           Spot Trading Insights {symbol && <span className="text-brand-600">({symbol}/PHP)</span>}
         </h3>
-        <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-bold uppercase ${insights.statusColor}`}>
-          {insights.statusText}
-        </span>
+        <div className="flex items-center gap-2">
+          {/* Trade Bias Indicator Badge */}
+          <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold ${insights.biasColor}`}>
+            BIAS: {insights.tradeBias}
+          </span>
+          <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-bold uppercase ${insights.statusColor}`}>
+            {insights.statusText}
+          </span>
+        </div>
       </div>
 
       <div className="space-y-3">
