@@ -5,21 +5,20 @@ import Dropdown from "@/components/Dropdown";
 import AlertBanner from "@/components/AlertBanner";
 import JournalSidebar from "./JournalSidebar";
 import TradingInsightCard from "./TradingInsightCard";
-import { useChartLogic } from "./useChartLogic";
+import { useChartLogic, type ChartRange } from "./useChartLogic";
 import { formatPhp } from "@/lib/format";
-import type { ChartGranularity } from "@/lib/chartBucket";
 
 const PriceLineChart = dynamic(() => import("./PriceLineChart"), {
   ssr: false,
   loading: () => <div className="flex h-96 items-center justify-center text-sm text-gray-500">Loading chart…</div>,
 });
 
-const YEAR_OPTIONS = [1, 2, 3, 4, 5].map((y) => ({ label: `${y} year${y > 1 ? "s" : ""}`, value: String(y) }));
-const GRANULARITY_OPTIONS: { label: string; value: ChartGranularity }[] = [
-  { label: "Daily", value: "daily" },
-  { label: "Weekly", value: "weekly" },
-  { label: "Monthly", value: "monthly" },
-  { label: "Yearly", value: "yearly" },
+const RANGE_OPTIONS: { label: string; value: ChartRange }[] = [
+  { label: "1M", value: "1m" },
+  { label: "3M", value: "3m" },
+  { label: "6M", value: "6m" },
+  { label: "1Y", value: "1y" },
+  { label: "3Y", value: "3y" },
 ];
 
 export default function ChartView() {
@@ -28,10 +27,8 @@ export default function ChartView() {
     allCoins,
     symbol,
     setSymbol,
-    years,
-    setYears,
-    granularity,
-    setGranularity,
+    range,
+    setRange,
     points,
     chartLoading,
     chartError,
@@ -48,7 +45,6 @@ export default function ChartView() {
 
   const [showHigh, setShowHigh] = useState(true);
   const [showLow, setShowLow] = useState(true);
-  const [showSma, setShowSma] = useState(false);
   const [showKeyLevels, setShowKeyLevels] = useState(true);
 
   const activePortfolio = useMemo(() => {
@@ -65,34 +61,31 @@ export default function ChartView() {
 
   const technicals = useMemo(() => {
     if (points.length === 0) return { support: null, resistance: null };
-    
+
     const recentData = points.slice(-Math.min(30, points.length));
     const support = Math.min(...recentData.map((p) => p.low));
     const resistance = Math.max(...recentData.map((p) => p.high));
-    
+
     return { support, resistance };
   }, [points]);
 
-// NEW: Nearing Targets Scanner Logic calculating 5% threshold
   const nearingTargets = useMemo(() => {
     if (!allCoins || allCoins.length === 0) return [];
-    
+
     const targets = [];
-    
+
     for (const coin of allCoins) {
-      // 1. Tell TypeScript to skip if price is null (narrowing the type to number)
       if (coin.currentPrice === null) continue;
-      
-      // 2. Safe to use math because we ensure targets are not null
+
       const isNearHigh = coin.targetHigh !== null && coin.currentPrice >= coin.targetHigh * 0.95;
       const isNearLow = coin.targetLow !== null && coin.currentPrice <= coin.targetLow * 1.05;
-      
+
       if (isNearHigh || isNearLow) {
         let status = "";
         let distance = 0;
         let targetType: "high" | "low" | null = null;
         let targetPrice = 0;
-        
+
         if (isNearHigh && coin.targetHigh !== null) {
           targetType = "high";
           targetPrice = coin.targetHigh;
@@ -104,57 +97,96 @@ export default function ChartView() {
           distance = ((coin.currentPrice - coin.targetLow) / coin.targetLow) * 100;
           status = distance <= 0 ? "Target Reached!" : `Within ${distance.toFixed(1)}% of Low`;
         }
-        
+
         targets.push({
           ...coin,
           targetType,
           targetPrice,
           status,
           distance: distance <= 0 ? 0 : distance,
-          // Guarantee it is typed as a number for the JSX below
-          currentPrice: coin.currentPrice 
+          currentPrice: coin.currentPrice,
         });
       }
     }
-    
-    return targets.sort((a, b) => a.distance - b.distance); 
+
+    return targets.sort((a, b) => a.distance - b.distance);
   }, [allCoins]);
 
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <Link href="/" className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors">
+        <Link
+          href="/"
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors"
+        >
           <span>←</span>
           <span>Back to Home</span>
         </Link>
       </div>
 
       <div className="flex flex-wrap items-end gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-        <Dropdown label="Coin" placeholder="Select a coin to analyse" value={symbol} onChange={setSymbol} options={coinOptions.map((c) => ({ label: `${c.name} (${c.symbol})`, value: c.symbol }))} />
+        <Dropdown
+          label="Coin"
+          placeholder="Select a coin to analyse"
+          value={symbol}
+          onChange={setSymbol}
+          options={coinOptions.map((c) => ({ label: `${c.name} (${c.symbol})`, value: c.symbol }))}
+        />
 
-        <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
-          <span>Range</span>
-          <select value={years} onChange={(e) => setYears(Number(e.target.value))} disabled={!symbol} className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">
-            {YEAR_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-          </select>
-        </label>
-
+        {/* Updated Range Selector (1M, 3M, 6M, 1Y, 3Y) */}
         <div className="flex flex-col gap-1 text-sm font-medium text-gray-700">
-          <span>View</span>
-          <div className={`inline-flex rounded-md border border-gray-200 p-1 ${!symbol ? 'opacity-50 pointer-events-none' : ''}`}>
-            {GRANULARITY_OPTIONS.map((opt) => (
-              <button key={opt.value} type="button" onClick={() => setGranularity(opt.value)} className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${granularity === opt.value ? "bg-brand-600 text-white" : "text-gray-600 hover:bg-gray-100"}`}>{opt.label}</button>
+          <span>Range</span>
+          <div className={`inline-flex rounded-md border border-gray-200 p-1 bg-white ${!symbol ? "opacity-50 pointer-events-none" : ""}`}>
+            {RANGE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setRange(opt.value)}
+                className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                  range === opt.value ? "bg-brand-600 text-white" : "text-gray-600 hover:bg-gray-100"
+                }`}
+              >
+                {opt.label}
+              </button>
             ))}
           </div>
         </div>
 
+        {/* Analysis Overlays */}
         <div className="flex flex-col gap-1 text-sm font-medium text-gray-700">
           <span>Analysis Overlays</span>
-          <div className={`flex flex-wrap items-center gap-1.5 rounded-md border border-gray-200 p-1 bg-white ${!symbol ? 'opacity-50 pointer-events-none' : ''}`}>
-            <button type="button" onClick={() => setShowHigh(!showHigh)} className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${showHigh ? "bg-green-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>High</button>
-            <button type="button" onClick={() => setShowLow(!showLow)} className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${showLow ? "bg-red-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>Low</button>
-            <button type="button" onClick={() => setShowKeyLevels(!showKeyLevels)} className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${showKeyLevels ? "bg-purple-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>Key Levels</button>
-            <button type="button" onClick={() => setShowSma(!showSma)} className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${showSma ? "bg-amber-500 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>20 SMA</button>
+          <div
+            className={`flex flex-wrap items-center gap-1.5 rounded-md border border-gray-200 p-1 bg-white ${
+              !symbol ? "opacity-50 pointer-events-none" : ""
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => setShowHigh(!showHigh)}
+              className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                showHigh ? "bg-green-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              High
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowLow(!showLow)}
+              className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                showLow ? "bg-red-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              Low
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowKeyLevels(!showKeyLevels)}
+              className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                showKeyLevels ? "bg-purple-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              Key Levels
+            </button>
           </div>
         </div>
       </div>
@@ -164,10 +196,11 @@ export default function ChartView() {
           <div className="flex min-h-[250px] flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-8 text-center">
             <div className="text-4xl mb-4">📈</div>
             <h2 className="text-lg font-bold text-gray-900 mb-2">No Coin Selected</h2>
-            <p className="text-sm text-gray-500 max-w-sm">Use the dropdown above to select a cryptocurrency to view its chart history, technical insights, and your trade logs.</p>
+            <p className="text-sm text-gray-500 max-w-sm">
+              Use the dropdown above to select a cryptocurrency to view its chart history, technical insights, and your trade logs.
+            </p>
           </div>
 
-          {/* NEW: Scanner Dashboard showing Coins Near Targets */}
           {allCoins && allCoins.length > 0 && (
             <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
               <div className="mb-4 flex items-center justify-between">
@@ -176,7 +209,7 @@ export default function ChartView() {
                   <p className="text-xs text-gray-500 mt-0.5">Coins within 5% of their configured limit targets.</p>
                 </div>
               </div>
-              
+
               {nearingTargets.length === 0 ? (
                 <div className="rounded border border-gray-100 bg-gray-50 p-6 text-center text-sm text-gray-500">
                   No coins are currently within 5% of their set target highs or lows.
@@ -187,9 +220,7 @@ export default function ChartView() {
                     <div
                       key={coin.symbol}
                       className={`rounded-lg border p-4 transition-all hover:shadow-md cursor-pointer ${
-                        coin.targetType === "high"
-                          ? "border-green-200 bg-green-50/30"
-                          : "border-red-200 bg-red-50/30"
+                        coin.targetType === "high" ? "border-green-200 bg-green-50/30" : "border-red-200 bg-red-50/30"
                       }`}
                       onClick={() => setSymbol(coin.symbol)}
                     >
@@ -207,17 +238,25 @@ export default function ChartView() {
                           {coin.status}
                         </span>
                       </div>
-                      
+
                       <div className="flex items-end justify-between">
                         <div>
                           <div className="text-[11px] font-semibold uppercase text-gray-500">Current Price</div>
                           <div className="text-sm font-medium text-gray-900">{formatPhp(coin.currentPrice)}</div>
                         </div>
                         <div className="text-right">
-                          <div className={`text-[11px] font-semibold uppercase ${coin.targetType === "high" ? "text-green-700" : "text-red-700"}`}>
+                          <div
+                            className={`text-[11px] font-semibold uppercase ${
+                              coin.targetType === "high" ? "text-green-700" : "text-red-700"
+                            }`}
+                          >
                             Target {coin.targetType}
                           </div>
-                          <div className={`text-sm font-medium ${coin.targetType === "high" ? "text-green-700" : "text-red-700"}`}>
+                          <div
+                            className={`text-sm font-medium ${
+                              coin.targetType === "high" ? "text-green-700" : "text-red-700"
+                            }`}
+                          >
                             {formatPhp(coin.targetPrice)}
                           </div>
                         </div>
@@ -244,7 +283,6 @@ export default function ChartView() {
                     journalLabels={journalLabelsInView}
                     showHigh={showHigh}
                     showLow={showLow}
-                    showSma={showSma}
                     showKeyLevels={showKeyLevels}
                     showBreakEven={!!activePortfolio && activePortfolio.holdings > 0}
                     breakEvenPrice={
@@ -258,16 +296,18 @@ export default function ChartView() {
                 )}
               </div>
 
-              <TradingInsightCard 
-                points={points} 
-                symbol={symbol} 
+              <TradingInsightCard
+                points={points}
+                symbol={symbol}
                 activePortfolio={activePortfolio}
                 support={technicals.support}
                 resistance={technicals.resistance}
               />
 
               <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-                <h3 className="mb-3 text-sm font-semibold text-gray-900">Transaction History <span className="text-brand-600">({symbol})</span></h3>
+                <h3 className="mb-3 text-sm font-semibold text-gray-900">
+                  Transaction History <span className="text-brand-600">({symbol})</span>
+                </h3>
                 {coinTransactions.length === 0 ? (
                   <p className="text-xs text-gray-500">No transactions recorded yet.</p>
                 ) : (
@@ -287,7 +327,13 @@ export default function ChartView() {
                           <tr key={tx.id} className="hover:bg-gray-50">
                             <td className="px-3 py-2 text-gray-500">{new Date(tx.transactedAt).toLocaleDateString()}</td>
                             <td className="px-3 py-2">
-                              <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${tx.type === "buy" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>{tx.type}</span>
+                              <span
+                                className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                                  tx.type === "buy" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                                }`}
+                              >
+                                {tx.type}
+                              </span>
                             </td>
                             <td className="px-3 py-2 font-medium text-gray-800">{tx.coinAmount}</td>
                             <td className="px-3 py-2 text-gray-600">{formatPhp(tx.price)}</td>
@@ -301,7 +347,15 @@ export default function ChartView() {
               </div>
             </div>
 
-            <JournalSidebar entries={entries} loading={journalLoading} error={journalError} defaultSymbol={symbol} authenticated={authenticated} onAdd={addJournalEntry} onDelete={deleteJournalEntry} />
+            <JournalSidebar
+              entries={entries}
+              loading={journalLoading}
+              error={journalError}
+              defaultSymbol={symbol}
+              authenticated={authenticated}
+              onAdd={addJournalEntry}
+              onDelete={deleteJournalEntry}
+            />
           </div>
         </>
       )}

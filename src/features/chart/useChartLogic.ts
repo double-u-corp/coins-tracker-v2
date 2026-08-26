@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import { useAuth } from "@/features/auth/useAuth";
-import { chartBucketKey, type ChartGranularity } from "@/lib/chartBucket";
+import { chartBucketKey } from "@/lib/chartBucket";
 import type { CoinSummary, ChartPoint } from "@/validators/recordSchema";
 import type { JournalEntryView } from "@/validators/journalSchema";
 
@@ -28,6 +28,16 @@ export interface PortfolioItem {
   gainLoss: number;
 }
 
+export type ChartRange = "1m" | "3m" | "6m" | "1y" | "3y";
+
+const RANGE_MONTHS_MAP: Record<ChartRange, number> = {
+  "1m": 1,
+  "3m": 3,
+  "6m": 6,
+  "1y": 12,
+  "3y": 36,
+};
+
 export function useChartLogic() {
   const router = useRouter();
   const { authenticated } = useAuth();
@@ -36,8 +46,7 @@ export function useChartLogic() {
   const [allCoins, setAllCoins] = useState<CoinSummary[]>([]);
   const [symbol, setSymbol] = useState("");
   const [hasAppliedInitialSymbol, setHasAppliedInitialSymbol] = useState(false);
-  const [years, setYears] = useState(1);
-  const [granularity, setGranularity] = useState<ChartGranularity>("daily");
+  const [range, setRange] = useState<ChartRange>("1y");
 
   const [points, setPoints] = useState<ChartPoint[]>([]);
   const [chartLoading, setChartLoading] = useState(false);
@@ -62,7 +71,9 @@ export function useChartLogic() {
         }
       })
       .catch(() => {});
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -72,22 +83,27 @@ export function useChartLogic() {
 
     const queriedSymbol = typeof router.query.symbol === "string" ? router.query.symbol.toUpperCase() : "";
     const matched = coinOptions.find((c) => c.symbol === queriedSymbol);
-    
-    setSymbol(matched?.symbol ?? ""); 
+
+    setSymbol(matched?.symbol ?? "");
     setHasAppliedInitialSymbol(true);
   }, [router.isReady, router.query.symbol, coinOptions, hasAppliedInitialSymbol]);
 
   const rangeStart = useMemo(() => {
     const d = new Date();
-    d.setFullYear(d.getFullYear() - years);
+    const months = RANGE_MONTHS_MAP[range] ?? 12;
+    d.setMonth(d.getMonth() - months);
     return d;
-  }, [years]);
+  }, [range]);
 
   const loadChart = useCallback(() => {
     if (!symbol) return;
     setChartLoading(true);
     setChartError(null);
-    fetch(`/api/coins?type=chart&symbol=${symbol}&years=${years}&granularity=${granularity}`)
+
+    const months = RANGE_MONTHS_MAP[range] ?? 12;
+    const yearsParam = (months / 12).toFixed(2);
+
+    fetch(`/api/coins?type=chart&symbol=${symbol}&years=${yearsParam}&granularity=daily`)
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to load chart data (${res.status})`);
         return res.json();
@@ -95,7 +111,7 @@ export function useChartLogic() {
       .then((data: { points: ChartPoint[] }) => setPoints(data.points))
       .catch((err) => setChartError((err as Error).message))
       .finally(() => setChartLoading(false));
-  }, [symbol, years, granularity]);
+  }, [symbol, range]);
 
   const loadJournal = useCallback(() => {
     if (!symbol) return;
@@ -127,18 +143,26 @@ export function useChartLogic() {
       .finally(() => setTxLoading(false));
   }, []);
 
-  useEffect(() => { loadChart(); }, [loadChart]);
-  useEffect(() => { loadJournal(); }, [loadJournal]);
-  useEffect(() => { loadTransactions(); }, [loadTransactions]);
+  useEffect(() => {
+    loadChart();
+  }, [loadChart]);
+
+  useEffect(() => {
+    loadJournal();
+  }, [loadJournal]);
+
+  useEffect(() => {
+    loadTransactions();
+  }, [loadTransactions]);
 
   const journalLabelsInView = useMemo(() => {
     const labels = new Set<string>();
     for (const entry of entries) {
-      const { label } = chartBucketKey(new Date(entry.entryDate), granularity);
+      const { label } = chartBucketKey(new Date(entry.entryDate), "daily");
       if (points.some((p) => p.label === label)) labels.add(label);
     }
     return labels;
-  }, [entries, granularity, points]);
+  }, [entries, points]);
 
   async function addJournalEntry(input: { symbol: string | null; entryDate: string; title: string; notes: string }) {
     const res = await fetch("/api/journal", {
@@ -161,9 +185,24 @@ export function useChartLogic() {
   }
 
   return {
-    coinOptions, allCoins, symbol, setSymbol, years, setYears, granularity, setGranularity,
-    points, chartLoading, chartError, entries, journalLoading, journalError,
-    journalLabelsInView, addJournalEntry, deleteJournalEntry, authenticated,
-    transactions, portfolio, txLoading
+    coinOptions,
+    allCoins,
+    symbol,
+    setSymbol,
+    range,
+    setRange,
+    points,
+    chartLoading,
+    chartError,
+    entries,
+    journalLoading,
+    journalError,
+    journalLabelsInView,
+    addJournalEntry,
+    deleteJournalEntry,
+    authenticated,
+    transactions,
+    portfolio,
+    txLoading,
   };
 }
