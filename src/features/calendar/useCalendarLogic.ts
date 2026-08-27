@@ -2,35 +2,33 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import type { CoinSummary, DailyRecord } from "@/validators/recordSchema";
 
-interface CoinOption {
+export interface CoinOption {
   symbol: string;
   name: string;
 }
 
-// Map of symbol -> array of daily records for multi-coin view
 export type MultiCoinRecords = Record<string, DailyRecord[]>;
 
 export function useCalendarLogic() {
   const router = useRouter();
 
   const [coinOptions, setCoinOptions] = useState<CoinOption[]>([]);
-  const [selectedSymbol, setSelectedSymbol] = useState<string>(""); // "" means All Coins
+  const [selectedSymbol, setSelectedSymbol] = useState<string>("");
   const [hasAppliedInitialSymbol, setHasAppliedInitialSymbol] = useState(false);
   const [monthCursor, setMonthCursor] = useState<Date>(() => new Date());
   
-  const [days, setDays] = useState<DailyRecord[]>([]); // For single coin view
-  const [allCoinsData, setAllCoinsData] = useState<MultiCoinRecords>({}); // For all coins view
+  const [days, setDays] = useState<DailyRecord[]>([]);
+  const [allCoinsData, setAllCoinsData] = useState<MultiCoinRecords>({});
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load the list of coins once, to populate the dropdown.
   useEffect(() => {
     let cancelled = false;
     fetch("/api/coins")
       .then((res) => res.json())
       .then((data: { coins: CoinSummary[] }) => {
-        if (!cancelled) {
+        if (!cancelled && Array.isArray(data.coins)) {
           setCoinOptions(data.coins.map((c) => ({ symbol: c.symbol, name: c.name })));
         }
       })
@@ -40,7 +38,6 @@ export function useCalendarLogic() {
     };
   }, []);
 
-  // Initial symbol handling from router query
   useEffect(() => {
     if (hasAppliedInitialSymbol) return;
     if (!router.isReady) return;
@@ -53,7 +50,6 @@ export function useCalendarLogic() {
         setSelectedSymbol(matched.symbol);
       }
     }
-    // If no query param, we leave selectedSymbol as "" (All Coins view by default or user choice)
     setHasAppliedInitialSymbol(true);
   }, [router.isReady, router.query.symbol, coinOptions, hasAppliedInitialSymbol]);
 
@@ -63,14 +59,12 @@ export function useCalendarLogic() {
     return `${y}-${m}`;
   }, [monthCursor]);
 
-  // Load daily high/low for single coin OR all coins whenever symbol/month changes
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
 
     if (selectedSymbol) {
-      // Single Coin Fetch
       fetch(`/api/coins?type=calendar&symbol=${selectedSymbol}&month=${monthParam}`)
         .then((res) => {
           if (!res.ok) throw new Error(`Failed to load calendar data (${res.status})`);
@@ -89,7 +83,6 @@ export function useCalendarLogic() {
           if (!cancelled) setLoading(false);
         });
     } else if (coinOptions.length > 0) {
-      // All Coins Fetch (Concurrent)
       Promise.all(
         coinOptions.map((coin) =>
           fetch(`/api/coins?type=calendar&symbol=${coin.symbol}&month=${monthParam}`)
