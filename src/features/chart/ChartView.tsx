@@ -5,6 +5,8 @@ import Dropdown from "@/components/Dropdown";
 import AlertBanner from "@/components/AlertBanner";
 import JournalSidebar from "./JournalSidebar";
 import TradingInsightCard from "./TradingInsightCard";
+import DCACalculator from "./DCACalculator";
+import StrategyPlaybook from "./StrategyPlaybook"
 import { useChartLogic, type ChartRange } from "./useChartLogic";
 import { formatPhp } from "@/lib/format";
 
@@ -51,6 +53,12 @@ export default function ChartView() {
     if (!symbol || !portfolio) return null;
     return portfolio.find((p) => p.symbol === symbol) || null;
   }, [symbol, portfolio]);
+
+  const currentPrice = useMemo(() => {
+    if (points.length === 0) return 0;
+    const lastPoint = points[points.length - 1];
+    return (lastPoint.high + lastPoint.low) / 2;
+  }, [points]);
 
   const coinTransactions = useMemo(() => {
     if (!symbol || !transactions) return [];
@@ -133,7 +141,7 @@ export default function ChartView() {
           options={coinOptions.map((c) => ({ label: `${c.name} (${c.symbol})`, value: c.symbol }))}
         />
 
-        {/* Updated Range Selector (1M, 3M, 6M, 1Y, 3Y) */}
+        {/* Range Selector (1M, 3M, 6M, 1Y, 3Y) */}
         <div className="flex flex-col gap-1 text-sm font-medium text-gray-700">
           <span>Range</span>
           <div className={`inline-flex rounded-md border border-gray-200 p-1 bg-white ${!symbol ? "opacity-50 pointer-events-none" : ""}`}>
@@ -296,6 +304,7 @@ export default function ChartView() {
                 )}
               </div>
 
+              {/* Spot Trading Insights */}
               <TradingInsightCard
                 points={points}
                 symbol={symbol}
@@ -304,6 +313,20 @@ export default function ChartView() {
                 resistance={technicals.resistance}
               />
 
+              {/* NEW: DCA Strategy Playbook */}
+              <StrategyPlaybook 
+                symbol={symbol} 
+                support={technicals.support} 
+              />
+
+              {/* DCA Recovery Calculator */}
+              <DCACalculator
+                symbol={symbol}
+                currentPrice={currentPrice}
+                portfolio={activePortfolio}
+              />
+
+              {/* Transaction History */}
               <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
                 <h3 className="mb-3 text-sm font-semibold text-gray-900">
                   Transaction History <span className="text-brand-600">({symbol})</span>
