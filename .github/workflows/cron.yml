@@ -10,6 +10,7 @@ name: Trigger price cron
 # - 15:00 UTC -> 11:00 PM PHT (US Peak Volatility)
 # - 18:00 UTC -> 02:00 AM PHT
 # - 21:00 UTC -> 05:00 AM PHT
+
 on:
   schedule:
     - cron: "0 0,3,6,9,12,15,18,21 * * *"
