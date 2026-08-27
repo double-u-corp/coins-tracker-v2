@@ -18,7 +18,6 @@ function formatDateTime(iso: string): string {
 
 export default function NewsSection({ refreshSignal }: NewsSectionProps) {
   const { items, loading, loadingMore, error, hasMore, loadMore } = useNewsLogic(refreshSignal);
- console.log( items )
   return (
     <section className="mt-8">
       <div className="mb-2 flex items-baseline justify-between">

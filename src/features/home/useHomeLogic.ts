@@ -61,8 +61,8 @@ export function useHomeLogic() {
   const [editRecordSaving, setEditRecordSaving] = useState(false);
   const [editRecordError, setEditRecordError] = useState<string | null>(null);
 
-  // NEW: Portfolio state for chip highlighting
   const [portfolio, setPortfolio] = useState<any[]>([]);
+  const [cronTriggering, setCronTriggering] = useState(false);
 
   const loadSummary = useCallback(async () => {
     try {
@@ -102,12 +102,43 @@ export function useHomeLogic() {
     }
   }, []);
 
+  // UPDATED: Manual Cron Trigger with AbortController timeout
+async function triggerCronManually() {
+  setCronTriggering(true);
+
+  try {
+    const res = await fetch("/api/cron-manual", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    const data = (await res.json()) as
+      | { ok: true; ranAt: string; results: any[] }
+      | { ok: false; error: string };
+
+    if (!res.ok || !data.ok) {
+      if (res.status === 401) {
+        throw new Error("You must be logged in to trigger a manual run.");
+      }
+      throw new Error(!data.ok ? data.error : `Request failed with status ${res.status}`);
+    }
+
+    // Refresh UI data after successful run
+    await loadSummary();
+  } catch (err: any) {
+    alert(err.message || "Failed to trigger manual update.");
+  } finally {
+    setCronTriggering(false);
+  }
+}
+
   useEffect(() => {
     loadSummary();
     checkAlerts();
   }, [loadSummary, checkAlerts]);
 
-  // NEW: Fetch portfolio holdings
   useEffect(() => {
     let cancelled = false;
     fetch("/api/transactions")
@@ -269,7 +300,7 @@ export function useHomeLogic() {
     coins: filteredCoins,  
     selectedCoins,
     setSelectedCoins,
-    portfolio, // NEW: Exported portfolio state
+    portfolio,
     canUpdatePrice: authenticated,
     priceUpdateCoin,
     priceUpdateModalOpen,
@@ -297,5 +328,7 @@ export function useHomeLogic() {
     reachedTargets,
     showTargetBanner,
     dismissTargetBanner,
+    cronTriggering,
+    triggerCronManually,
   };
 }

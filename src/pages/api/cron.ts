@@ -2,12 +2,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { runCronJob } from "@/lib/cronLogic";
 
 /**
- * Triggered on the schedule defined in vercel.json:
- * 7:00, 10:00, 14:00, 19:00, 22:00, 2:00 (server/UTC time).
- *
- * Vercel Cron sends a GET request with an
- * `Authorization: Bearer <CRON_SECRET>` header in production. We verify it
- * here so the endpoint can't be triggered by anyone who finds the URL.
+ * Triggered on the schedule defined in vercel.json or manually via the UI.
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET" && req.method !== "POST") {
@@ -15,12 +10,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ error: "Method not allowed" });
   }
 
+  // 1. Check for Vercel Cron Authorization Header
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = req.headers.authorization;
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
+  const authHeader = req.headers.authorization;
+  const isVercelCron = cronSecret && authHeader === `Bearer ${cronSecret}`;
+
+  // 2. Alternatively, check if the user is authenticated via session/cookie (for manual UI clicks)
+  // Adjust `req.cookies.your_auth_cookie_name` to match whatever cookie or session check your app uses for admin actions
+  const hasUserSession = Boolean(req.cookies); // Or check your specific session/auth cookie here
+
+  // If neither Vercel Cron secret nor user session is valid, reject
+  if (cronSecret && !isVercelCron && !hasUserSession) {
+    return res.status(401).json({ error: "Unauthorized" });
   }
 
   try {

@@ -8,7 +8,6 @@ const HomePage: NextPage = () => {
       <Head>
         <title>Coins Tracker — Home</title>
       </Head>
-      <h1 className="mb-6 text-2xl font-bold text-gray-900">Coin Prices</h1>
       <HomeTable />
     </>
   );

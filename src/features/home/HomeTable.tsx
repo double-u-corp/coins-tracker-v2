@@ -134,6 +134,8 @@ export default function HomeTable() {
     reachedTargets,
     showTargetBanner,
     dismissTargetBanner,
+    cronTriggering,
+    triggerCronManually,
   } = useHomeLogic();
 
   return (
@@ -161,6 +163,22 @@ export default function HomeTable() {
         onSaveEdit={saveEditRecord}
       />
 
+      {/* Header section with Title and Violet Run Cron Button right beside each other */}
+      <div className="mb-6 flex items-center gap-3 flex-wrap">
+        <h1 className="text-2xl font-bold text-gray-900">Coin Prices</h1>
+        {canUpdatePrice && (
+          <button
+            type="button"
+            onClick={triggerCronManually}
+            disabled={cronTriggering}
+            className="inline-flex items-center justify-center gap-1 rounded bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-50 transition-colors shadow-sm"
+            title="Manually trigger cron job execution"
+          >
+            <span>{cronTriggering ? "⏳ Running..." : "⚡ Run Cron"}</span>
+          </button>
+        )}
+      </div>
+
       <AlertBanner
         variant={error ? "error" : bannerVariant(lastCronStatus)}
         message={error ? `Failed to load data: ${error}` : `Last cron run: ${formatDateTime(lastCronRun)}`}
@@ -173,10 +191,11 @@ export default function HomeTable() {
       {/* Automatically visible mobile chip filter */}
       {!loading && allCoins.length > 0 && (
         <div className="mb-6">
-          <div className="mb-2 flex items-center justify-between">
+          <div className="mb-2 flex items-center justify-between flex-wrap gap-2">
             <span className="text-sm font-medium text-gray-700">
               Filter Coins {selectedCoins.length > 0 ? `(${selectedCoins.length} selected)` : ""}
             </span>
+
             {selectedCoins.length > 0 && (
               <button
                 onClick={() => setSelectedCoins([])}
