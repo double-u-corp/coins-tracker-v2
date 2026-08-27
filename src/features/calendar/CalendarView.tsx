@@ -19,7 +19,7 @@ export default function CalendarView() {
     error,
   } = useCalendarLogic();
 
-  // New state for sorting market overview cards
+  // Sorting state for market overview cards
   const [marketSortBy, setMarketSortBy] = useState<string>("volatility-desc");
 
   const monthLabel = monthCursor.toLocaleDateString(undefined, {
@@ -60,7 +60,6 @@ export default function CalendarView() {
     return { coin, coinDays, coinHigh, coinLow, highRec, lowRec, spread };
   });
 
-  // Sort based on marketSortBy selection
   const sortedCoinCards = [...coinCardsData].sort((a, b) => {
     if (marketSortBy === "volatility-desc") return b.spread - a.spread;
     if (marketSortBy === "volatility-asc") return a.spread - b.spread;
@@ -70,7 +69,8 @@ export default function CalendarView() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
+      {/* Navigation Header / Back Button */}
+      <div className="flex items-center justify-between">
         <Link 
           href="/" 
           className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors"
@@ -78,29 +78,32 @@ export default function CalendarView() {
           <span>←</span>
           <span>Back to Home</span>
         </Link>
+
+        {selectedSymbol && (
+          <button
+            type="button"
+            onClick={() => setSelectedSymbol("")}
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-md hover:bg-purple-100 transition-colors"
+          >
+            <span>🌐</span>
+            <span>Back to Market Overview</span>
+          </button>
+        )}
       </div>
 
-      {/* Top Controls */}
+      {/* Top Controls Bar */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col sm:flex-row gap-4 flex-1">
-          <Dropdown
-            label="Favorite coin"
-            placeholder="All Coins (Market Overview)"
-            value={selectedSymbol}
-            onChange={setSelectedSymbol}
-            options={[
-              { label: "🌐 All Coins (Market Overview)", value: "" },
-              ...coinOptions.map((c) => ({
-                label: `${c.name} (${c.symbol})`,
-                value: c.symbol,
-              })),
-            ]}
-          />
-
-          {/* Secondary Sort Dropdown (Visible only in Market Overview Mode) --> */}
-          {!selectedSymbol && (
+        <div>
+          {selectedSymbol ? (
+            <div className="flex flex-col">
+              <span className="text-xs font-bold uppercase tracking-wider text-gray-400">Viewing Coin</span>
+              <span className="text-lg font-bold text-gray-900">
+                {coinOptions.find((c) => c.symbol === selectedSymbol)?.name || selectedSymbol} ({selectedSymbol})
+              </span>
+            </div>
+          ) : (
             <Dropdown
-              label="Sort market by"
+              label="Sort market overview by"
               placeholder="Sort order"
               value={marketSortBy}
               onChange={setMarketSortBy}
@@ -199,38 +202,40 @@ export default function CalendarView() {
               </span>
             </div>
           </div>
-
-          <div className="rounded-lg border border-blue-100 bg-blue-50/50 p-4 text-xs text-blue-900">
-            <h4 className="font-bold mb-1 flex items-center gap-1.5">
-              <span>💡</span> How to use this Monthly Swing ({volatilitySpread.toFixed(1)}%):
-            </h4>
-            <ul className="list-disc list-inside space-y-1 text-blue-800">
-              {volatilitySpread > 20 ? (
-                <li><strong>High Volatility Detected:</strong> Wide channel swings. Avoid chasing pumps mid-month; wait patiently for prices to bleed down toward the Month Low before deploying your fixed cash budgets.</li>
-              ) : (
-                <li><strong>Stable / Tight Range:</strong> Lower volatility spread. Look for clean breakouts or use standard support-level ladder buys.</li>
-              )}
-              <li>Use the <strong>Month High date</strong> to track when distribution happened, and the <strong>Month Low date</strong> to benchmark your support floors.</li>
-            </ul>
-          </div>
         </div>
       )}
 
-      {/* ALL COINS OVERVIEW BANNER */}
+      {/* MARKET OVERVIEW BANNER & HINT */}
       {!loading && !error && !selectedSymbol && (
-        <div className="rounded-lg border border-purple-200 bg-purple-50 p-4 text-xs text-purple-900 flex items-center justify-between">
-          <div>
-            <h4 className="font-bold text-purple-900 text-sm flex items-center gap-1.5">
-              <span>🌐</span> All Coins Market Overview ({monthLabel})
+        <div className="flex flex-col gap-4">
+          <div className="rounded-lg border border-purple-200 bg-purple-50 p-4 text-xs text-purple-900 flex items-center justify-between">
+            <div>
+              <h4 className="font-bold text-purple-900 text-sm flex items-center gap-1.5">
+                <span>🌐</span> Market Overview Dashboard ({monthLabel})
+              </h4>
+              <p className="text-purple-700 mt-0.5">
+                Click any coin card below to inspect its detailed daily highs and lows for the month.
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-blue-100 bg-blue-50/50 p-4 text-xs text-blue-900 shadow-sm">
+            <h4 className="font-bold mb-2 flex items-center gap-1.5 text-sm text-blue-950">
+              <span>💡</span> Volatility Swing Strategy Guide
             </h4>
-            <p className="text-purple-700 mt-0.5">
-              Comparing monthly highs, lows, and volatility swing spreads across all monitored coins. Sorted by active ranking preference.
-            </p>
+            <div className="space-y-2 text-blue-900">
+              <p>
+                <strong className="text-blue-950">High Swing Coins (&gt;25–30% Spread):</strong> These are your Dip-Buying Targets. Wide volatility means they experience sharp sell-offs down to their Month Lows. Do not chase them when they spike to their Month High; instead, set your fixed cash budgets and ladder your entries closer to their recorded Month Lows.
+              </p>
+              <p>
+                <strong className="text-blue-950">Low Swing Coins (&lt;15% Spread):</strong> These are your Consolidation / Range Plays. Tight spreads mean they are trading in a narrow channel. Keep an eye on these for potential volume breakouts or steady accumulation if they align with your core portfolio strategy.
+              </p>
+            </div>
           </div>
         </div>
       )}
 
-      {/* DISPLAY MODE 1: SINGLE COIN GRID */}
+      {/* DISPLAY MODE 1: SINGLE COIN DAILY GRID */}
       {!loading && !error && selectedSymbol && recordsWithData.length > 0 && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {recordsWithData.map((record) => {
@@ -286,16 +291,17 @@ export default function CalendarView() {
         </div>
       )}
 
-      {/* DISPLAY MODE 2: SORTED ALL COINS SUMMARY CARDS GRID */}
+      {/* DISPLAY MODE 2: CLICKABLE ALL COINS SUMMARY CARDS GRID */}
       {!loading && !error && !selectedSymbol && sortedCoinCards.length > 0 && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {sortedCoinCards.map(({ coin, coinDays, coinHigh, coinLow, highRec, lowRec, spread }) => (
             <div
               key={coin.symbol}
-              className="flex flex-col justify-between rounded-lg border border-gray-200 bg-white p-4 shadow-sm hover:border-gray-300 transition-colors"
+              onClick={() => setSelectedSymbol(coin.symbol)}
+              className="flex flex-col justify-between rounded-lg border border-gray-200 bg-white p-4 shadow-sm hover:border-purple-400 hover:shadow-md transition-all cursor-pointer group"
             >
               <div className="flex items-center justify-between border-b border-gray-100 pb-2 mb-3">
-                <span className="text-sm font-bold text-gray-900">
+                <span className="text-sm font-bold text-gray-900 group-hover:text-purple-700 transition-colors">
                   {coin.name}
                 </span>
                 <span className="rounded bg-purple-100 px-2 py-0.5 text-xs font-bold text-purple-700 font-mono">
