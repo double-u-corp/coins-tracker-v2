@@ -17,12 +17,12 @@ export function useCalendarLogic() {
   const [hasAppliedInitialSymbol, setHasAppliedInitialSymbol] = useState(false);
   const [monthCursor, setMonthCursor] = useState<Date>(() => new Date());
   
-  const [days, setDays] = useState<DailyRecord[]>([]);
   const [allCoinsData, setAllCoinsData] = useState<MultiCoinRecords>({});
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Load the list of coins once
   useEffect(() => {
     let cancelled = false;
     fetch("/api/coins")
@@ -38,6 +38,7 @@ export function useCalendarLogic() {
     };
   }, []);
 
+  // Initial symbol handling from router query
   useEffect(() => {
     if (hasAppliedInitialSymbol) return;
     if (!router.isReady) return;
@@ -59,62 +60,47 @@ export function useCalendarLogic() {
     return `${y}-${m}`;
   }, [monthCursor]);
 
+  // Always fetch all coins for the selected month to ensure accurate ranking calculations
   useEffect(() => {
+    if (coinOptions.length === 0) return;
+
     let cancelled = false;
     setLoading(true);
     setError(null);
 
-    if (selectedSymbol) {
-      fetch(`/api/coins?type=calendar&symbol=${selectedSymbol}&month=${monthParam}`)
-        .then((res) => {
-          if (!res.ok) throw new Error(`Failed to load calendar data (${res.status})`);
-          return res.json();
-        })
-        .then((data: { days: DailyRecord[] }) => {
-          if (!cancelled) {
-            setDays(data.days);
-            setAllCoinsData({});
-          }
-        })
-        .catch((err) => {
-          if (!cancelled) setError((err as Error).message);
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
-    } else if (coinOptions.length > 0) {
-      Promise.all(
-        coinOptions.map((coin) =>
-          fetch(`/api/coins?type=calendar&symbol=${coin.symbol}&month=${monthParam}`)
-            .then((res) => (res.ok ? res.json() : { days: [] }))
-            .then((data: { days: DailyRecord[] }) => ({ symbol: coin.symbol, days: data.days || [] }))
-            .catch(() => ({ symbol: coin.symbol, days: [] }))
-        )
+    Promise.all(
+      coinOptions.map((coin) =>
+        fetch(`/api/coins?type=calendar&symbol=${coin.symbol}&month=${monthParam}`)
+          .then((res) => (res.ok ? res.json() : { days: [] }))
+          .then((data: { days: DailyRecord[] }) => ({ symbol: coin.symbol, days: data.days || [] }))
+          .catch(() => ({ symbol: coin.symbol, days: [] }))
       )
-        .then((results) => {
-          if (!cancelled) {
-            const map: MultiCoinRecords = {};
-            results.forEach((r) => {
-              map[r.symbol] = r.days;
-            });
-            setAllCoinsData(map);
-            setDays([]);
-          }
-        })
-        .catch((err) => {
-          if (!cancelled) setError((err as Error).message);
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
-    } else {
-      setLoading(false);
-    }
+    )
+      .then((results) => {
+        if (!cancelled) {
+          const map: MultiCoinRecords = {};
+          results.forEach((r) => {
+            map[r.symbol] = r.days;
+          });
+          setAllCoinsData(map);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setError((err as Error).message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
 
     return () => {
       cancelled = true;
     };
-  }, [selectedSymbol, monthParam, coinOptions]);
+  }, [monthParam, coinOptions]);
+
+  // Derive single coin daily records directly from allCoinsData
+  const days = useMemo(() => {
+    return selectedSymbol ? allCoinsData[selectedSymbol] || [] : [];
+  }, [selectedSymbol, allCoinsData]);
 
   function goToPreviousMonth() {
     setMonthCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
