@@ -17,7 +17,7 @@ import prisma from "./prisma";
  * range selector at 5 years for exactly this reason) — Home's "Recorded
  * High/Low" is unaffected either way (see pruneOldRecords).
  */
-export const RECORD_RETENTION_DAYS = 365 * 5;
+export const RECORD_RETENTION_DAYS = 365 * 3;
 
 /**
  * How long auto-generated NewsItem rows (Home page "Market Signals") are

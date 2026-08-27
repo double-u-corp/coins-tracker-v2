@@ -18,7 +18,7 @@ function formatDateTime(iso: string): string {
 
 export default function NewsSection({ refreshSignal }: NewsSectionProps) {
   const { items, loading, loadingMore, error, hasMore, loadMore } = useNewsLogic(refreshSignal);
-
+ console.log( items )
   return (
     <section className="mt-8">
       <div className="mb-2 flex items-baseline justify-between">
@@ -41,7 +41,16 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
             const isNewRun = idx > 0 && previous.cronLogId !== item.cronLogId;
             return (
               <li key={item.id}>
-                {isNewRun && <hr className="my-3 border-gray-200" />}
+            {isNewRun && (
+              <div className="relative my-6 flex items-center justify-center">
+                <div className="absolute inset-0 flex items-center" aria-hidden="true">
+                  <div className="w-full border-t-2 border-gray-300" />
+                </div>
+                <div className="relative flex items-center gap-2 rounded-full border border-gray-200 bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-600 shadow-sm">
+                  <span>Run #{item.cronLogId}</span>
+                </div>
+              </div>
+            )}
                 <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${SENTIMENT_STYLES[item.sentiment]}`}>
