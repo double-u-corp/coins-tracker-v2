@@ -1,19 +1,19 @@
 name: Trigger price cron
 
-# Runs every 3 hours (8 runs per day) at minute 12 to bypass server congestion. GitHub Actions schedules always run in UTC.
+# Runs every 3 hours (8 runs per day) at minute 17 to bypass server congestion. GitHub Actions schedules always run in UTC.
 # Philippine Time (PHT, UTC+8) conversion:
-# - 00:12 UTC -> 08:12 AM PHT (Daily Candle Reset)
-# - 03:12 UTC -> 11:12 AM PHT
-# - 06:12 UTC -> 02:12 PM PHT
-# - 09:12 UTC -> 05:12 PM PHT (London Session Open)
-# - 12:12 UTC -> 08:12 PM PHT (US Pre-Market)
-# - 15:12 UTC -> 11:12 PM PHT (US Peak Volatility)
-# - 18:12 UTC -> 02:12 AM PHT
-# - 21:12 UTC -> 05:12 AM PHT
+# - 00:17 UTC -> 08:17 AM PHT (Daily Candle Reset)
+# - 03:17 UTC -> 11:17 AM PHT
+# - 06:17 UTC -> 02:17 PM PHT
+# - 09:17 UTC -> 05:17 PM PHT (London Session Open)
+# - 12:17 UTC -> 08:17 PM PHT (US Pre-Market)
+# - 15:17 UTC -> 11:17 PM PHT (US Peak Volatility)
+# - 18:17 UTC -> 02:17 AM PHT
+# - 21:17 UTC -> 05:17 AM PHT
 
 on:
   schedule:
-    - cron: "12 0,3,6,9,12,15,18,21 * * *"
+    - cron: "17 0,3,6,9,12,15,18,21 * * *"
   # Lets you trigger a run manually from the Actions tab, for testing.
   workflow_dispatch:
 
