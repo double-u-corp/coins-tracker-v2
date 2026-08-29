@@ -5,6 +5,7 @@ import type { CoinSummary, DailyRecord } from "@/validators/recordSchema";
 export interface CoinOption {
   symbol: string;
   name: string;
+  currentPrice?: number | null; // Added currentPrice
 }
 
 export type MultiCoinRecords = Record<string, DailyRecord[]>;
@@ -29,7 +30,12 @@ export function useCalendarLogic() {
       .then((res) => res.json())
       .then((data: { coins: CoinSummary[] }) => {
         if (!cancelled && Array.isArray(data.coins)) {
-          setCoinOptions(data.coins.map((c) => ({ symbol: c.symbol, name: c.name })));
+          // Map the currentPrice so it is available in the UI
+          setCoinOptions(data.coins.map((c) => ({ 
+            symbol: c.symbol, 
+            name: c.name,
+            currentPrice: c.currentPrice 
+          })));
         }
       })
       .catch(() => {});

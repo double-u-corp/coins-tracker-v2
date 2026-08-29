@@ -28,6 +28,12 @@ export interface PortfolioItem {
   gainLoss: number;
 }
 
+export interface CoinOption {
+  symbol: string;
+  name: string;
+  currentPrice?: number | null;
+}
+
 export type ChartRange = "1m" | "3m" | "6m" | "1y" | "3y";
 
 const RANGE_MONTHS_MAP: Record<ChartRange, number> = {
@@ -42,7 +48,7 @@ export function useChartLogic() {
   const router = useRouter();
   const { authenticated } = useAuth();
 
-  const [coinOptions, setCoinOptions] = useState<{ symbol: string; name: string }[]>([]);
+  const [coinOptions, setCoinOptions] = useState<CoinOption[]>([]);
   const [allCoins, setAllCoins] = useState<CoinSummary[]>([]);
   const [symbol, setSymbol] = useState("");
   const [hasAppliedInitialSymbol, setHasAppliedInitialSymbol] = useState(false);
@@ -67,7 +73,13 @@ export function useChartLogic() {
       .then((data: { coins: CoinSummary[] }) => {
         if (!cancelled) {
           setAllCoins(data.coins);
-          setCoinOptions(data.coins.map((c) => ({ symbol: c.symbol, name: c.name })));
+          setCoinOptions(
+            data.coins.map((c) => ({
+              symbol: c.symbol,
+              name: c.name,
+              currentPrice: c.currentPrice,
+            }))
+          );
         }
       })
       .catch(() => {});
@@ -81,7 +93,8 @@ export function useChartLogic() {
     if (!router.isReady) return;
     if (coinOptions.length === 0) return;
 
-    const queriedSymbol = typeof router.query.symbol === "string" ? router.query.symbol.toUpperCase() : "";
+    const queriedSymbol =
+      typeof router.query.symbol === "string" ? router.query.symbol.toUpperCase() : "";
     const matched = coinOptions.find((c) => c.symbol === queriedSymbol);
 
     setSymbol(matched?.symbol ?? "");
@@ -164,7 +177,12 @@ export function useChartLogic() {
     return labels;
   }, [entries, points]);
 
-  async function addJournalEntry(input: { symbol: string | null; entryDate: string; title: string; notes: string }) {
+  async function addJournalEntry(input: {
+    symbol: string | null;
+    entryDate: string;
+    title: string;
+    notes: string;
+  }) {
     const res = await fetch("/api/journal", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

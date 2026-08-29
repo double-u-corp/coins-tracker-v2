@@ -6,13 +6,17 @@ import AlertBanner from "@/components/AlertBanner";
 import JournalSidebar from "./JournalSidebar";
 import TradingInsightCard from "./TradingInsightCard";
 import DCACalculator from "./DCACalculator";
-import StrategyPlaybook from "./StrategyPlaybook"
+import StrategyPlaybook from "./StrategyPlaybook";
 import { useChartLogic, type ChartRange } from "./useChartLogic";
 import { formatPhp } from "@/lib/format";
 
 const PriceLineChart = dynamic(() => import("./PriceLineChart"), {
   ssr: false,
-  loading: () => <div className="flex h-96 items-center justify-center text-sm text-gray-500">Loading chart…</div>,
+  loading: () => (
+    <div className="flex h-96 items-center justify-center text-sm text-gray-500">
+      Loading chart…
+    </div>
+  ),
 });
 
 const RANGE_OPTIONS: { label: string; value: ChartRange }[] = [
@@ -49,16 +53,51 @@ export default function ChartView() {
   const [showLow, setShowLow] = useState(true);
   const [showKeyLevels, setShowKeyLevels] = useState(true);
 
+  const selectedCoin = useMemo(() => {
+    return allCoins.find((c) => c.symbol === symbol) || null;
+  }, [allCoins, symbol]);
+
   const activePortfolio = useMemo(() => {
     if (!symbol || !portfolio) return null;
     return portfolio.find((p) => p.symbol === symbol) || null;
   }, [symbol, portfolio]);
 
   const currentPrice = useMemo(() => {
+    if (selectedCoin?.currentPrice != null) {
+      return selectedCoin.currentPrice;
+    }
     if (points.length === 0) return 0;
     const lastPoint = points[points.length - 1];
     return (lastPoint.high + lastPoint.low) / 2;
-  }, [points]);
+  }, [selectedCoin, points]);
+
+  // Calculate swing ranking across all coins (Target High vs Target Low)
+  const swingRanks = useMemo(() => {
+    if (!allCoins || allCoins.length === 0) return new Map<string, number>();
+
+    const ranked = [...allCoins]
+      .map((coin) => {
+        const high = coin.targetHigh;
+        const low = coin.targetLow;
+        let swingPercent = 0;
+        if (high != null && low != null && low > 0) {
+          swingPercent = ((high - low) / low) * 100;
+        }
+        return { symbol: coin.symbol, swingPercent };
+      })
+      .sort((a, b) => b.swingPercent - a.swingPercent);
+
+    const map = new Map<string, number>();
+    ranked.forEach((item, idx) => {
+      map.set(item.symbol, idx + 1);
+    });
+    return map;
+  }, [allCoins]);
+
+  const coinRank = useMemo(() => {
+    if (!symbol) return null;
+    return swingRanks.get(symbol) ?? null;
+  }, [symbol, swingRanks]);
 
   const coinTransactions = useMemo(() => {
     if (!symbol || !transactions) return [];
@@ -122,7 +161,8 @@ export default function ChartView() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
+      {/* Navigation Header / Calendar Link */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <Link
           href="/"
           className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors"
@@ -130,28 +170,50 @@ export default function ChartView() {
           <span>←</span>
           <span>Back to Home</span>
         </Link>
+
+        {symbol && (
+          <div className="flex items-center gap-2">
+            <Link
+              href={`/calendar?symbol=${symbol}`}
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-md hover:bg-purple-100 transition-colors"
+            >
+              <span>📅</span>
+              <span>View Calendar</span>
+            </Link>
+          </div>
+        )}
       </div>
 
+      {/* Top Controls Bar */}
       <div className="flex flex-wrap items-end gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
         <Dropdown
           label="Coin"
           placeholder="Select a coin to analyse"
           value={symbol}
           onChange={setSymbol}
-          options={coinOptions.map((c) => ({ label: `${c.name} (${c.symbol})`, value: c.symbol }))}
+          options={coinOptions.map((c) => ({
+            label: `${c.name} (${c.symbol})`,
+            value: c.symbol,
+          }))}
         />
 
-        {/* Range Selector (1M, 3M, 6M, 1Y, 3Y) */}
+        {/* Range Selector */}
         <div className="flex flex-col gap-1 text-sm font-medium text-gray-700">
           <span>Range</span>
-          <div className={`inline-flex rounded-md border border-gray-200 p-1 bg-white ${!symbol ? "opacity-50 pointer-events-none" : ""}`}>
+          <div
+            className={`inline-flex rounded-md border border-gray-200 p-1 bg-white ${
+              !symbol ? "opacity-50 pointer-events-none" : ""
+            }`}
+          >
             {RANGE_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
                 type="button"
                 onClick={() => setRange(opt.value)}
                 className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
-                  range === opt.value ? "bg-brand-600 text-white" : "text-gray-600 hover:bg-gray-100"
+                  range === opt.value
+                    ? "bg-brand-600 text-white"
+                    : "text-gray-600 hover:bg-gray-100"
                 }`}
               >
                 {opt.label}
@@ -190,7 +252,9 @@ export default function ChartView() {
               type="button"
               onClick={() => setShowKeyLevels(!showKeyLevels)}
               className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
-                showKeyLevels ? "bg-purple-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                showKeyLevels
+                  ? "bg-purple-600 text-white"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
               }`}
             >
               Key Levels
@@ -247,26 +311,21 @@ export default function ChartView() {
                         </span>
                       </div>
 
-                      <div className="flex items-end justify-between">
-                        <div>
-                          <div className="text-[11px] font-semibold uppercase text-gray-500">Current Price</div>
-                          <div className="text-sm font-medium text-gray-900">{formatPhp(coin.currentPrice)}</div>
+                      {/* FLATTENED PRICE ROW */}
+                      <div className="flex items-center justify-between text-xs pt-1 border-t border-gray-100 mt-2">
+                        <div className="text-gray-900">
+                          <span className="text-[10px] font-semibold uppercase text-gray-500 mr-1">Price</span>
+                          <span className="font-medium">{formatPhp(coin.currentPrice)}</span>
                         </div>
-                        <div className="text-right">
-                          <div
-                            className={`text-[11px] font-semibold uppercase ${
-                              coin.targetType === "high" ? "text-green-700" : "text-red-700"
-                            }`}
-                          >
-                            Target {coin.targetType}
-                          </div>
-                          <div
-                            className={`text-sm font-medium ${
-                              coin.targetType === "high" ? "text-green-700" : "text-red-700"
-                            }`}
-                          >
-                            {formatPhp(coin.targetPrice)}
-                          </div>
+                        <div
+                          className={
+                            coin.targetType === "high" ? "text-green-700" : "text-red-700"
+                          }
+                        >
+                          <span className="text-[10px] font-semibold uppercase opacity-75 mr-1">
+                            Tgt {coin.targetType}
+                          </span>
+                          <span className="font-medium">{formatPhp(coin.targetPrice)}</span>
                         </div>
                       </div>
                     </div>
@@ -280,10 +339,40 @@ export default function ChartView() {
         <div className="flex flex-col gap-6">
           {chartError && <AlertBanner variant="error" message={`Failed to load chart: ${chartError}`} />}
 
+          {/* Header Card with Calendar-themed Purple Rank Badge */}
+{/* Header Card with Calendar-themed Purple Rank Badge */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white border border-purple-100 rounded-lg p-5 shadow-sm">
+            
+            {/* LEFT SIDE: Rank and Name Side-by-Side */}
+            <div className="flex flex-row items-center gap-3 flex-wrap sm:flex-nowrap">
+              {coinRank !== null && (
+                <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-2.5 py-1 rounded-md whitespace-nowrap">
+                  <span>Rank #{coinRank}</span>
+                  {coinRank === 1 && <span className="font-medium text-purple-600 hidden sm:inline">(Highest Swing)</span>}
+                </div>
+              )}
+              
+              <h2 className="text-xl font-bold text-gray-900 whitespace-nowrap">
+                {selectedCoin?.name || symbol} ({symbol?.endsWith('PHP') ? symbol : `${symbol}PHP`})
+              </h2>
+            </div>
+
+            {/* RIGHT SIDE: Current Price */}
+            {currentPrice > 0 && (
+              <div className="text-left sm:text-right border-t sm:border-0 border-gray-100 pt-3 sm:pt-0 w-full sm:w-auto mt-2 sm:mt-0">
+                <div className="text-xs font-semibold uppercase text-gray-500">Current Price</div>
+                <div className="text-2xl font-bold text-gray-900 font-mono">
+                  {formatPhp(currentPrice)}
+                </div>
+              </div>
+            )}
+          </div>
           {/* Full Width Chart Container */}
           <div className="w-full rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
             {chartLoading ? (
-              <div className="flex h-96 items-center justify-center text-sm text-gray-500">Loading chart…</div>
+              <div className="flex h-96 items-center justify-center text-sm text-gray-500">
+                Loading chart…
+              </div>
             ) : (
               <PriceLineChart
                 points={points}
@@ -313,10 +402,7 @@ export default function ChartView() {
           />
 
           {/* DCA Strategy Playbook */}
-          <StrategyPlaybook 
-            symbol={symbol} 
-            support={technicals.support} 
-          />
+          <StrategyPlaybook symbol={symbol} support={technicals.support} />
 
           {/* DCA Recovery Calculator */}
           <DCACalculator
@@ -347,7 +433,9 @@ export default function ChartView() {
                   <tbody className="divide-y divide-gray-100">
                     {coinTransactions.map((tx) => (
                       <tr key={tx.id} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 text-gray-500">{new Date(tx.transactedAt).toLocaleDateString()}</td>
+                        <td className="px-3 py-2 text-gray-500">
+                          {new Date(tx.transactedAt).toLocaleDateString()}
+                        </td>
                         <td className="px-3 py-2">
                           <span
                             className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
@@ -359,7 +447,9 @@ export default function ChartView() {
                         </td>
                         <td className="px-3 py-2 font-medium text-gray-800">{tx.coinAmount}</td>
                         <td className="px-3 py-2 text-gray-600">{formatPhp(tx.price)}</td>
-                        <td className="px-3 py-2 text-right font-semibold text-gray-900">{formatPhp(tx.phpAmount)}</td>
+                        <td className="px-3 py-2 text-right font-semibold text-gray-900">
+                          {formatPhp(tx.phpAmount)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -367,7 +457,7 @@ export default function ChartView() {
               </div>
             )}
           </div>
-          
+
           {/* Log an Event / JournalSidebar */}
           <JournalSidebar
             entries={entries}

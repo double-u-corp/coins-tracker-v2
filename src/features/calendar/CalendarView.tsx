@@ -1,9 +1,133 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/router";
 import Link from "next/link";
 import Dropdown from "@/components/Dropdown";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
-import { useCalendarLogic } from "./useCalendarLogic";
+import type { CoinSummary, DailyRecord } from "@/validators/recordSchema";
+
+export interface CoinOption {
+  symbol: string;
+  name: string;
+  currentPrice?: number | null;
+}
+
+export type MultiCoinRecords = Record<string, DailyRecord[]>;
+
+export function useCalendarLogic() {
+  const router = useRouter();
+
+  const [coinOptions, setCoinOptions] = useState<CoinOption[]>([]);
+  const [selectedSymbol, setSelectedSymbol] = useState<string>("");
+  const [hasAppliedInitialSymbol, setHasAppliedInitialSymbol] = useState(false);
+  const [monthCursor, setMonthCursor] = useState<Date>(() => new Date());
+  
+  const [allCoinsData, setAllCoinsData] = useState<MultiCoinRecords>({});
+  
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/coins")
+      .then((res) => res.json())
+      .then((data: { coins: CoinSummary[] }) => {
+        if (!cancelled && Array.isArray(data.coins)) {
+          setCoinOptions(data.coins.map((c) => ({ 
+            symbol: c.symbol, 
+            name: c.name,
+            currentPrice: c.currentPrice 
+          })));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (hasAppliedInitialSymbol) return;
+    if (!router.isReady) return;
+    if (coinOptions.length === 0) return;
+
+    const queriedSymbol = typeof router.query.symbol === "string" ? router.query.symbol.toUpperCase() : "";
+    if (queriedSymbol) {
+      const matched = coinOptions.find((c) => c.symbol === queriedSymbol);
+      if (matched) {
+        setSelectedSymbol(matched.symbol);
+      }
+    }
+    setHasAppliedInitialSymbol(true);
+  }, [router.isReady, router.query.symbol, coinOptions, hasAppliedInitialSymbol]);
+
+  const monthParam = useMemo(() => {
+    const y = monthCursor.getFullYear();
+    const m = String(monthCursor.getMonth() + 1).padStart(2, "0");
+    return `${y}-${m}`;
+  }, [monthCursor]);
+
+  useEffect(() => {
+    if (coinOptions.length === 0) return;
+
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    Promise.all(
+      coinOptions.map((coin) =>
+        fetch(`/api/coins?type=calendar&symbol=${coin.symbol}&month=${monthParam}`)
+          .then((res) => (res.ok ? res.json() : { days: [] }))
+          .then((data: { days: DailyRecord[] }) => ({ symbol: coin.symbol, days: data.days || [] }))
+          .catch(() => ({ symbol: coin.symbol, days: [] }))
+      )
+    )
+      .then((results) => {
+        if (!cancelled) {
+          const map: MultiCoinRecords = {};
+          results.forEach((r) => {
+            map[r.symbol] = r.days;
+          });
+          setAllCoinsData(map);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setError((err as Error).message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [monthParam, coinOptions]);
+
+  const days = useMemo(() => {
+    return selectedSymbol ? allCoinsData[selectedSymbol] || [] : [];
+  }, [selectedSymbol, allCoinsData]);
+
+  function goToPreviousMonth() {
+    setMonthCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+  }
+
+  function goToNextMonth() {
+    setMonthCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+  }
+
+  return {
+    coinOptions,
+    selectedSymbol,
+    setSelectedSymbol,
+    monthCursor,
+    goToPreviousMonth,
+    goToNextMonth,
+    days,
+    allCoinsData,
+    loading,
+    error,
+  };
+}
 
 export default function CalendarView() {
   const {
@@ -20,6 +144,7 @@ export default function CalendarView() {
   } = useCalendarLogic();
 
   const [marketSortBy, setMarketSortBy] = useState<string>("volatility-desc");
+  const [copied, setCopied] = useState(false);
 
   const monthLabel = monthCursor.toLocaleDateString(undefined, {
     month: "long",
@@ -59,7 +184,6 @@ export default function CalendarView() {
     return { coin, coinDays, coinHigh, coinLow, highRec, lowRec, spread };
   });
 
-  // Calculate dynamic rank based on selected sort order
   const sortedCoinCards = [...coinCardsData]
     .sort((a, b) => {
       if (marketSortBy === "volatility-desc") return b.spread - a.spread;
@@ -69,12 +193,11 @@ export default function CalendarView() {
     })
     .map((item, index) => ({
       ...item,
-      rank: index + 1, // Dynamic rank based on current sort
+      rank: index + 1,
     }));
 
   const currentSortedCoin = sortedCoinCards.find((c) => c.coin.symbol === selectedSymbol);
 
-  // Dropdown options dynamically sorted with rank & swing %
   const coinDropdownOptions = [
     { label: "🌐 All Coins (Overview)", value: "" },
     ...sortedCoinCards.map(({ coin, rank, spread }) => ({
@@ -83,10 +206,32 @@ export default function CalendarView() {
     })),
   ];
 
+  // --- COPY SUMMARY HANDLER (Includes Ranking) ---
+  const handleCopySummary = async () => {
+    const rankText = currentSortedCoin ? `Rank #${currentSortedCoin.rank}` : "Rank #N/A";
+    const summaryText = 
+      `👑 ${rankText}\n` +
+      `🏆 Month High ${highestRecord ? formatDateShort(highestRecord.date) : 'N/A'}\n` +
+      `${monthHighest != null ? formatPhp(monthHighest) : '₱0.00'}\n` +
+      `📉 Month Low ${lowestRecord ? formatDateShort(lowestRecord.date) : 'N/A'}\n` +
+      `${monthLowest != null ? formatPhp(monthLowest) : '₱0.00'}\n` +
+      `📊 Monthly Swing\n` +
+      `High-to-Low Spread\n` +
+      `${volatilitySpread.toFixed(1)}%`;
+
+    try {
+      await navigator.clipboard.writeText(summaryText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy text: ", err);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-6">
       {/* Navigation Header / Back Button */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <Link 
           href="/" 
           className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors"
@@ -96,21 +241,37 @@ export default function CalendarView() {
         </Link>
 
         {selectedSymbol && (
-          <button
-            type="button"
-            onClick={() => setSelectedSymbol("")}
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-md hover:bg-purple-100 transition-colors"
-          >
-            <span>🌐</span>
-            <span>Back to Market Overview</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleCopySummary}
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-md hover:bg-purple-100 transition-colors shadow-sm"
+            >
+              <span>📋</span>
+              <span>{copied ? "Copied to Clipboard!" : "Copy Summary"}</span>
+            </button>
+            <Link
+              href={`/chart?symbol=${selectedSymbol}`}
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-3 py-1.5 rounded-md hover:bg-blue-100 transition-colors"
+            >
+              <span>📈</span>
+              <span>View Chart</span>
+            </Link>
+            <button
+              type="button"
+              onClick={() => setSelectedSymbol("")}
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-md hover:bg-purple-100 transition-colors"
+            >
+              <span>🌐</span>
+              <span>Market Overview</span>
+            </button>
+          </div>
         )}
       </div>
 
       {/* Top Controls Bar */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          {/* Coin Selector Dropdown */}
           <div className="min-w-[240px]">
             <Dropdown
               label="Select Coin"
@@ -121,7 +282,6 @@ export default function CalendarView() {
             />
           </div>
 
-          {/* Sort Overview Dropdown */}
           <div className="min-w-[220px]">
             <Dropdown
               label="Sort rank by"
@@ -176,7 +336,7 @@ export default function CalendarView() {
       {/* SINGLE COIN SUMMARY BAR */}
       {!loading && !error && selectedSymbol && (
         <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-between bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-4 bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
             <div className="flex items-center gap-3">
               {currentSortedCoin && (
                 <span className="rounded-md bg-purple-100 px-2.5 py-1 text-xs font-bold text-purple-700 font-mono">
@@ -187,6 +347,15 @@ export default function CalendarView() {
                 {currentSortedCoin?.coin.name || selectedSymbol} ({selectedSymbol})
               </h2>
             </div>
+            
+            {currentSortedCoin?.coin.currentPrice != null && (
+              <div className="text-right">
+                <div className="text-xs font-bold uppercase text-gray-500">Current Price</div>
+                <div className="text-2xl font-bold text-gray-900 font-mono">
+                  {formatPhp(currentSortedCoin.coin.currentPrice)}
+                </div>
+              </div>
+            )}
           </div>
 
           {recordsWithData.length > 0 && (
@@ -345,9 +514,17 @@ export default function CalendarView() {
                     {coin.name}
                   </span>
                 </div>
-                <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-600 font-mono">
-                  {coin.symbol}
-                </span>
+                
+                <div className="flex flex-col items-end">
+                  <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-600 font-mono mb-1">
+                    {coin.symbol}
+                  </span>
+                  {coin.currentPrice != null && (
+                    <span className="text-[11px] font-bold text-gray-700 font-mono">
+                      {formatPhp(coin.currentPrice)}
+                    </span>
+                  )}
+                </div>
               </div>
 
               {coinDays.length === 0 ? (
