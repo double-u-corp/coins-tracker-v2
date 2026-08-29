@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { useState } from "react";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
 import { useHomeLogic } from "./useHomeLogic";
@@ -97,6 +98,8 @@ function CoinCard({ coin, canUpdatePrice, onUpdatePriceClick }: CoinCardProps) {
 }
 
 export default function HomeTable() {
+  const [showSchedule, setShowSchedule] = useState(false);
+
   const {
     coins,
     allCoins,
@@ -164,20 +167,47 @@ export default function HomeTable() {
       />
 
       {/* Header section with Title and Violet Run Cron Button right beside each other */}
-      <div className="mb-6 flex items-center gap-3 flex-wrap">
-        <h1 className="text-2xl font-bold text-gray-900">Coin Prices</h1>
-        {canUpdatePrice && (
-          <button
-            type="button"
-            onClick={triggerCronManually}
-            disabled={cronTriggering}
-            className="inline-flex items-center justify-center gap-1 rounded bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-50 transition-colors shadow-sm"
-            title="Manually trigger cron job execution"
-          >
-            <span>{cronTriggering ? "⏳ Running..." : "⚡ Run Cron"}</span>
-          </button>
-        )}
+      <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-gray-900">Coin Prices</h1>
+          {canUpdatePrice && (
+            <button
+              type="button"
+              onClick={triggerCronManually}
+              disabled={cronTriggering}
+              className="inline-flex items-center justify-center gap-1 rounded bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-50 transition-colors shadow-sm"
+              title="Manually trigger cron job execution"
+            >
+              <span>{cronTriggering ? "⏳ Running..." : "⚡ Run Cron"}</span>
+            </button>
+          )}
+        </div>
+
+        {/* Schedule Toggle Button */}
+        <button
+          type="button"
+          onClick={() => setShowSchedule(!showSchedule)}
+          className="text-xs font-medium text-indigo-600 hover:text-indigo-800 underline transition-colors"
+        >
+          {showSchedule ? "Hide Cron Schedule ▲" : "View Cron Schedule ▼"}
+        </button>
       </div>
+{/* Collapsible Schedule Section */}
+      {showSchedule && (
+        <div className="mb-4 rounded-lg border border-indigo-100 bg-indigo-50/50 p-3 text-xs text-indigo-900 shadow-sm">
+          <div className="font-semibold mb-1">Expected Daily Cron Slots (PHT):</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 font-mono text-indigo-800">
+            <div>• 00:05 UTC → 08:05 AM PHT (Daily Candle Reset)</div>
+            <div>• 03:05 UTC → 11:05 AM PHT</div>
+            <div>• 06:05 UTC → 02:05 PM PHT</div>
+            <div>• 09:05 UTC → 05:05 PM PHT (London Open)</div>
+            <div>• 12:05 UTC → 08:05 PM PHT (US Pre-Market)</div>
+            <div>• 15:05 UTC → 11:05 PM PHT (US Peak Volatility)</div>
+            <div>• 18:05 UTC → 02:05 AM PHT</div>
+            <div>• 21:05 UTC → 05:05 AM PHT</div>
+          </div>
+        </div>
+      )}
 
       <AlertBanner
         variant={error ? "error" : bannerVariant(lastCronStatus)}
