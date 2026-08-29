@@ -1,4 +1,6 @@
 const TICKER_PRICE_URL = "https://api.pro.coins.ph/openapi/quote/v1/ticker/price";
+const CMC_QUOTE_URL = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest";
+const FOREX_API_URL = "https://open.er-api.com/v6/latest/USD";
 
 /**
  * Which coins get tracked is now driven by the `Coin` table (see
@@ -26,11 +28,39 @@ interface CoinsTickerResponse {
 
 /**
  * Fetches the current price for a single symbol from the Coins.ph public
- * ticker endpoint.
+ * ticker endpoint, with custom interceptors for CoinMarketCap tokens.
  */
 export async function fetchPrice(symbol: string): Promise<number> {
+  // 1. Intercept custom coins to use CoinMarketCap
+  if (["ONDOPHP", "ONDO", "TXPHP", "TX"].includes(symbol)) {
+    const baseSymbol = symbol.replace("PHP", ""); // Extracts exactly "ONDO" or "TX"
+
+    // A. Fetch price in USD from CoinMarketCap
+    const cmcRes = await fetch(
+      `${CMC_QUOTE_URL}?symbol=${baseSymbol}`,
+      {
+        headers: {
+          "X-CMC_PRO_API_KEY": process.env.CMC_API_KEY || "", 
+        },
+        cache: "no-store",
+      }
+    );
+    if (!cmcRes.ok) throw new Error(`CoinMarketCap API error for ${symbol}`);
+    const cmcData = await cmcRes.json();
+    const usdPrice = cmcData.data[baseSymbol].quote.USD.price;
+
+    // B. Fetch live USD to PHP exchange rate (Free, no API key)
+    const fxRes = await fetch(FOREX_API_URL, { cache: "no-store" });
+    if (!fxRes.ok) throw new Error(`Forex API error for USD to PHP conversion`);
+    const fxData = await fxRes.json();
+    const usdToPhpRate = fxData.rates.PHP;
+
+    // C. Calculate final PHP price
+    return usdPrice * usdToPhpRate;
+  }
+
+  // 2. Default behavior for all other coins (Coins.ph)
   const res = await fetch(`${TICKER_PRICE_URL}?symbol=${encodeURIComponent(symbol)}`, {
-    // Always hit the live endpoint; never cache a stale price.
     cache: "no-store",
   });
 
