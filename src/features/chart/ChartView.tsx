@@ -277,110 +277,108 @@ export default function ChartView() {
           )}
         </div>
       ) : (
-        <>
-          <div className="flex flex-col gap-6 lg:flex-row">
-            <div className="flex-1 space-y-4">
-              {chartError && <AlertBanner variant="error" message={`Failed to load chart: ${chartError}`} />}
+        <div className="flex flex-col gap-6">
+          {chartError && <AlertBanner variant="error" message={`Failed to load chart: ${chartError}`} />}
 
-              <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-                {chartLoading ? (
-                  <div className="flex h-96 items-center justify-center text-sm text-gray-500">Loading chart…</div>
-                ) : (
-                  <PriceLineChart
-                    points={points}
-                    journalLabels={journalLabelsInView}
-                    showHigh={showHigh}
-                    showLow={showLow}
-                    showKeyLevels={showKeyLevels}
-                    showBreakEven={!!activePortfolio && activePortfolio.holdings > 0}
-                    breakEvenPrice={
-                      activePortfolio && activePortfolio.holdings > 0
-                        ? activePortfolio.spent / activePortfolio.holdings
-                        : null
-                    }
-                    support={technicals.support}
-                    resistance={technicals.resistance}
-                  />
-                )}
-              </div>
-
-              {/* Spot Trading Insights */}
-              <TradingInsightCard
+          {/* Full Width Chart Container */}
+          <div className="w-full rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+            {chartLoading ? (
+              <div className="flex h-96 items-center justify-center text-sm text-gray-500">Loading chart…</div>
+            ) : (
+              <PriceLineChart
                 points={points}
-                symbol={symbol}
-                activePortfolio={activePortfolio}
+                journalLabels={journalLabelsInView}
+                showHigh={showHigh}
+                showLow={showLow}
+                showKeyLevels={showKeyLevels}
+                showBreakEven={!!activePortfolio && activePortfolio.holdings > 0}
+                breakEvenPrice={
+                  activePortfolio && activePortfolio.holdings > 0
+                    ? activePortfolio.spent / activePortfolio.holdings
+                    : null
+                }
                 support={technicals.support}
                 resistance={technicals.resistance}
               />
-
-              {/* NEW: DCA Strategy Playbook */}
-              <StrategyPlaybook 
-                symbol={symbol} 
-                support={technicals.support} 
-              />
-
-              {/* DCA Recovery Calculator */}
-              <DCACalculator
-                symbol={symbol}
-                currentPrice={currentPrice}
-                portfolio={activePortfolio}
-              />
-
-              {/* Transaction History */}
-              <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-                <h3 className="mb-3 text-sm font-semibold text-gray-900">
-                  Transaction History <span className="text-brand-600">({symbol})</span>
-                </h3>
-                {coinTransactions.length === 0 ? (
-                  <p className="text-xs text-gray-500">No transactions recorded yet.</p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead className="border-b border-gray-200 bg-gray-50 text-gray-500">
-                        <tr>
-                          <th className="px-3 py-2">Date</th>
-                          <th className="px-3 py-2">Type</th>
-                          <th className="px-3 py-2">Amount</th>
-                          <th className="px-3 py-2">Price</th>
-                          <th className="px-3 py-2 text-right">Value</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {coinTransactions.map((tx) => (
-                          <tr key={tx.id} className="hover:bg-gray-50">
-                            <td className="px-3 py-2 text-gray-500">{new Date(tx.transactedAt).toLocaleDateString()}</td>
-                            <td className="px-3 py-2">
-                              <span
-                                className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
-                                  tx.type === "buy" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
-                                }`}
-                              >
-                                {tx.type}
-                              </span>
-                            </td>
-                            <td className="px-3 py-2 font-medium text-gray-800">{tx.coinAmount}</td>
-                            <td className="px-3 py-2 text-gray-600">{formatPhp(tx.price)}</td>
-                            <td className="px-3 py-2 text-right font-semibold text-gray-900">{formatPhp(tx.phpAmount)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <JournalSidebar
-              entries={entries}
-              loading={journalLoading}
-              error={journalError}
-              defaultSymbol={symbol}
-              authenticated={authenticated}
-              onAdd={addJournalEntry}
-              onDelete={deleteJournalEntry}
-            />
+            )}
           </div>
-        </>
+
+          {/* Spot Trading Insights */}
+          <TradingInsightCard
+            points={points}
+            symbol={symbol}
+            activePortfolio={activePortfolio}
+            support={technicals.support}
+            resistance={technicals.resistance}
+          />
+
+          {/* DCA Strategy Playbook */}
+          <StrategyPlaybook 
+            symbol={symbol} 
+            support={technicals.support} 
+          />
+
+          {/* DCA Recovery Calculator */}
+          <DCACalculator
+            symbol={symbol}
+            currentPrice={currentPrice}
+            portfolio={activePortfolio}
+          />
+
+          {/* Transaction History */}
+          <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+            <h3 className="mb-3 text-sm font-semibold text-gray-900">
+              Transaction History <span className="text-brand-600">({symbol})</span>
+            </h3>
+            {coinTransactions.length === 0 ? (
+              <p className="text-xs text-gray-500">No transactions recorded yet.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b border-gray-200 bg-gray-50 text-gray-500">
+                    <tr>
+                      <th className="px-3 py-2">Date</th>
+                      <th className="px-3 py-2">Type</th>
+                      <th className="px-3 py-2">Amount</th>
+                      <th className="px-3 py-2">Price</th>
+                      <th className="px-3 py-2 text-right">Value</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {coinTransactions.map((tx) => (
+                      <tr key={tx.id} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 text-gray-500">{new Date(tx.transactedAt).toLocaleDateString()}</td>
+                        <td className="px-3 py-2">
+                          <span
+                            className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                              tx.type === "buy" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                            }`}
+                          >
+                            {tx.type}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 font-medium text-gray-800">{tx.coinAmount}</td>
+                        <td className="px-3 py-2 text-gray-600">{formatPhp(tx.price)}</td>
+                        <td className="px-3 py-2 text-right font-semibold text-gray-900">{formatPhp(tx.phpAmount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          
+          {/* Log an Event / JournalSidebar */}
+          <JournalSidebar
+            entries={entries}
+            loading={journalLoading}
+            error={journalError}
+            defaultSymbol={symbol}
+            authenticated={authenticated}
+            onAdd={addJournalEntry}
+            onDelete={deleteJournalEntry}
+          />
+        </div>
       )}
     </div>
   );

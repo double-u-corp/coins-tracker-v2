@@ -42,16 +42,20 @@ export default function JournalSidebar({
   }
 
   return (
-    <aside className="flex w-full flex-col gap-4 lg:w-80 lg:shrink-0">
-      {authenticated ? (
-        <JournalForm defaultSymbol={defaultSymbol} onSubmit={onAdd} />
-      ) : (
-        <div className="rounded-lg border border-gray-200 bg-white p-4 text-xs text-gray-500 shadow-sm">
-          Log in to add journal entries.
-        </div>
-      )}
+    <aside className="grid w-full grid-cols-1 gap-6 lg:grid-cols-12">
+      {/* Column 1: The Form (Takes up 4 columns on desktop) */}
+      <div className="lg:col-span-4">
+        {authenticated ? (
+          <JournalForm defaultSymbol={defaultSymbol} onSubmit={onAdd} />
+        ) : (
+          <div className="rounded-lg border border-gray-200 bg-white p-4 text-xs text-gray-500 shadow-sm">
+            Log in to add journal entries.
+          </div>
+        )}
+      </div>
 
-      <div>
+      {/* Column 2: The List of Entries (Takes up 8 columns on desktop) */}
+      <div className="lg:col-span-8">
         <h3 className="mb-2 text-sm font-semibold text-gray-900">Events &amp; notes in range</h3>
         {error && <AlertBanner variant="error" message={`Failed to load journal: ${error}`} />}
         {deleteError && <AlertBanner variant="error" message={deleteError} />}
