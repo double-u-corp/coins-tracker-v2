@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
 import { useHomeLogic } from "./useHomeLogic";
@@ -98,7 +98,34 @@ function CoinCard({ coin, canUpdatePrice, onUpdatePriceClick }: CoinCardProps) {
 }
 
 export default function HomeTable() {
-  const [showSchedule, setShowSchedule] = useState(false);
+  const [nextCronLabel, setNextCronLabel] = useState("Calculating...");
+
+  useEffect(() => {
+    const now = new Date();
+    const h = now.getHours();
+    const m = now.getMinutes();
+    const currentTotalMinutes = h * 60 + m;
+
+    const slots = [
+      { h: 2, m: 5, label: "02:05 AM" },
+      { h: 5, m: 5, label: "05:05 AM" },
+      { h: 8, m: 5, label: "08:05 AM (Daily Candle Reset)" },
+      { h: 11, m: 5, label: "11:05 AM" },
+      { h: 14, m: 5, label: "02:05 PM" },
+      { h: 17, m: 5, label: "05:05 PM (London Open)" },
+      { h: 20, m: 5, label: "08:05 PM (US Pre-Market)" },
+      { h: 23, m: 5, label: "11:05 PM (US Peak)" },
+    ];
+
+    let nextLabel = "02:05 AM (Tomorrow)";
+    for (const slot of slots) {
+      if (currentTotalMinutes < slot.h * 60 + slot.m) {
+        nextLabel = slot.label;
+        break;
+      }
+    }
+    setNextCronLabel(nextLabel);
+  }, []);
 
   const {
     coins,
@@ -182,36 +209,11 @@ export default function HomeTable() {
             </button>
           )}
         </div>
-
-        {/* Schedule Toggle Button */}
-        <button
-          type="button"
-          onClick={() => setShowSchedule(!showSchedule)}
-          className="text-xs font-medium text-indigo-600 hover:text-indigo-800 underline transition-colors"
-        >
-          {showSchedule ? "Hide Cron Schedule ▲" : "View Cron Schedule ▼"}
-        </button>
       </div>
-{/* Collapsible Schedule Section */}
-      {showSchedule && (
-        <div className="mb-4 rounded-lg border border-indigo-100 bg-indigo-50/50 p-3 text-xs text-indigo-900 shadow-sm">
-          <div className="font-semibold mb-1">Expected Daily Cron Slots (PHT):</div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 font-mono text-indigo-800">
-            <div>• 00:05 UTC → 08:05 AM PHT (Daily Candle Reset)</div>
-            <div>• 03:05 UTC → 11:05 AM PHT</div>
-            <div>• 06:05 UTC → 02:05 PM PHT</div>
-            <div>• 09:05 UTC → 05:05 PM PHT (London Open)</div>
-            <div>• 12:05 UTC → 08:05 PM PHT (US Pre-Market)</div>
-            <div>• 15:05 UTC → 11:05 PM PHT (US Peak Volatility)</div>
-            <div>• 18:05 UTC → 02:05 AM PHT</div>
-            <div>• 21:05 UTC → 05:05 AM PHT</div>
-          </div>
-        </div>
-      )}
 
       <AlertBanner
         variant={error ? "error" : bannerVariant(lastCronStatus)}
-        message={error ? `Failed to load data: ${error}` : `Last cron run: ${formatDateTime(lastCronRun)}`}
+        message={error ? `Failed to load data: ${error}` : `Last cron run: ${formatDateTime(lastCronRun)} | Next run: ${nextCronLabel}`}
       />
 
       {showTargetBanner && (
