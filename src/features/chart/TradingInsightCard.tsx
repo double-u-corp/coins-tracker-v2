@@ -25,6 +25,7 @@ export interface InsightResult {
   sma20: number | null;
   sma50: number | null;
   sma200: number | null;
+  rsi: number | null;
   macroTrend: "MACRO BULLISH" | "MACRO BEARISH" | "ACCUMULATING DATA";
 }
 
@@ -37,6 +38,42 @@ function calculateSMAAt(points: ChartPoint[], period: number, offset = 0): numbe
     sum += (points[i].high + points[i].low) / 2;
   }
   return sum / period;
+}
+
+// Calculate RSI for a specific slice of points
+function calculateRSIAt(points: ChartPoint[], period = 14): number | null {
+  if (points.length <= period) return null;
+
+  let gains = 0;
+  let losses = 0;
+
+  for (let i = 1; i <= period; i++) {
+    const prevPrice = (points[i - 1].high + points[i - 1].low) / 2;
+    const currPrice = (points[i].high + points[i].low) / 2;
+    const diff = currPrice - prevPrice;
+    if (diff >= 0) gains += diff;
+    else losses += Math.abs(diff);
+  }
+
+  let avgGain = gains / period;
+  let avgLoss = losses / period;
+
+  let lastRsi = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+
+  for (let i = period + 1; i < points.length; i++) {
+    const prevPrice = (points[i - 1].high + points[i - 1].low) / 2;
+    const currPrice = (points[i].high + points[i].low) / 2;
+    const diff = currPrice - prevPrice;
+    const gain = diff > 0 ? diff : 0;
+    const loss = diff < 0 ? Math.abs(diff) : 0;
+
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+
+    lastRsi = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+  }
+
+  return Number(lastRsi.toFixed(1));
 }
 
 export default function TradingInsightCard({
@@ -63,6 +100,7 @@ export default function TradingInsightCard({
         sma20: null,
         sma50: null,
         sma200: null,
+        rsi: null,
         macroTrend: "ACCUMULATING DATA",
       };
     }
@@ -71,21 +109,28 @@ export default function TradingInsightCard({
     const lastPoint = points[points.length - 1];
     const currentPrice = (lastPoint.high + lastPoint.low) / 2;
 
-    // 1. Current Day SMAs
+    // 1. Current Day SMAs & RSI
     const sma20 = calculateSMAAt(points, 20, 0);
     const sma50 = calculateSMAAt(points, 50, 0);
     const sma200 = calculateSMAAt(points, 200, 0);
+    const rsi = calculateRSIAt(points, 14);
 
-    // 2. Previous Day SMAs (To detect actual crossovers)
+    // 2. Previous Day SMAs
     const prevSma20 = calculateSMAAt(points, 20, 1);
     const prevSma50 = calculateSMAAt(points, 50, 1);
     const prevSma200 = calculateSMAAt(points, 200, 1);
 
-    // 3. Evaluate Specific Crossover Events
+    // 3. Evaluate Specific Crossover Events & RSI Alerts
     let crossoverAlert: string | null = null;
 
-    // Golden Cross: 50 SMA crosses above 200 SMA
-    if (prevSma50 && prevSma200 && sma50 && sma200) {
+    if (rsi !== null && rsi >= 70) {
+      crossoverAlert = `🔥 RSI Overbought (${rsi}) — Caution advised for new buy entries.`;
+    } else if (rsi !== null && rsi <= 30) {
+      crossoverAlert = `💎 RSI Oversold (${rsi}) — High-conviction DCA Accumulation Zone.`;
+    }
+
+    // Golden Cross / Death Cross
+    if (!crossoverAlert && prevSma50 && prevSma200 && sma50 && sma200) {
       if (prevSma50 <= prevSma200 && sma50 > sma200) {
         crossoverAlert = "🚀 Golden Cross Detected! (50 SMA crossed above 200 SMA) — Strong Macro Bullish Signal.";
       } else if (prevSma50 >= prevSma200 && sma50 < sma200) {
@@ -93,7 +138,7 @@ export default function TradingInsightCard({
       }
     }
 
-    // Medium-Term Swing Cross: 20 SMA crosses 50 SMA (If no 200 SMA cross is active)
+    // Medium-Term Swing Cross
     if (!crossoverAlert && prevSma20 && prevSma50 && sma20 && sma50) {
       if (prevSma20 <= prevSma50 && sma20 > sma50) {
         crossoverAlert = "📈 Bullish Momentum Cross! (20 SMA crossed above 50 SMA) — Upward Trend Accelerating.";
@@ -127,31 +172,32 @@ export default function TradingInsightCard({
     const targetLow = localSupport;
     const targetHigh = localResistance;
 
-    const hasHoldings = activePortfolio && activePortfolio.holdings > 0;
-    const avgEntry = hasHoldings ? activePortfolio.spent / activePortfolio.holdings : null;
-
     const isAboveSma20 = sma20 !== null && currentPrice > sma20;
     const range = localResistance - localSupport;
     const positionInRange = range > 0 ? (currentPrice - localSupport) / range : 0.5;
 
     // 6. Trade Bias Logic
     let tradeBias: "LONG" | "SHORT" | "NEUTRAL" = "NEUTRAL";
-    let biasColor = "bg-gray-100 text-gray-700 border-gray-300";
 
-    if (positionInRange <= 0.25 || (isAboveSma20 && positionInRange <= 0.45)) {
+    if ((rsi !== null && rsi <= 35) || positionInRange <= 0.25 || (isAboveSma20 && positionInRange <= 0.45)) {
       tradeBias = "LONG";
-      biasColor = "bg-emerald-100 text-emerald-800 border-emerald-300";
-    } else if (positionInRange >= 0.75 || (!isAboveSma20 && positionInRange >= 0.55)) {
+    } else if ((rsi !== null && rsi >= 65) || positionInRange >= 0.75 || (!isAboveSma20 && positionInRange >= 0.55)) {
       tradeBias = "SHORT";
-      biasColor = "bg-rose-100 text-rose-800 border-rose-300";
     }
+
+    const biasColor =
+      tradeBias === "LONG"
+        ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+        : tradeBias === "SHORT"
+        ? "bg-rose-100 text-rose-800 border-rose-300"
+        : "bg-gray-100 text-gray-700 border-gray-300";
 
     // Dynamic Title & Description generation
     let title = "Range Consolidation";
     let description = `Trading at ${formatPhp(currentPrice)}. Awaiting directional breakout.`;
 
     if (crossoverAlert) {
-      title = "Crossover Event Active";
+      title = "Active Market Alert";
       description = crossoverAlert;
     } else if (isAboveSma20) {
       title = "Bullish SMA Alignment";
@@ -170,7 +216,7 @@ export default function TradingInsightCard({
       biasColor,
       dcaAction: tradeBias === "LONG" ? "Deploy Ladder Buy" : tradeBias === "SHORT" ? "Hold PHP Cash" : "Wait for Setup",
       directiveDescription: tradeBias === "LONG" 
-        ? "Price alignment supports buying. Execute tranches near support." 
+        ? "Price alignment and technicals support buying. Execute tranches near support." 
         : "Market momentum is weak or extended. Maintain cash reserves.",
       crossoverAlert,
       targetLow,
@@ -178,6 +224,7 @@ export default function TradingInsightCard({
       sma20,
       sma50,
       sma200,
+      rsi,
       macroTrend,
     };
   }, [symbol, points, activePortfolio, support, resistance]);
@@ -199,9 +246,9 @@ export default function TradingInsightCard({
       </div>
 
       <div className="space-y-3">
-        {/* Dynamic Crossover Banner Alert */}
+        {/* Dynamic Alert Banner */}
         {insights.crossoverAlert && (
-          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-900">
+          <div className="rounded-md border border-indigo-200 bg-indigo-50/70 p-3 text-xs font-semibold text-indigo-900">
             {insights.crossoverAlert}
           </div>
         )}
@@ -224,13 +271,13 @@ export default function TradingInsightCard({
           </p>
         </div>
 
-        {/* Moving Averages Table */}
+        {/* Moving Averages & RSI Indicators Grid */}
         <div className="rounded-md border border-gray-200 bg-gray-50/80 p-2.5">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-2 flex justify-between">
-            <span>Moving Averages (PHP)</span>
+            <span>Indicators & Moving Averages</span>
             <span className="text-gray-700 font-bold">{insights.macroTrend}</span>
           </div>
-          <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="grid grid-cols-4 gap-2 text-center">
             <div className="bg-white p-1.5 rounded border border-gray-100">
               <div className="text-[10px] text-gray-500 font-medium">20 SMA</div>
               <div className="text-xs font-bold text-gray-800">
@@ -247,6 +294,12 @@ export default function TradingInsightCard({
               <div className="text-[10px] text-gray-500 font-medium">200 SMA</div>
               <div className="text-xs font-bold text-gray-800">
                 {insights.sma200 ? formatPhp(insights.sma200) : "Building..."}
+              </div>
+            </div>
+            <div className="bg-white p-1.5 rounded border border-indigo-100">
+              <div className="text-[10px] text-indigo-600 font-medium">RSI (14)</div>
+              <div className="text-xs font-bold text-indigo-900">
+                {insights.rsi !== null ? insights.rsi : "Building..."}
               </div>
             </div>
           </div>

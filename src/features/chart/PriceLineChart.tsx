@@ -35,10 +35,11 @@ export default function PriceLineChart({
   support: externalSupport,
   resistance: externalResistance,
 }: PriceLineChartProps) {
-  // Toggle states for individual SMA levels
+  // Toggle states for individual SMA levels and RSI
   const [showSma20, setShowSma20] = useState<boolean>(true);
   const [showSma50, setShowSma50] = useState<boolean>(true);
   const [showSma200, setShowSma200] = useState<boolean>(true);
+  const [showRsi, setShowRsi] = useState<boolean>(true);
 
   // 1. Calculate local extremes and the 50% Equilibrium Key Level if not provided
   const recentData = points.slice(-Math.min(30, points.length));
@@ -48,7 +49,41 @@ export default function PriceLineChart({
   // The Key Level is set as the 50% midpoint equilibrium of the current view range
   const equilibriumKeyLevel = (calculatedSupport + calculatedResistance) / 2;
 
-  // 2. Compute chart data, rolling 20 SMA, 50 SMA, 200 SMA, and Key Levels on the fly
+  // 2. Calculate 14-period RSI across dataset
+  const rsiPeriod = 14;
+  const rsiValues: (number | null)[] = new Array(points.length).fill(null);
+  if (points.length > rsiPeriod) {
+    let gains = 0;
+    let losses = 0;
+
+    for (let i = 1; i <= rsiPeriod; i++) {
+      const prevPrice = (points[i - 1].high + points[i - 1].low) / 2;
+      const currPrice = (points[i].high + points[i].low) / 2;
+      const diff = currPrice - prevPrice;
+      if (diff >= 0) gains += diff;
+      else losses += Math.abs(diff);
+    }
+
+    let avgGain = gains / rsiPeriod;
+    let avgLoss = losses / rsiPeriod;
+
+    rsiValues[rsiPeriod] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+
+    for (let i = rsiPeriod + 1; i < points.length; i++) {
+      const prevPrice = (points[i - 1].high + points[i - 1].low) / 2;
+      const currPrice = (points[i].high + points[i].low) / 2;
+      const diff = currPrice - prevPrice;
+      const gain = diff > 0 ? diff : 0;
+      const loss = diff < 0 ? Math.abs(diff) : 0;
+
+      avgGain = (avgGain * (rsiPeriod - 1) + gain) / rsiPeriod;
+      avgLoss = (avgLoss * (rsiPeriod - 1) + loss) / rsiPeriod;
+
+      rsiValues[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+    }
+  }
+
+  // 3. Compute chart data, rolling 20 SMA, 50 SMA, 200 SMA, RSI, and Key Levels on the fly
   const chartData = points.map((p, index, arr) => {
     // 20-period SMA
     let sma20Value: number | undefined = undefined;
@@ -89,6 +124,7 @@ export default function PriceLineChart({
       sma20: sma20Value,
       sma50: sma50Value,
       sma200: sma200Value,
+      rsi: rsiValues[index] !== null ? Number(rsiValues[index]?.toFixed(2)) : undefined,
       keyLevel: "keyLevel" in p && (p as any).keyLevel !== undefined ? (p as any).keyLevel : equilibriumKeyLevel,
     };
   });
@@ -97,10 +133,10 @@ export default function PriceLineChart({
   const resistance = externalResistance !== undefined && externalResistance !== null ? externalResistance : calculatedResistance;
 
   return (
-    <div className="w-full space-y-2">
+    <div className="w-full space-y-4">
       {/* Level Toggle Buttons Bar */}
       <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
-        <span className="font-semibold text-gray-500 mr-1">SMA Levels:</span>
+        <span className="font-semibold text-gray-500 mr-1">Overlays & Indicators:</span>
         <button
           type="button"
           onClick={() => setShowSma20(!showSma20)}
@@ -134,8 +170,20 @@ export default function PriceLineChart({
         >
           200 SMA
         </button>
+        <button
+          type="button"
+          onClick={() => setShowRsi(!showRsi)}
+          className={`px-2.5 py-1 rounded-md text-xs font-bold border transition-colors ${
+            showRsi
+              ? "bg-indigo-100 text-indigo-800 border-indigo-300"
+              : "bg-gray-100 text-gray-400 border-gray-200 hover:bg-gray-200"
+          }`}
+        >
+          RSI (14)
+        </button>
       </div>
 
+      {/* Main Price Chart */}
       <div className="h-96 w-full">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
@@ -150,7 +198,7 @@ export default function PriceLineChart({
             />
             <Tooltip
               formatter={(value: any, name: string) => [
-                value !== undefined ? formatPhp(Number(value)) : "N/A",
+                value !== undefined ? (name === "RSI (14)" ? value : formatPhp(Number(value))) : "N/A",
                 name.toUpperCase(),
               ]}
               labelStyle={{ color: "#374151", fontWeight: "bold" }}
@@ -255,6 +303,41 @@ export default function PriceLineChart({
           </ComposedChart>
         </ResponsiveContainer>
       </div>
+
+      {/* RSI Sub-Chart Panel */}
+      {showRsi && (
+        <div className="rounded-lg border border-indigo-100 bg-indigo-50/20 p-3">
+          <div className="flex items-center justify-between text-xs font-semibold text-indigo-900 mb-2">
+            <span>Relative Strength Index (RSI 14)</span>
+            <span className="text-gray-500 font-medium">Overbought &gt; 70 | Oversold &lt; 30</span>
+          </div>
+          <div className="h-28 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={chartData} margin={{ top: 5, right: 30, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="label" hide />
+                <YAxis domain={[0, 100]} ticks={[30, 50, 70]} stroke="#9ca3af" fontSize={10} tickLine={false} orientation="right" />
+                <Tooltip
+                  formatter={(value: any) => [value ?? "N/A", "RSI"]}
+                  labelStyle={{ color: "#374151", fontWeight: "bold" }}
+                />
+                <ReferenceLine y={70} stroke="#ef4444" strokeDasharray="3 3" />
+                <ReferenceLine y={50} stroke="#9ca3af" strokeDasharray="2 2" />
+                <ReferenceLine y={30} stroke="#10b981" strokeDasharray="3 3" />
+                <Line
+                  type="monotone"
+                  dataKey="rsi"
+                  stroke="#6366f1"
+                  strokeWidth={1.5}
+                  dot={false}
+                  name="RSI"
+                  connectNulls={false}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
