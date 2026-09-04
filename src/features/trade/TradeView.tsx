@@ -108,7 +108,7 @@ export default function TradeView() {
   }, [portfolio, symbol, isCashFlow]);
 
   const portfolioTotals = useMemo(() => {
-    const totalSpent = portfolio.reduce((sum, p) => sum + p.spent, 0);
+    const totalSpent = portfolio.reduce((sum, p) => sum + Math.max(0, p.spent), 0);
     const totalSold = portfolio.reduce((sum, p) => sum + p.sold, 0);
     const withKnownPrice = portfolio.filter((p) => p.currentValue !== null && p.gainLoss !== null);
     
@@ -358,30 +358,33 @@ export default function TradeView() {
                       </td>
                     </tr>
                   ) : (
-                    portfolio.map((entry) => (
-                      <tr key={entry.symbol}>
-                        <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                          {entry.name} <span className="text-gray-400">({entry.symbol})</span>
-                        </td>
-                        <td className="px-4 py-3 text-right text-sm text-gray-700">{formatCoinAmount(entry.holdings)}</td>
-                        <td className="px-4 py-3 text-right text-sm text-emerald-600 font-medium">{formatPhp(entry.sold)}</td>
-                        <td className={`px-4 py-3 text-right text-sm font-medium ${entry.spent < 0 ? "text-emerald-600" : "text-gray-700"}`}>
-                          {formatPhp(entry.spent)}
-                        </td>
-                        <td className="px-4 py-3 text-right text-sm text-gray-700">
-                          {entry.currentValue !== null ? formatPhp(entry.currentValue) : "—"}
-                        </td>
-                        <td
-                          className={`px-4 py-3 text-right text-sm font-medium ${
-                            entry.gainLoss === null ? "text-gray-400" : entry.gainLoss >= 0 ? "text-green-600" : "text-red-600"
-                          }`}
-                        >
-                          {entry.gainLoss !== null
-                            ? `${entry.gainLoss >= 0 ? "+" : ""}${formatPhp(entry.gainLoss)}`
-                            : "—"}
-                        </td>
-                      </tr>
-                    ))
+                    portfolio.map((entry) => {
+                      const displaySpent = Math.max(0, entry.spent);
+                      return (
+                        <tr key={entry.symbol}>
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                            {entry.name} <span className="text-gray-400">({entry.symbol})</span>
+                          </td>
+                          <td className="px-4 py-3 text-right text-sm text-gray-700">{formatCoinAmount(entry.holdings)}</td>
+                          <td className="px-4 py-3 text-right text-sm text-emerald-600 font-medium">{formatPhp(entry.sold)}</td>
+                          <td className="px-4 py-3 text-right text-sm font-medium text-gray-700">
+                            {formatPhp(displaySpent)}
+                          </td>
+                          <td className="px-4 py-3 text-right text-sm text-gray-700">
+                            {entry.currentValue !== null ? formatPhp(entry.currentValue) : "—"}
+                          </td>
+                          <td
+                            className={`px-4 py-3 text-right text-sm font-medium ${
+                              entry.gainLoss === null ? "text-gray-400" : entry.gainLoss >= 0 ? "text-green-600" : "text-red-600"
+                            }`}
+                          >
+                            {entry.gainLoss !== null
+                              ? `${entry.gainLoss >= 0 ? "+" : ""}${formatPhp(entry.gainLoss)}`
+                              : "—"}
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>

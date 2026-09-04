@@ -35,6 +35,56 @@ export function useTradeLogic() {
   const [editError, setEditError] = useState<string | null>(null);
   const [editSaving, setEditSaving] = useState(false);
 
+// Updated Portfolio Logic using Cost-Floor Aggregation
+const processPortfolio = (
+  serverPortfolio: PortfolioEntry[],
+  txList: TransactionView[]
+): PortfolioEntry[] => {
+  const coinMap = new Map<
+    string,
+    {
+      totalBoughtPhp: number;
+      totalSoldPhp: number;
+    }
+  >();
+
+  for (const t of txList) {
+    if (!t.symbol || t.symbol === "PHP") continue;
+    const tType = String(t.type).toLowerCase();
+
+    if (!coinMap.has(t.symbol)) {
+      coinMap.set(t.symbol, { totalBoughtPhp: 0, totalSoldPhp: 0 });
+    }
+
+    const stats = coinMap.get(t.symbol)!;
+    if (tType === "buy") {
+      stats.totalBoughtPhp += Number(t.phpAmount) || 0;
+    } else if (tType === "sell") {
+      stats.totalSoldPhp += Number(t.phpAmount) || 0;
+    }
+  }
+
+  return serverPortfolio.map((entry) => {
+    const stats = coinMap.get(entry.symbol);
+    const totalBought = stats ? stats.totalBoughtPhp : 0;
+    const totalSold = stats ? stats.totalSoldPhp : 0;
+
+    // 1. Net Spent = Total Spent - Total Sold, floored at 0
+    // Once Total Sold >= Total Spent, Net Spent becomes 0
+    const netSpent = Math.max(0, totalBought - totalSold);
+
+    const currentValue = entry.currentValue !== null ? Number(entry.currentValue) : null;
+    
+    // 2. When Net Spent is 0, Gain / Loss equals full Current Value (Pure Gain)
+    const gainLoss = currentValue !== null ? currentValue - netSpent : null;
+
+    return {
+      ...entry,
+      spent: netSpent,
+      gainLoss,
+    };
+  });
+};
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
@@ -50,7 +100,10 @@ export function useTradeLogic() {
       setCoinOptions(options);
       setSymbol((prev) => prev || options[0]?.symbol || "");
       setTransactions(txData.transactions);
-      setPortfolio(txData.portfolio);
+      
+      // Process portfolio to apply Average Cost Basis logic
+      const adjustedPortfolio = processPortfolio(txData.portfolio, txData.transactions);
+      setPortfolio(adjustedPortfolio);
     } catch (err) {
       setLoadError((err as Error).message);
     } finally {
