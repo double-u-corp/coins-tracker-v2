@@ -4,13 +4,15 @@ import { formatPhp } from "@/lib/format";
 interface DCACalculatorProps {
   symbol: string;
   currentPrice: number;
+  support?: number | null;
+  resistance?: number | null;
   portfolio: {
     holdings: number;
     spent: number;
   } | null;
 }
 
-export default function DCACalculator({ symbol, currentPrice, portfolio }: DCACalculatorProps) {
+export default function DCACalculator({ symbol, currentPrice, support, resistance, portfolio }: DCACalculatorProps) {
   const [mode, setMode] = useState<"targetPrice" | "budget">("targetPrice");
   const [targetPriceInput, setTargetPriceInput] = useState<string>("");
   const [budgetInput, setBudgetInput] = useState<string>("");
@@ -140,9 +142,24 @@ export default function DCACalculator({ symbol, currentPrice, portfolio }: DCACa
       {mode === "targetPrice" && (
         <div className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-700">
-              Target Average Price (₱)
-            </label>
+            <div className="flex justify-between items-center mb-1">
+              <label className="text-xs font-medium text-gray-700">
+                Target Average Break-Even Price (₱)
+              </label>
+              {/* Quick Level Presets if Support/Resistance exist */}
+              <div className="flex gap-1">
+                {support && support > currentPrice && support < currentAverage && (
+                  <button
+                    type="button"
+                    onClick={() => setTargetPriceInput(support.toFixed(2))}
+                    className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
+                  >
+                    Use Support ({formatPhp(support)})
+                  </button>
+                )}
+              </div>
+            </div>
+
             <div className="relative">
               <input
                 type="number"
@@ -152,18 +169,16 @@ export default function DCACalculator({ symbol, currentPrice, portfolio }: DCACa
                 placeholder={`e.g., ${((currentAverage + currentPrice) / 2).toFixed(2)}`}
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
               />
-              {currentAverage > currentPrice && (
-                <button
-                  type="button"
-                  onClick={() => setTargetPriceInput(((currentAverage + currentPrice) / 2).toFixed(2))}
-                  className="absolute right-2 top-1.5 rounded bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-600 hover:bg-gray-200"
-                >
-                  Midpoint
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => setTargetPriceInput(((currentAverage + currentPrice) / 2).toFixed(2))}
+                className="absolute right-2 top-1.5 rounded bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-600 hover:bg-gray-200"
+              >
+                Midpoint
+              </button>
             </div>
             <p className="mt-1 text-[11px] text-gray-500">
-              Enter a price between current market ({formatPhp(currentPrice)}) and your avg ({formatPhp(currentAverage)}).
+              Set your target break-even goal between current market ({formatPhp(currentPrice)}) and your current average ({formatPhp(currentAverage)}).
             </p>
           </div>
 
@@ -221,11 +236,11 @@ export default function DCACalculator({ symbol, currentPrice, portfolio }: DCACa
                 step="any"
                 value={budgetInput}
                 onChange={(e) => setBudgetInput(e.target.value)}
-                placeholder="e.g., 3000"
+                placeholder="e.g., 5000"
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
               />
               <div className="absolute right-2 top-1.5 flex gap-1">
-                {[1000, 3000, 5000].map((amt) => (
+                {[3000, 5000, 10000, 20000].map((amt) => (
                   <button
                     key={amt}
                     type="button"

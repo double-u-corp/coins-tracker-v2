@@ -222,7 +222,7 @@ export default function PriceLineChart({
       {showRsi && (
         <div className="h-20 sm:h-28 w-full -ml-2 sm:ml-0 mt-1">
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartData} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
+<ComposedChart data={chartData} margin={{ top: 5, right: window.innerWidth < 640 ? 5 : 20, left: window.innerWidth < 640 ? 5 : 20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
               <YAxis orientation="right" domain={[0, 100]} ticks={[30, 70]} stroke="#9ca3af" fontSize={9} tickLine={false} axisLine={false} width={55} />
               <Tooltip formatter={(value: any) => [value ?? "N/A", "RSI"]} labelStyle={{ display: 'none' }} />
