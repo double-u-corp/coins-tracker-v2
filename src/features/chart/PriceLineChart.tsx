@@ -35,9 +35,9 @@ export default function PriceLineChart({
   support: externalSupport,
   resistance: externalResistance,
 }: PriceLineChartProps) {
-  const [showSma20, setShowSma20] = useState<boolean>(false);
-  const [showSma50, setShowSma50] = useState<boolean>(false);
-  const [showSma200, setShowSma200] = useState<boolean>(false);
+  const [showSma20, setShowSma20] = useState<boolean>(true);
+  const [showSma50, setShowSma50] = useState<boolean>(true);
+  const [showSma200, setShowSma200] = useState<boolean>(true);
   const [showRsi, setShowRsi] = useState<boolean>(false);
 
   if (!points || points.length === 0) {
@@ -55,7 +55,7 @@ export default function PriceLineChart({
     const recentData = points.slice(-Math.min(30, points.length));
     const calcSupport = Math.min(...recentData.map((p) => p.low));
     const calcResistance = Math.max(...recentData.map((p) => p.high));
-    const equilibrium = (calcSupport + calcResistance) / 2;
+    const equilibrium = Number((calcSupport + calcResistance) / 2);
 
     const rsiPeriod = 14;
     const rsiValues: (number | null)[] = new Array(points.length).fill(null);
@@ -86,20 +86,22 @@ export default function PriceLineChart({
         return sum / period;
       };
 
+      const rawKeyLevel = "keyLevel" in p ? (p as any).keyLevel : undefined;
+
       return {
         ...p,
         sma20: calcSma(20),
         sma50: calcSma(50),
         sma200: calcSma(200),
         rsi: rsiValues[index] !== null ? Number(rsiValues[index]?.toFixed(2)) : undefined,
-        keyLevel: ("keyLevel" in p && p.keyLevel !== undefined) ? p.keyLevel : equilibrium,
+        keyLevel: rawKeyLevel !== undefined && rawKeyLevel !== null ? Number(rawKeyLevel) : equilibrium,
       };
     });
   }, [points]);
 
   const support = externalSupport ?? Math.min(...chartData.slice(-30).map(d => d.low));
   const resistance = externalResistance ?? Math.max(...chartData.slice(-30).map(d => d.high));
-  const currentKeyLevel = chartData[chartData.length - 1]?.keyLevel;
+  const currentKeyLevel: number | undefined = chartData[chartData.length - 1]?.keyLevel;
 
   return (
     <div className="w-full flex flex-col gap-3">
@@ -152,7 +154,6 @@ export default function PriceLineChart({
             {showSma50 && <Line type="monotone" dataKey="sma50" stroke="#3b82f6" strokeWidth={1.5} dot={false} name="50 SMA" />}
             {showSma200 && <Line type="monotone" dataKey="sma200" stroke="#a855f7" strokeWidth={1.5} strokeDasharray="4 4" dot={false} name="200 SMA" />}
 
-            {/* Key Level converted to ReferenceLine (Removes it from Tooltip and matches styling) */}
             {showKeyLevels && currentKeyLevel !== undefined && (
               <ReferenceLine 
                 y={currentKeyLevel} 
@@ -169,7 +170,7 @@ export default function PriceLineChart({
               />
             )}
 
-            {showBreakEven && breakEvenPrice && (
+            {showBreakEven && breakEvenPrice != null && (
               <ReferenceLine 
                 y={breakEvenPrice} 
                 stroke="#3b82f6" 
