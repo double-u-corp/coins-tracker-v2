@@ -128,14 +128,19 @@ export default function PriceLineChart({
               minTickGap={20}
             />
             
-            <YAxis
+<YAxis
               orientation="right"
               stroke="#9ca3af"
               fontSize={10}
-              width={55}
+              width={45}
               tickLine={false}
               axisLine={false}
-              tickFormatter={(val) => formatPhp(val)}
+              tickFormatter={(val) => {
+                if (window.innerWidth < 640 && val >= 1000) {
+                  return `${(val / 1000).toFixed(0)}k`;
+                }
+                return formatPhp(val);
+              }}
               domain={["auto", "auto"]}
             />
             
