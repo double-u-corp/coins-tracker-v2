@@ -150,7 +150,34 @@ export function useChartLogic() {
       })
       .then((data) => {
         setTransactions(data.transactions || []);
-        setPortfolio(data.portfolio || []);
+        
+        // Recalculate portfolio items for Cost Floor method
+        const rawPortfolio: PortfolioItem[] = data.portfolio || [];
+        const txs: Transaction[] = data.transactions || [];
+
+        const coinMap = new Map<string, { bought: number; sold: number }>();
+        for (const t of txs) {
+          if (!t.symbol || t.symbol === "PHP") continue;
+          if (!coinMap.has(t.symbol)) coinMap.set(t.symbol, { bought: 0, sold: 0 });
+          const stats = coinMap.get(t.symbol)!;
+          if (t.type === "buy") stats.bought += Number(t.phpAmount) || 0;
+          else if (t.type === "sell") stats.sold += Number(t.phpAmount) || 0;
+        }
+
+        const adjustedPortfolio = rawPortfolio.map((p) => {
+          const stats = coinMap.get(p.symbol);
+          const bought = stats ? stats.bought : 0;
+          const sold = stats ? stats.sold : 0;
+          const netSpent = Math.max(0, bought - sold);
+          const val = p.currentValue ?? 0;
+          return {
+            ...p,
+            spent: netSpent,
+            gainLoss: val - netSpent,
+          };
+        });
+
+        setPortfolio(adjustedPortfolio);
       })
       .catch((err) => console.error(err))
       .finally(() => setTxLoading(false));

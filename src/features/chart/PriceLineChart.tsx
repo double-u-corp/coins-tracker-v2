@@ -35,21 +35,17 @@ export default function PriceLineChart({
   support: externalSupport,
   resistance: externalResistance,
 }: PriceLineChartProps) {
-  // Toggle states for individual SMA levels and RSI
   const [showSma20, setShowSma20] = useState<boolean>(true);
   const [showSma50, setShowSma50] = useState<boolean>(true);
   const [showSma200, setShowSma200] = useState<boolean>(true);
   const [showRsi, setShowRsi] = useState<boolean>(true);
 
-  // 1. Calculate local extremes and the 50% Equilibrium Key Level if not provided
   const recentData = points.slice(-Math.min(30, points.length));
   const calculatedSupport = Math.min(...recentData.map((p) => p.low));
   const calculatedResistance = Math.max(...recentData.map((p) => p.high));
   
-  // The Key Level is set as the 50% midpoint equilibrium of the current view range
   const equilibriumKeyLevel = (calculatedSupport + calculatedResistance) / 2;
 
-  // 2. Calculate 14-period RSI across dataset
   const rsiPeriod = 14;
   const rsiValues: (number | null)[] = new Array(points.length).fill(null);
   if (points.length > rsiPeriod) {
@@ -83,9 +79,7 @@ export default function PriceLineChart({
     }
   }
 
-  // 3. Compute chart data, rolling 20 SMA, 50 SMA, 200 SMA, RSI, and Key Levels on the fly
   const chartData = points.map((p, index, arr) => {
-    // 20-period SMA
     let sma20Value: number | undefined = undefined;
     if (index >= 19) {
       let sum = 0;
@@ -95,7 +89,6 @@ export default function PriceLineChart({
       sma20Value = sum / 20;
     }
 
-    // 50-period SMA
     let sma50Value: number | undefined = undefined;
     if (index >= 49) {
       let sum = 0;
@@ -105,7 +98,6 @@ export default function PriceLineChart({
       sma50Value = sum / 50;
     }
 
-    // 200-period SMA
     let sma200Value: number | undefined = undefined;
     if (index >= 199) {
       let sum = 0;
@@ -134,7 +126,6 @@ export default function PriceLineChart({
 
   return (
     <div className="w-full space-y-4">
-      {/* Level Toggle Buttons Bar */}
       <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
         <span className="font-semibold text-gray-500 mr-1">Overlays & Indicators:</span>
         <button
@@ -183,15 +174,17 @@ export default function PriceLineChart({
         </button>
       </div>
 
-      {/* Main Price Chart */}
       <div className="h-96 w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+          {/* Increased left margin to prevent cutoffs */}
+          <ComposedChart data={chartData} margin={{ top: 10, right: 30, left: 15, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
             <XAxis dataKey="label" stroke="#9ca3af" fontSize={12} tickLine={false} />
+            {/* Extended Y-Axis width to 100px so ₱275,000+ numbers display fully */}
             <YAxis
               stroke="#9ca3af"
               fontSize={12}
+              width={100}
               tickLine={false}
               tickFormatter={(val) => formatPhp(val)}
               domain={["auto", "auto"]}
@@ -212,7 +205,6 @@ export default function PriceLineChart({
               <Line type="monotone" dataKey="low" stroke="#dc2626" strokeWidth={2} dot={false} name="Low" />
             )}
 
-            {/* 20 SMA Line (Amber) */}
             {showSma20 && (
               <Line
                 type="monotone"
@@ -225,7 +217,6 @@ export default function PriceLineChart({
               />
             )}
 
-            {/* 50 SMA Line (Blue) */}
             {showSma50 && (
               <Line
                 type="monotone"
@@ -238,7 +229,6 @@ export default function PriceLineChart({
               />
             )}
 
-            {/* 200 SMA Line (Purple Dashed) */}
             {showSma200 && (
               <Line
                 type="monotone"
@@ -256,8 +246,7 @@ export default function PriceLineChart({
               <Line type="monotone" dataKey="keyLevel" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="4 4" dot={false} name="Key Level (Equilibrium)" />
             )}
 
-            {/* Average Cost / Break-even Reference Line */}
-            {showBreakEven && breakEvenPrice !== null && (
+            {showBreakEven && breakEvenPrice !== null && breakEvenPrice > 0 && (
               <ReferenceLine
                 y={breakEvenPrice}
                 stroke="#2563eb"
@@ -271,7 +260,6 @@ export default function PriceLineChart({
               />
             )}
 
-            {/* Resistance Line */}
             {resistance !== undefined && resistance !== null && (
               <ReferenceLine
                 y={resistance}
@@ -286,7 +274,6 @@ export default function PriceLineChart({
               />
             )}
 
-            {/* Support Line */}
             {support !== undefined && support !== null && (
               <ReferenceLine
                 y={support}
@@ -304,7 +291,6 @@ export default function PriceLineChart({
         </ResponsiveContainer>
       </div>
 
-      {/* RSI Sub-Chart Panel */}
       {showRsi && (
         <div className="rounded-lg border border-indigo-100 bg-indigo-50/20 p-3">
           <div className="flex items-center justify-between text-xs font-semibold text-indigo-900 mb-2">
@@ -313,7 +299,7 @@ export default function PriceLineChart({
           </div>
           <div className="h-28 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={chartData} margin={{ top: 5, right: 30, left: 0, bottom: 0 }}>
+              <ComposedChart data={chartData} margin={{ top: 5, right: 30, left: 15, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="label" hide />
                 <YAxis domain={[0, 100]} ticks={[30, 50, 70]} stroke="#9ca3af" fontSize={10} tickLine={false} orientation="right" />

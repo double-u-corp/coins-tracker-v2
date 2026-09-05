@@ -71,7 +71,6 @@ export default function ChartView() {
     return (lastPoint.high + lastPoint.low) / 2;
   }, [selectedCoin, points]);
 
-  // Calculate swing ranking across all coins (Target High vs Target Low)
   const swingRanks = useMemo(() => {
     if (!allCoins || allCoins.length === 0) return new Map<string, number>();
 
@@ -161,7 +160,6 @@ export default function ChartView() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Navigation Header / Calendar Link */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link
           href="/"
@@ -184,7 +182,6 @@ export default function ChartView() {
         )}
       </div>
 
-      {/* Top Controls Bar */}
       <div className="flex flex-wrap items-end gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
         <Dropdown
           label="Coin"
@@ -197,7 +194,6 @@ export default function ChartView() {
           }))}
         />
 
-        {/* Range Selector */}
         <div className="flex flex-col gap-1 text-sm font-medium text-gray-700">
           <span>Range</span>
           <div
@@ -222,7 +218,6 @@ export default function ChartView() {
           </div>
         </div>
 
-        {/* Analysis Overlays */}
         <div className="flex flex-col gap-1 text-sm font-medium text-gray-700">
           <span>Analysis Overlays</span>
           <div
@@ -311,7 +306,6 @@ export default function ChartView() {
                         </span>
                       </div>
 
-                      {/* FLATTENED PRICE ROW */}
                       <div className="flex items-center justify-between text-xs pt-1 border-t border-gray-100 mt-2">
                         <div className="text-gray-900">
                           <span className="text-[10px] font-semibold uppercase text-gray-500 mr-1">Price</span>
@@ -339,11 +333,7 @@ export default function ChartView() {
         <div className="flex flex-col gap-6">
           {chartError && <AlertBanner variant="error" message={`Failed to load chart: ${chartError}`} />}
 
-          {/* Header Card with Calendar-themed Purple Rank Badge */}
-{/* Header Card with Calendar-themed Purple Rank Badge */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white border border-purple-100 rounded-lg p-5 shadow-sm">
-            
-            {/* LEFT SIDE: Rank and Name Side-by-Side */}
             <div className="flex flex-row items-center gap-3 flex-wrap sm:flex-nowrap">
               {coinRank !== null && (
                 <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-2.5 py-1 rounded-md whitespace-nowrap">
@@ -357,7 +347,6 @@ export default function ChartView() {
               </h2>
             </div>
 
-            {/* RIGHT SIDE: Current Price */}
             {currentPrice > 0 && (
               <div className="text-left sm:text-right border-t sm:border-0 border-gray-100 pt-3 sm:pt-0 w-full sm:w-auto mt-2 sm:mt-0">
                 <div className="text-xs font-semibold uppercase text-gray-500">Current Price</div>
@@ -367,7 +356,7 @@ export default function ChartView() {
               </div>
             )}
           </div>
-          {/* Full Width Chart Container */}
+
           <div className="w-full rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
             {chartLoading ? (
               <div className="flex h-96 items-center justify-center text-sm text-gray-500">
@@ -380,9 +369,9 @@ export default function ChartView() {
                 showHigh={showHigh}
                 showLow={showLow}
                 showKeyLevels={showKeyLevels}
-                showBreakEven={!!activePortfolio && activePortfolio.holdings > 0}
+                showBreakEven={!!activePortfolio && activePortfolio.holdings > 0 && activePortfolio.spent > 0}
                 breakEvenPrice={
-                  activePortfolio && activePortfolio.holdings > 0
+                  activePortfolio && activePortfolio.holdings > 0 && activePortfolio.spent > 0
                     ? activePortfolio.spent / activePortfolio.holdings
                     : null
                 }
@@ -392,7 +381,6 @@ export default function ChartView() {
             )}
           </div>
 
-          {/* Spot Trading Insights */}
           <TradingInsightCard
             points={points}
             symbol={symbol}
@@ -401,17 +389,14 @@ export default function ChartView() {
             resistance={technicals.resistance}
           />
 
-          {/* DCA Strategy Playbook */}
           <StrategyPlaybook symbol={symbol} support={technicals.support} />
 
-          {/* DCA Recovery Calculator */}
           <DCACalculator
             symbol={symbol}
             currentPrice={currentPrice}
             portfolio={activePortfolio}
           />
 
-          {/* Transaction History */}
           <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
             <h3 className="mb-3 text-sm font-semibold text-gray-900">
               Transaction History <span className="text-brand-600">({symbol})</span>
@@ -458,7 +443,6 @@ export default function ChartView() {
             )}
           </div>
 
-          {/* Log an Event / JournalSidebar */}
           <JournalSidebar
             entries={entries}
             loading={journalLoading}

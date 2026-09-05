@@ -19,7 +19,7 @@ export interface InsightResult {
   biasColor: string;
   dcaAction: string;
   directiveDescription: string;
-  crossoverAlert: string | null; // Explict Crossover Text
+  crossoverAlert: string | null; // Explicit Crossover Text
   targetLow: number | null;
   targetHigh: number | null;
   sma20: number | null;
@@ -246,7 +246,6 @@ export default function TradingInsightCard({
       </div>
 
       <div className="space-y-3">
-        {/* Dynamic Alert Banner */}
         {insights.crossoverAlert && (
           <div className="rounded-md border border-indigo-200 bg-indigo-50/70 p-3 text-xs font-semibold text-indigo-900">
             {insights.crossoverAlert}
@@ -258,7 +257,6 @@ export default function TradingInsightCard({
           <p className="text-sm leading-relaxed text-gray-600">{insights.description}</p>
         </div>
 
-        {/* DCA Action Directive Banner */}
         <div className="rounded-md border border-brand-200 bg-brand-50/50 p-3">
           <div className="flex items-center justify-between mb-1">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-brand-800">DCA Allocation Directive</div>
@@ -271,7 +269,6 @@ export default function TradingInsightCard({
           </p>
         </div>
 
-        {/* Moving Averages & RSI Indicators Grid */}
         <div className="rounded-md border border-gray-200 bg-gray-50/80 p-2.5">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-2 flex justify-between">
             <span>Indicators & Moving Averages</span>
