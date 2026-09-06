@@ -286,6 +286,21 @@ export function useCatalystsLogic() {
     }
   };
 
+  const updateJournalEntry = async (id: number, input: { title?: string; notes?: string }) => {
+  const res = await fetch("/api/journal", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, ...input }),
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || errData.message || "Failed to update entry");
+  }
+
+  await fetchJournalEntries();
+};
+
 const deleteJournalEntry = async (id: number) => {
   const res = await fetch("/api/journal", {
     method: "DELETE",
@@ -324,6 +339,7 @@ const deleteJournalEntry = async (id: number) => {
     authenticated,
     addJournalEntry,
     deleteJournalEntry,
+    updateJournalEntry,
     aiCache,
     aiLoading,
     aiErrors,

@@ -15,6 +15,7 @@ export default function CatalystsView() {
     authenticated,
     addJournalEntry,
     deleteJournalEntry,
+    updateJournalEntry,
     aiCache,
     aiLoading,
     aiErrors,
@@ -198,6 +199,7 @@ export default function CatalystsView() {
           authenticated={authenticated}
           onAdd={addJournalEntry}
           onDelete={deleteJournalEntry}
+          onUpdate={updateJournalEntry}
         />
       </div>
     </div>

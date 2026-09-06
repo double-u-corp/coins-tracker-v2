@@ -1,4 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
+import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { isAuthenticatedRequest } from "@/lib/auth";
 import { createJournalEntrySchema, deleteJournalEntrySchema } from "@/validators/journalSchema";
@@ -6,14 +7,19 @@ import type { JournalEntryView } from "@/validators/journalSchema";
 
 type ListResponse = { entries: JournalEntryView[] };
 type CreateResponse = { entry: JournalEntryView };
+type UpdateResponse = { entry: JournalEntryView };
 type DeleteResponse = { ok: true };
 type ErrorResponse = { error: string };
+
+const updateJournalEntrySchema = z.object({
+  id: z.coerce.number({ invalid_type_error: "ID must be a number" }),
+  title: z.string().min(1, "Title cannot be empty").optional(),
+  notes: z.string().min(1, "Notes cannot be empty").optional(),
+});
 
 /**
  * GET /api/journal?symbol=X&from=YYYY-MM-DD&to=YYYY-MM-DD
  * Lists journal entries, optionally filtered to a date range and/or a coin.
- * When `symbol` is given, includes that coin's entries AND general entries
- * (coinId null) — general notes are relevant no matter which chart is open.
  */
 async function handleList(req: NextApiRequest, res: NextApiResponse<ListResponse | ErrorResponse>) {
   const { symbol, from, to } = req.query;
@@ -25,8 +31,6 @@ async function handleList(req: NextApiRequest, res: NextApiResponse<ListResponse
   let symbolFilter: { OR?: { coinId: number | null }[] } = {};
   if (typeof symbol === "string" && symbol.trim()) {
     const coin = await prisma.coin.findUnique({ where: { symbol: symbol.trim().toUpperCase() } });
-    // This coin's entries OR general (coin-agnostic) entries. -1 is a
-    // sentinel that matches nothing if the symbol isn't a monitored coin.
     symbolFilter = { OR: [{ coinId: coin?.id ?? -1 }, { coinId: null }] };
   }
 
@@ -58,7 +62,8 @@ async function handleCreate(req: NextApiRequest, res: NextApiResponse<CreateResp
     return res.status(401).json({ error: "Login required" });
   }
 
-  const parsed = createJournalEntrySchema.safeParse(req.body);
+  const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+  const parsed = createJournalEntrySchema.safeParse(body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Invalid journal entry" });
   }
@@ -92,13 +97,55 @@ async function handleCreate(req: NextApiRequest, res: NextApiResponse<CreateResp
   });
 }
 
+/** PUT /api/journal — edit a journal entry. Requires login. */
+async function handleUpdate(req: NextApiRequest, res: NextApiResponse<UpdateResponse | ErrorResponse>) {
+  if (!isAuthenticatedRequest(req)) {
+    return res.status(401).json({ error: "Login required" });
+  }
+
+  const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+  const parsed = updateJournalEntrySchema.safeParse(body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Invalid update payload" });
+  }
+
+  const { id, title, notes } = parsed.data;
+
+  const existing = await prisma.journalEntry.findUnique({ where: { id } });
+  if (!existing) {
+    return res.status(404).json({ error: "Journal entry not found" });
+  }
+
+  const updated = await prisma.journalEntry.update({
+    where: { id },
+    data: {
+      ...(title !== undefined && { title }),
+      ...(notes !== undefined && { notes }),
+    },
+    include: { coin: true },
+  });
+
+  return res.status(200).json({
+    entry: {
+      id: updated.id,
+      symbol: updated.coin?.symbol ?? null,
+      name: updated.coin?.name ?? null,
+      entryDate: updated.entryDate.toISOString(),
+      title: updated.title,
+      notes: updated.notes,
+      createdAt: updated.createdAt.toISOString(),
+    },
+  });
+}
+
 /** DELETE /api/journal — remove a journal entry. Requires login. */
 async function handleDelete(req: NextApiRequest, res: NextApiResponse<DeleteResponse | ErrorResponse>) {
   if (!isAuthenticatedRequest(req)) {
     return res.status(401).json({ error: "Login required" });
   }
 
-  const parsed = deleteJournalEntrySchema.safeParse(req.body);
+  const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+  const parsed = deleteJournalEntrySchema.safeParse(body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Invalid payload" });
   }
@@ -114,17 +161,20 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse<DeleteResp
 
 export default async function handler(
   req: NextApiRequest,
-  res: NextApiResponse<ListResponse | CreateResponse | DeleteResponse | ErrorResponse>
+  res: NextApiResponse<ListResponse | CreateResponse | UpdateResponse | DeleteResponse | ErrorResponse>
 ) {
   try {
     if (req.method === "POST") {
       return await handleCreate(req, res as NextApiResponse<CreateResponse | ErrorResponse>);
     }
+    if (req.method === "PUT") {
+      return await handleUpdate(req, res as NextApiResponse<UpdateResponse | ErrorResponse>);
+    }
     if (req.method === "DELETE") {
       return await handleDelete(req, res as NextApiResponse<DeleteResponse | ErrorResponse>);
     }
     if (req.method !== "GET") {
-      res.setHeader("Allow", "GET, POST, DELETE");
+      res.setHeader("Allow", "GET, POST, PUT, DELETE");
       return res.status(405).json({ error: "Method not allowed" });
     }
     return await handleList(req, res as NextApiResponse<ListResponse | ErrorResponse>);
