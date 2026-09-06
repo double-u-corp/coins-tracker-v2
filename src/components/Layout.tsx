@@ -14,12 +14,16 @@ const PROTECTED_NAV_LINKS = [
   { href: "/manage", label: "Manage Coins" },
 ];
 
+const PUBLIC_CATALYSTS = [
+  { href: "/catalysts", label: "Catalysts" }
+];
+
 export default function Layout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { authenticated, loading, logout } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const navLinks = authenticated ? [...PUBLIC_NAV_LINKS, ...PROTECTED_NAV_LINKS] : PUBLIC_NAV_LINKS;
+  const navLinks = authenticated ? [...PUBLIC_NAV_LINKS, ...PROTECTED_NAV_LINKS, ...PUBLIC_CATALYSTS] : [...PUBLIC_NAV_LINKS, ...PUBLIC_CATALYSTS];
 
   // Close the mobile menu automatically whenever the route changes.
   useEffect(() => {
