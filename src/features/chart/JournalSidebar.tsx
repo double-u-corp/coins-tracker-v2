@@ -2,6 +2,7 @@ import { useState } from "react";
 import AlertBanner from "@/components/AlertBanner";
 import JournalForm from "./JournalForm";
 import type { JournalEntryView } from "@/validators/journalSchema";
+import FormattedAiResponse from "@/components/FormattedAiResponse";
 
 interface JournalSidebarProps {
   entries: JournalEntryView[];
@@ -87,7 +88,8 @@ export default function JournalSidebar({
                     </button>
                   )}
                 </div>
-                <p className="mt-1 text-xs text-gray-600">{entry.notes}</p>
+                {/* <p className="mt-1 text-xs text-gray-600">{entry.notes}</p> */}
+                <FormattedAiResponse text={entry.notes} />
               </li>
             ))}
           </ul>

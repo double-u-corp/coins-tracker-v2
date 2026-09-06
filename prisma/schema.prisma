@@ -122,3 +122,12 @@ model NewsItem {
 
   @@index([coinId, publishedAt])
 }
+
+model CatalystLog {
+  id        Int      @id @default(autoincrement())
+  promptId  String   @unique
+  category  String   // "Daily" | "Weekly" | "Monthly"
+  response  String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

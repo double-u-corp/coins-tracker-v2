@@ -1,10 +1,17 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import type { JournalEntryView } from "@/validators/journalSchema";
 
 export interface CatalystPrompt {
   id: string;
   category: "Daily" | "Weekly" | "Monthly";
   title: string;
   prompt: string;
+}
+
+export interface CachedAiLog {
+  timestamp: number;
+  response: string;
+  category: "Daily" | "Weekly" | "Monthly";
 }
 
 const TOKENS = [
@@ -20,7 +27,6 @@ const chunkArray = (arr: string[], size: number) =>
 
 const tokenBatches = chunkArray(TOKENS, 6);
 
-// Daily Ticker Batches
 const derivativesPrompts: CatalystPrompt[] = tokenBatches.map((batch, index) => ({
   id: `daily-derivatives-${index + 1}`,
   category: "Daily",
@@ -42,7 +48,6 @@ const exploitPrompts: CatalystPrompt[] = tokenBatches.map((batch, index) => ({
   prompt: `Have there been any recent exploits, bridge hacks, or security incidents affecting ${batch.join(", ")} or the protocols/exchanges they rely on?`,
 }));
 
-// Weekly Exchange Listings & Delistings Batches
 const exchangeListingPrompts: CatalystPrompt[] = tokenBatches.map((batch, index) => ({
   id: `weekly-listings-${index + 1}`,
   category: "Weekly",
@@ -50,7 +55,6 @@ const exchangeListingPrompts: CatalystPrompt[] = tokenBatches.map((batch, index)
   prompt: `What are the latest official announcements regarding new listings, upcoming delistings, or network support changes on major exchanges (including Binance, Coinbase, OKX, Bybit, and Coins.ph) for ${batch.join(", ")}?`,
 }));
 
-// Monthly Unlocks Batches
 const monthlyUnlockPrompts: CatalystPrompt[] = tokenBatches.map((batch, index) => ({
   id: `token-batch-${index + 1}`,
   category: "Monthly",
@@ -122,6 +126,182 @@ export function useCatalystsLogic() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
 
+  const [aiCache, setAiCache] = useState<Record<string, CachedAiLog>>({});
+  const [aiLoading, setAiLoading] = useState<Record<string, boolean>>({});
+  const [aiErrors, setAiErrors] = useState<Record<string, string>>({});
+  const [savedStatus, setSavedStatus] = useState<Record<string, boolean>>({});
+
+  const [entries, setEntries] = useState<JournalEntryView[]>([]);
+  const [journalLoading, setJournalLoading] = useState(true);
+  const [journalError, setJournalError] = useState<string | null>(null);
+  const [authenticated, setAuthenticated] = useState(true);
+
+  const fetchAiLogs = useCallback(async () => {
+    try {
+      const res = await fetch("/api/catalyst-ai");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.logs) {
+          setAiCache(data.logs);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load DB AI logs", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAiLogs();
+  }, [fetchAiLogs]);
+
+  const generalEntries = useMemo(() => {
+    return entries.filter((entry) => !entry.symbol || entry.symbol.trim() === "");
+  }, [entries]);
+
+  const checkIsPeriodCurrent = (timestamp: number, category: "Daily" | "Weekly" | "Monthly") => {
+    const runDate = new Date(timestamp);
+    const now = new Date();
+
+    if (category === "Daily") {
+      return runDate.toDateString() === now.toDateString();
+    }
+    if (category === "Weekly") {
+      const diffDays = (now.getTime() - runDate.getTime()) / (1000 * 3600 * 24);
+      return diffDays < 7;
+    }
+    if (category === "Monthly") {
+      return runDate.getFullYear() === now.getFullYear() && runDate.getMonth() === now.getMonth();
+    }
+    return false;
+  };
+
+  const getPromptStatus = (id: string, category: "Daily" | "Weekly" | "Monthly") => {
+    const log = aiCache[id];
+    if (!log) return { status: "unrun", label: "Not Fetched" };
+
+    const isCurrent = checkIsPeriodCurrent(log.timestamp, category);
+    const dateStr = new Date(log.timestamp).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    if (isCurrent) {
+      return { status: "current", label: `Fetched (${category}) • ${dateStr}` };
+    } else {
+      return { status: "expired", label: `Expired (${dateStr})` };
+    }
+  };
+
+  const runAiSearch = async (
+    promptId: string,
+    promptText: string,
+    category: "Daily" | "Weekly" | "Monthly",
+    force = false
+  ) => {
+    setAiLoading((prev) => ({ ...prev, [promptId]: true }));
+    setAiErrors((prev) => ({ ...prev, [promptId]: "" }));
+
+    try {
+      const res = await fetch("/api/catalyst-ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          promptId,
+          prompt: promptText,
+          category,
+          forceRefresh: force,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to fetch live insights.");
+
+      setAiCache((prev) => ({
+        ...prev,
+        [promptId]: {
+          timestamp: Date.now(),
+          response: data.response,
+          category,
+        },
+      }));
+    } catch (err: any) {
+      setAiErrors((prev) => ({ ...prev, [promptId]: err.message || "An error occurred" }));
+    } finally {
+      setAiLoading((prev) => ({ ...prev, [promptId]: false }));
+    }
+  };
+
+  const fetchJournalEntries = useCallback(async () => {
+    setJournalLoading(true);
+    setJournalError(null);
+    try {
+      const res = await fetch("/api/journal");
+      if (res.status === 401) {
+        setAuthenticated(false);
+        return;
+      }
+      if (!res.ok) throw new Error("Failed to load journal entries");
+      const data = await res.json();
+      setEntries(data.entries || data || []);
+    } catch (err) {
+      setJournalError((err as Error).message);
+    } finally {
+      setJournalLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchJournalEntries();
+  }, [fetchJournalEntries]);
+
+  const addJournalEntry = async (input: { symbol: string | null; entryDate: string; title: string; notes: string }) => {
+    const res = await fetch("/api/journal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.message || "Failed to add journal entry");
+    }
+    await fetchJournalEntries();
+  };
+
+  const saveAiResponseToJournal = async (promptId: string, title: string, text: string) => {
+    try {
+      await addJournalEntry({
+        symbol: null,
+        entryDate: new Date().toISOString().split("T")[0],
+        title: `AI Catalyst: ${title}`,
+        notes: text,
+      });
+      setSavedStatus((prev) => ({ ...prev, [promptId]: true }));
+      setTimeout(() => {
+        setSavedStatus((prev) => ({ ...prev, [promptId]: false }));
+      }, 3000);
+    } catch (err) {
+      alert("Failed to save to journal: " + (err as Error).message);
+    }
+  };
+
+const deleteJournalEntry = async (id: number) => {
+  const res = await fetch("/api/journal", {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ id }),
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || errData.message || "Failed to delete journal entry");
+  }
+
+  await fetchJournalEntries();
+};
   const handleCopy = (id: string, text: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
@@ -138,5 +318,18 @@ export function useCatalystsLogic() {
     filteredPrompts,
     copiedId,
     handleCopy,
+    generalEntries,
+    journalLoading,
+    journalError,
+    authenticated,
+    addJournalEntry,
+    deleteJournalEntry,
+    aiCache,
+    aiLoading,
+    aiErrors,
+    savedStatus,
+    runAiSearch,
+    getPromptStatus,
+    saveAiResponseToJournal,
   };
 }
