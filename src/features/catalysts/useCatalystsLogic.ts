@@ -8,7 +8,7 @@ export interface CatalystPrompt {
 }
 
 const TOKENS = [
-  "HYPE", "BNB", "TX", "ASTER", "VIRTUAL", "UNI", "RON", "TRX", 
+  "HYPE", "BNB", "TX (coreum and sologenic)", "ASTER", "VIRTUAL", "UNI", "RON", "TRX", 
   "ADA", "XRP", "SHIB", "TRUMP", "ENA", "XPL", "XAUT", "LTC", 
   "GRAM", "Ondo", "XDC", "SPX", "POL", "BGB", "WEMIX", "SKY"
 ];
