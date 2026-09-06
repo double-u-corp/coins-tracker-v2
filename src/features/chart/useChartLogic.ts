@@ -127,7 +127,6 @@ export function useChartLogic() {
   }, [symbol, range]);
 
   const loadJournal = useCallback(() => {
-    if (!symbol) return;
     setJournalLoading(true);
     setJournalError(null);
     const from = rangeStart.toISOString().slice(0, 10);
@@ -136,7 +135,14 @@ export function useChartLogic() {
         if (!res.ok) throw new Error(`Failed to load journal (${res.status})`);
         return res.json();
       })
-      .then((data: { entries: JournalEntryView[] }) => setEntries(data.entries))
+      .then((data: { entries: JournalEntryView[] }) => {
+        // When a coin symbol is active, return entries for that coin.
+        // When symbol is empty (""), return only general entries (!e.symbol).
+        const filteredEntries = data.entries.filter((e) =>
+          symbol ? e.symbol === symbol : !e.symbol
+        );
+        setEntries(filteredEntries);
+      })
       .catch((err) => setJournalError((err as Error).message))
       .finally(() => setJournalLoading(false));
   }, [symbol, rangeStart]);

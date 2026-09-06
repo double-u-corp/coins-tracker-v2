@@ -328,6 +328,26 @@ export default function ChartView() {
               )}
             </div>
           )}
+
+          {/* General Journal Block displayed when no coin is selected */}
+          <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex items-center justify-between border-b border-gray-100 pb-3">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900">🌍 General Market Journal &amp; Notes</h3>
+                <p className="text-xs text-gray-500 mt-0.5">Track macro updates, news, and notes not tied to a specific coin.</p>
+              </div>
+            </div>
+
+            <JournalSidebar
+              entries={entries}
+              loading={journalLoading}
+              error={journalError}
+              defaultSymbol={symbol}
+              authenticated={authenticated}
+              onAdd={addJournalEntry}
+              onDelete={deleteJournalEntry}
+            />
+          </div>
         </div>
       ) : (
         <div className="flex flex-col gap-6">
