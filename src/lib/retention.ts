@@ -35,6 +35,15 @@ export const RECORD_RETENTION_DAYS = 365 * 3;
 export const NEWS_RETENTION_DAYS = 180;
 
 /**
+ * How long operational CronLog rows are kept. Cron logs are strictly diagnostic 
+ * background execution history (success/failure statuses, sync timestamps). 
+ * Keeping them for 30 days provides plenty of window for debugging recent 
+ * automation issues while preventing the database from bloating with 
+ * repetitive operational noise.
+ */
+export const CRON_LOG_RETENTION_DAYS = 30;
+
+/**
  * Deletes Record rows older than RECORD_RETENTION_DAYS — except each
  * coin's single most recent row, which is always kept regardless of age.
  * That guard matters: a coin's running high/low lives in whatever its
@@ -66,5 +75,25 @@ export async function pruneOldRecords(): Promise<number> {
 export async function pruneOldNews(): Promise<number> {
   const cutoff = new Date(Date.now() - NEWS_RETENTION_DAYS * 24 * 60 * 60 * 1000);
   const result = await prisma.newsItem.deleteMany({ where: { publishedAt: { lt: cutoff } } });
+  return result.count;
+}
+
+/** 
+ * Deletes CronLog rows older than CRON_LOG_RETENTION_DAYS. 
+ * Assumes your model is named `cronLog` in Prisma. Adjust the property name 
+ * (e.g., `createdAt` or `timestamp`) if your schema uses a different date field.
+ * Returns the number of rows deleted.
+ */
+export async function pruneOldCronLogs(): Promise<number> {
+  const cutoff = new Date(Date.now() - CRON_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  
+  // Note: if your model name or timestamp field varies slightly in schema.prisma, 
+  // adjust `prisma.cronLog` and `createdAt` accordingly.
+  const result = await prisma.cronLog.deleteMany({ 
+    where: { 
+      ranAt: { lt: cutoff } 
+    } 
+  });
+  
   return result.count;
 }

@@ -1,6 +1,6 @@
 import prisma from "./prisma";
 import { fetchPrice, deriveNameFromSymbol } from "./coinsApi";
-import { pruneOldRecords, pruneOldNews } from "./retention";
+import { pruneOldRecords, pruneOldNews, pruneOldCronLogs } from "./retention";
 import { generateSignalForCoin, fetchAllRssArticles, matchRssArticlesForCoin, type GeneratedSignal } from "./newsApi";
 
 export interface CronResult {
@@ -174,17 +174,19 @@ export async function runCronJob(): Promise<CronResult[]> {
 
   let prunedRecordCount = 0;
   let prunedNewsCount = 0;
+  let prunedCronLogCount = 0;
   try {
     prunedRecordCount = await pruneOldRecords();
     prunedNewsCount = await pruneOldNews();
+    prunedCronLogCount = await pruneOldCronLogs();
   } catch {
     // Non-fatal — a failed prune shouldn't mark the whole cron run as
     // failed, since the actual price-fetching work already succeeded.
   }
 
   const pruneNote =
-    prunedRecordCount > 0 || prunedNewsCount > 0
-      ? ` Pruned ${prunedRecordCount} record(s) and ${prunedNewsCount} news item(s) past retention.`
+    prunedRecordCount > 0 || prunedNewsCount > 0 || prunedCronLogCount > 0
+      ? ` Pruned ${prunedRecordCount} record(s), ${prunedNewsCount} news item(s), and ${prunedCronLogCount} cron log(s) past retention.`
       : "";
   const newsNote = newsWarnings.length > 0 ? ` News fetch issues: ${newsWarnings.join("; ")}.` : "";
 
