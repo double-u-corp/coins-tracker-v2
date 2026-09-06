@@ -8,16 +8,17 @@ import prisma from "./prisma";
  * financial record-keeping you'll want long after any reasonable
  * price-history window, not disposable operational data.
  *
- * 5 years is generous for a personal price tracker. At 6 snapshots/day per
- * coin that's roughly 11,000 rows per coin over the full window — trivial
+ * 3 years is generous for a personal price tracker. At 6 snapshots/day per
+ * coin that's roughly 6,500 rows per coin over the full window — trivial
  * for SQLite either way (it handles millions of rows without strain), so
  * this exists as a long-term hygiene safety net rather than because the
  * app is anywhere near a real storage concern. The tradeoff to know about:
  * Calendar/Chart lose detail beyond this window (the Chart page caps its
- * range selector at 5 years for exactly this reason) — Home's "Recorded
+ * range selector for exactly this reason) — Home's "Recorded
  * High/Low" is unaffected either way (see pruneOldRecords).
  */
-export const RECORD_RETENTION_DAYS = 365 * 3;
+export const RECORD_RETENTION_MONTHS = 36;
+export const RECORD_RETENTION_DAYS = RECORD_RETENTION_MONTHS * 30;
 
 /**
  * How long auto-generated NewsItem rows (Home page "Market Signals") are
@@ -32,16 +33,18 @@ export const RECORD_RETENTION_DAYS = 365 * 3;
  * row" guard is needed here (unlike Record) — nothing depends on an old
  * NewsItem surviving, so this is a plain age-based delete.
  */
-export const NEWS_RETENTION_DAYS = 180;
+export const NEWS_RETENTION_MONTHS = 1;
+export const NEWS_RETENTION_DAYS = NEWS_RETENTION_MONTHS * 30;
 
 /**
  * How long operational CronLog rows are kept. Cron logs are strictly diagnostic 
  * background execution history (success/failure statuses, sync timestamps). 
- * Keeping them for 30 days provides plenty of window for debugging recent 
+ * Keeping them for 1 month provides plenty of window for debugging recent 
  * automation issues while preventing the database from bloating with 
  * repetitive operational noise.
  */
-export const CRON_LOG_RETENTION_DAYS = 30;
+export const CRON_LOG_RETENTION_MONTHS = 1;
+export const CRON_LOG_RETENTION_DAYS = CRON_LOG_RETENTION_MONTHS * 30;
 
 /**
  * Deletes Record rows older than RECORD_RETENTION_DAYS — except each
@@ -87,8 +90,6 @@ export async function pruneOldNews(): Promise<number> {
 export async function pruneOldCronLogs(): Promise<number> {
   const cutoff = new Date(Date.now() - CRON_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000);
   
-  // Note: if your model name or timestamp field varies slightly in schema.prisma, 
-  // adjust `prisma.cronLog` and `createdAt` accordingly.
   const result = await prisma.cronLog.deleteMany({ 
     where: { 
       ranAt: { lt: cutoff } 
