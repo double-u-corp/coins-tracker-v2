@@ -67,18 +67,24 @@ async function summarizeWithGroq(prompt: string, searchContext: string): Promise
     },
     body: JSON.stringify({
       model: "openai/gpt-oss-120b",
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a real-time crypto analyst. Synthesize the provided web search context and answer the user query directly in 3-4 concise bullet points. Highlight funding rates, open interest, liquidations, exchange announcements, or protocol updates if mentioned in the context. Always cite key sources using brackets like 【url】 or 【Source Name】 when relevant.",
+      // Inside summarizeWithGroq / summarizeWithOpenAI in catalyst-ai.ts
+        messages: [
+          {
+            role: "system",
+            content: `You are a real-time crypto analyst. Synthesize the provided web search context and answer the user query directly.
+
+            FORMATTING REQUIREMENTS:
+            1. Always start the response with an explicit sentiment header on the very first line:
+              **Sentiment:** 🟢 BULLISH | 🔴 BEARISH | ⚪ NEUTRAL — [1-sentence summary of why].
+            2. Follow with 3 concise bullet points summarizing funding rates, protocol news, exchange listings, or whale activity.
+            3. Always cite sources using brackets like 【url】 or 【Source Name】.`
         },
         {
           role: "user",
-          content: `SEARCH CONTEXT:\n${searchContext}\n\nUSER QUERY:\n${prompt}`,
-        },
+          content: `SEARCH CONTEXT:\n${searchContext}\n\nUSER QUERY:\n${prompt}`
+        }
       ],
-      temperature: 0.2,
+      temperature: 0,
       max_tokens: 500,
     }),
   });
