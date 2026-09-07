@@ -1,103 +1,108 @@
 import React from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
-interface Props {
+interface FormattedAiResponseProps {
   text: string;
 }
 
-export default function FormattedAiResponse({ text }: Props) {
-  // Split text into lines to preserve bullet lists and structure
-  const lines = text.split("\n");
+export default function FormattedAiResponse({ text }: FormattedAiResponseProps) {
+  // Pre-process text to clean bracket citations and prevent UI breaks on truncated text
+  const cleanMarkdownText = (rawText: string) => {
+    if (!rawText) return "";
+    return rawText
+      // Convert 【domain.com (Title)】 into *(Source: domain.com)*
+      .replace(/【([^】]+)】/g, (_, match) => ` *(${match})*`)
+      // Remove orphaned/truncated brackets at the end of cut-off responses
+      .replace(/【[^】]*$/g, "");
+  };
 
   return (
-    <div className="space-y-2 text-xs text-gray-800 leading-relaxed font-sans">
-      {lines.map((line, lineIdx) => {
-        if (!line.trim()) return <div key={lineIdx} className="h-1" />;
+    <div className="prose prose-purple max-w-none text-xs text-gray-800">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          // Styled External Links
+          a: ({ href, children }) => (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-purple-600 hover:text-purple-800 underline font-medium"
+            >
+              {children}
+            </a>
+          ),
 
-        return (
-          <p key={lineIdx} className={line.trim().startsWith("-") || line.trim().startsWith("*") ? "pl-3" : ""}>
-            {renderFormattedLine(line)}
-          </p>
-        );
-      })}
+          // Styled Markdown Tables
+          table: ({ children }) => (
+            <div className="my-3 overflow-x-auto rounded-lg border border-purple-200 shadow-sm">
+              <table className="w-full border-collapse bg-white text-left text-xs">
+                {children}
+              </table>
+            </div>
+          ),
+          thead: ({ children }) => (
+            <thead className="bg-purple-100/70 border-b border-purple-200 text-purple-900 font-bold">
+              {children}
+            </thead>
+          ),
+          th: ({ children }) => (
+            <th className="px-3.5 py-2.5 text-[11px] font-bold tracking-wider text-purple-950 uppercase">
+              {children}
+            </th>
+          ),
+          td: ({ children }) => (
+            <td className="px-3.5 py-2 border-t border-purple-100 text-gray-700 leading-relaxed">
+              {children}
+            </td>
+          ),
+          tr: ({ children }) => (
+            <tr className="hover:bg-purple-50/50 transition-colors">{children}</tr>
+          ),
+
+          // Headings & Text Formatting
+          h1: ({ children }) => (
+            <h1 className="text-sm font-bold text-gray-900 mt-3 mb-1">{children}</h1>
+          ),
+          h2: ({ children }) => (
+            <h2 className="text-xs font-bold text-purple-900 uppercase tracking-wide mt-3 mb-1.5 border-b border-purple-100 pb-1">
+              {children}
+            </h2>
+          ),
+          h3: ({ children }) => (
+            <h3 className="text-xs font-semibold text-gray-900 mt-2 mb-1">{children}</h3>
+          ),
+          p: ({ children }) => (
+            <p className="text-xs leading-relaxed text-gray-700 my-1.5">{children}</p>
+          ),
+          strong: ({ children }) => (
+            <strong className="font-semibold text-gray-900">{children}</strong>
+          ),
+
+          // Lists
+          ul: ({ children }) => (
+            <ul className="list-disc list-inside space-y-1 my-2 text-xs text-gray-700">
+              {children}
+            </ul>
+          ),
+          ol: ({ children }) => (
+            <ol className="list-decimal list-inside space-y-1 my-2 text-xs text-gray-700">
+              {children}
+            </ol>
+          ),
+          li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+
+          // Quotes & Notes
+          blockquote: ({ children }) => (
+            <blockquote className="border-l-4 border-purple-400 bg-purple-50/60 pl-3 py-1.5 my-2 text-xs italic text-gray-700 rounded-r">
+              {children}
+            </blockquote>
+          ),
+        }}
+      >
+        {cleanMarkdownText(text)}
+      </ReactMarkdown>
     </div>
   );
-}
-
-/**
- * Parses markdown bolding (**bold**) and citation brackets 【url】 or 【source】 into styled React elements
- */
-function renderFormattedLine(line: string) {
-  // Regex to match citation brackets: 【https://...】 or 【Source Name】
-  const citationRegex = /【([^】]+)】/g;
-  
-  const parts: React.ReactNode[] = [];
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = citationRegex.exec(line)) !== null) {
-    const textBefore = line.substring(lastIndex, match.index);
-    if (textBefore) {
-      parts.push(...parseBoldText(textBefore, `text-${lastIndex}`));
-    }
-
-    const content = match[1].trim();
-    const isUrl = content.startsWith("http://") || content.startsWith("https://");
-
-    if (isUrl) {
-      // Extract domain for clean link badge display
-      let domain = "Source";
-      try {
-        domain = new URL(content).hostname.replace("www.", "");
-      } catch (_) {}
-
-      parts.push(
-        <a
-          key={`link-${match.index}`}
-          href={content}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 mx-1 px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 hover:bg-purple-200 font-medium text-[11px] transition-colors"
-        >
-          <span>🌐 {domain}</span>
-          <span>↗</span>
-        </a>
-      );
-    } else {
-      // Render source names as styled metadata tags
-      parts.push(
-        <span
-          key={`tag-${match.index}`}
-          className="inline-block mx-1 px-1.5 py-0.5 rounded bg-gray-200 text-gray-700 font-medium text-[10px]"
-        >
-          {content}
-        </span>
-      );
-    }
-
-    lastIndex = citationRegex.lastIndex;
-  }
-
-  const remainingText = line.substring(lastIndex);
-  if (remainingText) {
-    parts.push(...parseBoldText(remainingText, `text-end`));
-  }
-
-  return parts;
-}
-
-/**
- * Parses bold text formatted as **text**
- */
-function parseBoldText(text: string, keyPrefix: string): React.ReactNode[] {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
-  return parts.map((part, index) => {
-    if (part.startsWith("**") && part.endsWith("**")) {
-      return (
-        <strong key={`${keyPrefix}-bold-${index}`} className="font-bold text-gray-900">
-          {part.slice(2, -2)}
-        </strong>
-      );
-    }
-    return part;
-  });
 }

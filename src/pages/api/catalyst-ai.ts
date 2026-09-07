@@ -7,26 +7,9 @@ type ResponseData = {
   error?: string;
 };
 
-function checkIsPeriodCurrent(timestamp: Date, category: string): boolean {
-  const runDate = new Date(timestamp);
-  const now = new Date();
-
-  if (category === "Daily") {
-    return runDate.toDateString() === now.toDateString();
-  }
-  if (category === "Weekly") {
-    const diffDays = (now.getTime() - runDate.getTime()) / (1000 * 3600 * 24);
-    return diffDays < 7;
-  }
-  if (category === "Monthly") {
-    return runDate.getFullYear() === now.getFullYear() && runDate.getMonth() === now.getMonth();
-  }
-  return false;
-}
-
 async function fetchTavilySearch(query: string): Promise<string> {
   const tavilyApiKey = process.env.TAVILY_API_KEY;
-  if (!tavilyApiKey) throw new Error("TAVILY_API_KEY is missing in environment variables.");
+  if (!tavilyApiKey) throw new Error("TAVILY_API_KEY is missing.");
 
   const response = await fetch("https://api.tavily.com/search", {
     method: "POST",
@@ -46,18 +29,25 @@ async function fetchTavilySearch(query: string): Promise<string> {
   }
 
   const data = await response.json();
-  const directAnswer = data.answer ? `Tavily Direct Summary: ${data.answer}\n\n` : "";
-  const snippets =
-    data.results
-      ?.map((item: any) => `- ${item.title}: ${item.content} (${item.url})`)
-      .join("\n") || "";
+  const directAnswer = data.answer ? `Direct Summary: ${data.answer}\n\n` : "";
+  const snippets = data.results
+    ?.map((item: any) => `- ${item.title}: ${item.content} (${item.url})`)
+    .join("\n") || "";
 
-  return `${directAnswer}Recent News & Market Snippets:\n${snippets}`;
+  return `${directAnswer}Recent Market Data:\n${snippets}`;
 }
 
 async function summarizeWithGroq(prompt: string, searchContext: string): Promise<string> {
   const groqApiKey = process.env.GROQ_API_KEY;
-  if (!groqApiKey) throw new Error("GROQ_API_KEY is missing in environment variables.");
+  if (!groqApiKey) throw new Error("GROQ_API_KEY is missing.");
+
+  const systemPrompt = `You are an elite real-time crypto intelligence analyst. Synthesize the web search context to answer the user query for the target crypto asset.
+
+FORMATTING REQUIREMENTS:
+1. MANDATORY: The VERY FIRST line MUST be an explicit sentiment verdict in this exact format:
+   **Sentiment:** 🟢 BULLISH | 🔴 BEARISH | ⚪ NEUTRAL — [Concise 1-sentence explanation]
+2. Provide 3-4 distinct, highly actionable bullet points summarizing price drivers, funding rates, protocol updates, or whale movements.
+3. Every single fact, announcement, or metric MUST cite its source using inline bracket links like [Source Title](URL).`;
 
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
@@ -67,42 +57,25 @@ async function summarizeWithGroq(prompt: string, searchContext: string): Promise
     },
     body: JSON.stringify({
       model: "openai/gpt-oss-120b",
-      // Inside summarizeWithGroq / summarizeWithOpenAI in catalyst-ai.ts
-        messages: [
-          {
-            role: "system",
-            content: `You are a real-time crypto analyst. Synthesize the provided web search context and answer the user query directly.
-
-            FORMATTING REQUIREMENTS:
-            1. Always start the response with an explicit sentiment header on the very first line:
-              **Sentiment:** 🟢 BULLISH | 🔴 BEARISH | ⚪ NEUTRAL — [1-sentence summary of why].
-            2. Follow with 3 concise bullet points summarizing funding rates, protocol news, exchange listings, or whale activity.
-            3. Always cite sources using brackets like 【url】 or 【Source Name】.`
-        },
-        {
-          role: "user",
-          content: `SEARCH CONTEXT:\n${searchContext}\n\nUSER QUERY:\n${prompt}`
-        }
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `SEARCH CONTEXT:\n${searchContext}\n\nUSER QUERY:\n${prompt}` },
       ],
-      temperature: 0,
-      max_tokens: 500,
+      temperature: 0.2,
+      max_tokens: 1200,
     }),
   });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error?.message || "Failed to generate AI summary with Groq.");
+    throw new Error(errorData.error?.message || "Failed to generate AI summary.");
   }
 
   const data = await response.json();
   return data.choices?.[0]?.message?.content || "No response generated.";
 }
 
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse<ResponseData>
-) {
-  // GET: Load all existing database logs on initial page load
+export default async function handler(req: NextApiRequest, res: NextApiResponse<ResponseData>) {
   if (req.method === "GET") {
     try {
       const logs = await prisma.catalystLog.findMany();
@@ -122,7 +95,6 @@ export default async function handler(
     }
   }
 
-  // POST: Retrieve cached result or trigger live Tavily + Groq scan
   if (req.method === "POST") {
     const { promptId, prompt, category, forceRefresh } = req.body || {};
 
@@ -132,11 +104,8 @@ export default async function handler(
 
     try {
       if (!forceRefresh) {
-        const existingLog = await prisma.catalystLog.findUnique({
-          where: { promptId },
-        });
-
-        if (existingLog && checkIsPeriodCurrent(existingLog.updatedAt, category)) {
+        const existingLog = await prisma.catalystLog.findUnique({ where: { promptId } });
+        if (existingLog) {
           return res.status(200).json({ response: existingLog.response });
         }
       }
@@ -152,10 +121,7 @@ export default async function handler(
 
       return res.status(200).json({ response: summary });
     } catch (err) {
-      console.error("Catalyst AI Error:", err);
-      return res.status(500).json({
-        error: (err as Error).message || "Failed to process live AI news request.",
-      });
+      return res.status(500).json({ error: (err as Error).message || "Failed to execute scan." });
     }
   }
 

@@ -3,7 +3,7 @@ import type { JournalEntryView } from "@/validators/journalSchema";
 
 export interface CatalystPrompt {
   id: string;
-  category: "Daily" | "Weekly" | "Monthly";
+  category: "News" | "Daily" | "Weekly" | "Monthly" | "Macro";
   title: string;
   prompt: string;
 }
@@ -11,7 +11,7 @@ export interface CatalystPrompt {
 export interface CachedAiLog {
   timestamp: number;
   response: string;
-  category: "Daily" | "Weekly" | "Monthly";
+  category: string;
 }
 
 export const AVAILABLE_TOKENS = [
@@ -24,7 +24,7 @@ export const AVAILABLE_TOKENS = [
   "LINK",
   "HYPE",
   "BNB",
-  "TX",        // Corrume + Sol merge
+  "TX",
   "ASTER",
   "VIRTUAL",
   "UNI",
@@ -45,18 +45,35 @@ export const AVAILABLE_TOKENS = [
   "POL",
   "BGB",
   "WEMIX",
-  "SKY"
-];;
+  "SKY",
+];
 
-// Shared instruction rules for AI prompts
-const INSTRUCTION_SUFFIX = 
-  " RULES: 1. Prioritize current breaking news (past 24-72h) and upcoming scheduled events over past events. 2. If no current/future news exists, you may mention past events, but explicitly label them with their exact past occurrence date as historical context. 3. MUST include direct article links / source URLs for every news item, announcement, or catalyst reported.";
+// Helper to inject tailored, category-specific execution rules
+const getCategoryRules = (category: CatalystPrompt["category"]) => {
+  switch (category) {
+    case "News":
+      return " RULES: 1. Focus strictly on breaking developments, whale activity, or official announcements from the past 24-72 hours. 2. Explain the direct cause behind recent price action. 3. Include direct source links where available.";
 
-// Context helper to disambiguate tokens with generic ticker names or rebrands
+    case "Daily":
+      return " RULES: 1. Focus on live 24h market data: perpetual funding rates, open interest shifts, liquidations, and on-chain net flows. 2. Provide a clear 24h sentiment assessment (Bullish/Bearish/Neutral leverage).";
+
+    case "Weekly":
+      return " RULES: 1. Focus on events and updates within a 7-day lookback or lookahead window. 2. Highlight exchange listings (Binance, Coins.ph, OKX), new pairs, or weekly structural changes.";
+
+    case "Monthly":
+      return " RULES: 1. Focus on a 30-60 day horizon for scheduled token unlocks (% of circulating supply), major roadmap milestones, mainnet upgrades, or TGEs. 2. Highlight potential supply pressure.";
+
+    case "Macro":
+return " RULES: 1. List upcoming scheduled US economic calendar dates for this month. 2. NEVER use Unicode citation brackets like 【...】. 3. Format ALL citations as standard Markdown links: [Source Name](https://url.com).";
+    default:
+      return "";
+  }
+};
+
 const formatTokenForPrompt = (token: string) => {
   switch (token.toUpperCase()) {
     case "TX":
-      return "TX (txEcosystem / tx protocol, the merged token of Coreum [COREUM] and Sologenic [SOLO])";
+      return "TX (txEcosystem / tx protocol, merged token of Coreum and Sologenic)";
     case "POL":
       return "POL (Polygon, formerly MATIC)";
     default:
@@ -64,130 +81,44 @@ const formatTokenForPrompt = (token: string) => {
   }
 };
 
-const chunkArray = (arr: string[], size: number) => 
-  Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
-    arr.slice(i * size, i * size + size)
-  );
-
-const tokenBatches = chunkArray(AVAILABLE_TOKENS, 6);
-
-const derivativesPrompts: CatalystPrompt[] = tokenBatches.map((batch, index) => {
-  const tokenList = batch.map(formatTokenForPrompt).join(", ");
-  return {
-    id: `daily-derivatives-${index + 1}`,
-    category: "Daily",
-    title: `Derivatives Batch ${index + 1} (${batch.join(", ")})`,
-    prompt: `What do current perpetual funding rates and open interest levels for ${tokenList} suggest about over-leveraged positioning, and has there been a recent liquidation spike in any of them? ${INSTRUCTION_SUFFIX}`,
-  };
-});
-
-const onChainPrompts: CatalystPrompt[] = tokenBatches.map((batch, index) => {
-  const tokenList = batch.map(formatTokenForPrompt).join(", ");
-  return {
-    id: `daily-onchain-${index + 1}`,
-    category: "Daily",
-    title: `On-Chain Batch ${index + 1} (${batch.join(", ")})`,
-    prompt: `What are the latest on-chain signals this week for ${tokenList} — large whale transfers, exchange inflows/outflows, or unusual holder activity — that could indicate upcoming volatility? ${INSTRUCTION_SUFFIX}`,
-  };
-});
-
-const exploitPrompts: CatalystPrompt[] = tokenBatches.map((batch, index) => {
-  const tokenList = batch.map(formatTokenForPrompt).join(", ");
-  return {
-    id: `daily-exploit-${index + 1}`,
-    category: "Daily",
-    title: `Exploit Risk Batch ${index + 1} (${batch.join(", ")})`,
-    prompt: `Have there been any recent exploits, bridge hacks, or security incidents affecting ${tokenList} or the protocols/exchanges they rely on? ${INSTRUCTION_SUFFIX}`,
-  };
-});
-
-const exchangeListingPrompts: CatalystPrompt[] = tokenBatches.map((batch, index) => {
-  const tokenList = batch.map(formatTokenForPrompt).join(", ");
-  return {
-    id: `weekly-listings-${index + 1}`,
-    category: "Weekly",
-    title: `Exchange Listings Batch ${index + 1} (${batch.join(", ")})`,
-    prompt: `What are the latest official announcements regarding new listings, upcoming delistings, or network support changes on major exchanges (including Binance, Coinbase, OKX, Bybit, and Coins.ph) for ${tokenList}? ${INSTRUCTION_SUFFIX}`,
-  };
-});
-
-const monthlyUnlockPrompts: CatalystPrompt[] = tokenBatches.map((batch, index) => {
-  const tokenList = batch.map(formatTokenForPrompt).join(", ");
-  return {
-    id: `token-batch-${index + 1}`,
-    category: "Monthly",
-    title: `Token Unlocks Batch ${index + 1} (${batch.join(", ")})`,
-    prompt: `What are the major scheduled token unlocks, mainnet upgrades, or migration dates in the next 60 days for ${tokenList}? ${INSTRUCTION_SUFFIX}`,
-  };
-});
-
-const STATIC_PROMPTS: CatalystPrompt[] = [
+const STATIC_MACRO_PROMPTS: CatalystPrompt[] = [
   {
     id: "weekly-coins-ph",
     category: "Weekly",
-    title: "Exchange Listings — Coins.ph",
-    prompt: `What are the latest official news and announcements from Coins.ph, including coin listings, delistings, or new additions? ${INSTRUCTION_SUFFIX}`,
+    title: "Coins.ph Listings & Official Updates",
+    prompt: `What are the latest official announcements, new token listings, or updates from Coins.ph?${getCategoryRules("Weekly")}`,
   },
   {
-    id: "weekly-1",
-    category: "Weekly",
+    id: "macro-fed-calendar",
+    category: "Macro",
     title: "Macro & Fed Calendar",
-    prompt: `What are the upcoming high-impact US macroeconomic events, FOMC meetings, Fed speaker appearances, and employment reports for the next two weeks that could cause crypto market volatility? ${INSTRUCTION_SUFFIX}`,
+    prompt: `What are the upcoming high-impact US macroeconomic events, FOMC meetings, Fed speeches, and economic reports scheduled for this month?${getCategoryRules("Macro")}`,
   },
   {
-    id: "weekly-2",
-    category: "Weekly",
-    title: "Inflation Prints",
-    prompt: `What are the exact CPI and core PCE release dates this month, and what are the consensus estimates versus the prior reading? ${INSTRUCTION_SUFFIX}`,
+    id: "macro-inflation",
+    category: "Macro",
+    title: "Inflation Reports (CPI & PCE)",
+    prompt: `When are the next US CPI and core PCE inflation reports scheduled, and what are the market expectations and consensus readings?${getCategoryRules("Macro")}`,
   },
   {
-    id: "weekly-3",
-    category: "Weekly",
-    title: "Labor Market Reports",
-    prompt: `What are the upcoming labor market releases — Initial Jobless Claims, JOLTS job openings, ADP Employment — scheduled this week or month, and how have recent prints trended? ${INSTRUCTION_SUFFIX}`,
+    id: "macro-dxy-yields",
+    category: "Macro",
+    title: "US Dollar Index (DXY) & 10Y Yields",
+    prompt: `How are the US Dollar Index (DXY) and 10-year US Treasury yield trending this week, and how is it impacting crypto market risk appetite?${getCategoryRules("Macro")}`,
   },
   {
-    id: "weekly-4",
-    category: "Weekly",
-    title: "Macro Cross-Asset Backdrop",
-    prompt: `How are the US Dollar Index (DXY) and 10-year Treasury yield trending this week, and is broader crypto market risk appetite currently rising or falling? ${INSTRUCTION_SUFFIX}`,
+    id: "macro-geopolitics",
+    category: "Macro",
+    title: "Geopolitics & Global Risk",
+    prompt: `Are there any major global financial market risks, banking developments, or geopolitical events currently impacting crypto and risk-on assets?${getCategoryRules("Macro")}`,
   },
-  {
-    id: "weekly-5",
-    category: "Weekly",
-    title: "Geopolitics & Risk-Off Flows",
-    prompt: `Are there any active or escalating geopolitical tensions, international security crises, or trade restrictions currently driving risk-off flows in global markets that are affecting crypto? ${INSTRUCTION_SUFFIX}`,
-  },
-  {
-    id: "weekly-6",
-    category: "Weekly",
-    title: "Energy & Oil Prices",
-    prompt: `What are the latest OPEC+ production decisions, crude oil inventory reports, or supply disruptions that could feed into inflation data and shift crypto volatility? ${INSTRUCTION_SUFFIX}`,
-  },
-  {
-    id: "monthly-regulatory",
-    category: "Monthly",
-    title: "Regulatory Calendar",
-    prompt: `Are there any pending SEC or CFTC decisions, congressional votes, or MiCA enforcement actions affecting crypto scheduled this month? ${INSTRUCTION_SUFFIX}`,
-  },
-];
-
-const ALL_PROMPTS = [
-  ...derivativesPrompts,
-  ...onChainPrompts,
-  ...exploitPrompts,
-  ...exchangeListingPrompts,
-  ...monthlyUnlockPrompts,
-  ...STATIC_PROMPTS,
 ];
 
 export function useCatalystsLogic() {
-  const [activeTab, setActiveTab] = useState<"batch" | "coin">("batch");
   const [selectedCoin, setSelectedCoin] = useState<string>("TX");
-
-  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
 
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [aiCache, setAiCache] = useState<Record<string, CachedAiLog>>({});
   const [aiLoading, setAiLoading] = useState<Record<string, boolean>>({});
   const [aiErrors, setAiErrors] = useState<Record<string, string>>({});
@@ -198,13 +129,77 @@ export function useCatalystsLogic() {
   const [journalError, setJournalError] = useState<string | null>(null);
   const [authenticated, setAuthenticated] = useState(true);
 
+  // Dynamic coin-specific prompts with category-tailored instructions
+  const coinSpecificPrompts = useMemo<CatalystPrompt[]>(() => {
+    const formattedToken = formatTokenForPrompt(selectedCoin);
+    const key = selectedCoin.toLowerCase();
+
+    return [
+      {
+        id: `coin-${key}-news-moving`,
+        category: "News",
+        title: `${selectedCoin} — Breaking News & Price Drivers`,
+        prompt: `Why is ${formattedToken} moving today? What are the top breaking news items, announcements, or whale moves driving this asset?${getCategoryRules("News")}`,
+      },
+      {
+        id: `coin-${key}-daily-derivatives`,
+        category: "Daily",
+        title: `${selectedCoin} — Derivatives & Leverage`,
+        prompt: `What do perpetual funding rates, open interest, and liquidation levels suggest about leverage and market positioning for ${formattedToken}?${getCategoryRules("Daily")}`,
+      },
+      {
+        id: `coin-${key}-daily-onchain`,
+        category: "Daily",
+        title: `${selectedCoin} — On-Chain Signals & Whale Flows`,
+        prompt: `What are the latest on-chain signals for ${formattedToken} — large exchange net inflows/outflows or wallet accumulation patterns?${getCategoryRules("Daily")}`,
+      },
+      {
+        id: `coin-${key}-weekly-listings`,
+        category: "Weekly",
+        title: `${selectedCoin} — Exchange Listings & Pairs`,
+        prompt: `What are the latest official announcements regarding new exchange listings or perpetual trading pairs (Binance, Coinbase, OKX, Coins.ph) for ${formattedToken}?${getCategoryRules("Weekly")}`,
+      },
+      {
+        id: `coin-${key}-monthly-unlocks`,
+        category: "Monthly",
+        title: `${selectedCoin} — Token Unlocks & Roadmap`,
+        prompt: `What are the major scheduled token unlocks, mainnet upgrades, or governance milestones in the next 30-60 days for ${formattedToken}?${getCategoryRules("Monthly")}`,
+      },
+    ];
+  }, [selectedCoin]);
+
+  const allPrompts = useMemo(() => {
+    return [...coinSpecificPrompts, ...STATIC_MACRO_PROMPTS];
+  }, [coinSpecificPrompts]);
+
+  const filteredPrompts = useMemo(() => {
+    if (selectedCategory === "All") return allPrompts;
+    return allPrompts.filter((p) => p.category === selectedCategory);
+  }, [allPrompts, selectedCategory]);
+
+  // Robust log fetcher ensuring cache state persists across page refreshes
   const fetchAiLogs = useCallback(async () => {
     try {
       const res = await fetch("/api/catalyst-ai");
       if (res.ok) {
         const data = await res.json();
         if (data.logs) {
-          setAiCache(data.logs);
+          if (Array.isArray(data.logs)) {
+            const logMap: Record<string, CachedAiLog> = {};
+            data.logs.forEach((log: any) => {
+              const key = log.promptId || log.id;
+              if (key) {
+                logMap[key] = {
+                  timestamp: new Date(log.createdAt || log.timestamp || Date.now()).getTime(),
+                  response: log.response || log.content || "",
+                  category: log.category || "General",
+                };
+              }
+            });
+            setAiCache(logMap);
+          } else {
+            setAiCache(data.logs);
+          }
         }
       }
     } catch (e) {
@@ -212,22 +207,42 @@ export function useCatalystsLogic() {
     }
   }, []);
 
+  const fetchJournalEntries = useCallback(async () => {
+    setJournalLoading(true);
+    setJournalError(null);
+    try {
+      const res = await fetch("/api/journal");
+      if (res.status === 401) {
+        setAuthenticated(false);
+        return;
+      }
+      if (!res.ok) throw new Error("Failed to load journal entries");
+      const data = await res.json();
+      setEntries(data.entries || data || []);
+    } catch (err) {
+      setJournalError((err as Error).message);
+    } finally {
+      setJournalLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchAiLogs();
-  }, [fetchAiLogs]);
+    fetchJournalEntries();
+  }, [fetchAiLogs, fetchJournalEntries]);
 
   const generalEntries = useMemo(() => {
     return entries.filter((entry) => !entry.symbol || entry.symbol.trim() === "");
   }, [entries]);
 
-  const checkIsPeriodCurrent = (timestamp: number, category: "Daily" | "Weekly" | "Monthly") => {
+  const checkIsPeriodCurrent = (timestamp: number, category: string) => {
     const runDate = new Date(timestamp);
     const now = new Date();
 
-    if (category === "Daily") {
+    if (category === "News" || category === "Daily") {
       return runDate.toDateString() === now.toDateString();
     }
-    if (category === "Weekly") {
+    if (category === "Weekly" || category === "Macro") {
       const diffDays = (now.getTime() - runDate.getTime()) / (1000 * 3600 * 24);
       return diffDays < 7;
     }
@@ -237,7 +252,7 @@ export function useCatalystsLogic() {
     return false;
   };
 
-  const getPromptStatus = (id: string, category: "Daily" | "Weekly" | "Monthly") => {
+  const getPromptStatus = (id: string, category: string) => {
     const log = aiCache[id];
     if (!log) return { status: "unrun", label: "Not Fetched" };
 
@@ -250,7 +265,7 @@ export function useCatalystsLogic() {
     });
 
     if (isCurrent) {
-      return { status: "current", label: `Fetched (${category}) • ${dateStr}` };
+      return { status: "current", label: `Fetched • ${dateStr}` };
     } else {
       return { status: "expired", label: `Expired (${dateStr})` };
     }
@@ -259,7 +274,7 @@ export function useCatalystsLogic() {
   const runAiSearch = async (
     promptId: string,
     promptText: string,
-    category: "Daily" | "Weekly" | "Monthly",
+    category: string,
     force = false
   ) => {
     setAiLoading((prev) => ({ ...prev, [promptId]: true }));
@@ -295,49 +310,6 @@ export function useCatalystsLogic() {
     }
   };
 
-  const runCoinDeepDiveScan = async (
-    coin: string,
-    actionType: "why_moving" | "catalysts" | "risks"
-  ) => {
-    const promptId = `coin-deepdive-${coin.toLowerCase()}-${actionType}`;
-    const targetCoinName = formatTokenForPrompt(coin);
-    let promptText = "";
-
-    if (actionType === "why_moving") {
-      promptText = `Why is ${targetCoinName} price moving today? What are the top breaking news items, official announcements, or whale movements in the last 24-48 hours driving this price action? ${INSTRUCTION_SUFFIX}`;
-    } else if (actionType === "catalysts") {
-      promptText = `What are the upcoming bullish catalysts, scheduled mainnet upgrades, major partnerships, or exchange listings for ${targetCoinName}? ${INSTRUCTION_SUFFIX}`;
-    } else {
-      promptText = `Are there any active security threats, upcoming token unlocks, regulatory risks, or negative catalysts affecting ${targetCoinName}? ${INSTRUCTION_SUFFIX}`;
-    }
-
-    await runAiSearch(promptId, promptText, "Daily", true);
-    return promptId;
-  };
-
-  const fetchJournalEntries = useCallback(async () => {
-    setJournalLoading(true);
-    setJournalError(null);
-    try {
-      const res = await fetch("/api/journal");
-      if (res.status === 401) {
-        setAuthenticated(false);
-        return;
-      }
-      if (!res.ok) throw new Error("Failed to load journal entries");
-      const data = await res.json();
-      setEntries(data.entries || data || []);
-    } catch (err) {
-      setJournalError((err as Error).message);
-    } finally {
-      setJournalLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchJournalEntries();
-  }, [fetchJournalEntries]);
-
   const addJournalEntry = async (input: { symbol: string | null; entryDate: string; title: string; notes: string }) => {
     const res = await fetch("/api/journal", {
       method: "POST",
@@ -354,9 +326,9 @@ export function useCatalystsLogic() {
   const saveAiResponseToJournal = async (promptId: string, title: string, text: string) => {
     try {
       await addJournalEntry({
-        symbol: null,
+        symbol: selectedCoin,
         entryDate: new Date().toISOString().split("T")[0],
-        title: `AI Catalyst: ${title}`,
+        title: `AI Catalyst [${selectedCoin}]: ${title}`,
         notes: text,
       });
       setSavedStatus((prev) => ({ ...prev, [promptId]: true }));
@@ -386,9 +358,7 @@ export function useCatalystsLogic() {
   const deleteJournalEntry = async (id: number) => {
     const res = await fetch("/api/journal", {
       method: "DELETE",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id }),
     });
 
@@ -406,16 +376,9 @@ export function useCatalystsLogic() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const filteredPrompts = ALL_PROMPTS.filter(
-    (p) => selectedCategory === "All" || p.category === selectedCategory
-  );
-
   return {
-    activeTab,
-    setActiveTab,
     selectedCoin,
     setSelectedCoin,
-    runCoinDeepDiveScan,
     selectedCategory,
     setSelectedCategory,
     filteredPrompts,
