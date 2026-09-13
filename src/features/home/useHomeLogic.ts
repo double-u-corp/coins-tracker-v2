@@ -10,20 +10,16 @@ interface HomeState {
   error: string | null;
 }
 
-export interface ReachedTarget {
+export interface TargetAlertCoin {
+  cardKey: string;
   symbol: string;
   name: string;
-  type: "high" | "low";
-  value: number;
-}
-
-export interface NearingTargetCoin extends CoinSummary {
-  cardKey: string;
   targetType: "high" | "low";
+  alertType: "reached" | "nearing";
   targetPrice: number;
+  currentPrice: number;
   distance: number;
   status: string;
-  currentPrice: number;
 }
 
 interface PriceUpdateCoin {
@@ -53,7 +49,6 @@ export function useHomeLogic() {
   const [selectedCoins, setSelectedCoins] = useState<string[]>([]);
   const [alertRecords, setAlertRecords] = useState<NewRecordAlert[]>([]);
   const [alertModalOpen, setAlertModalOpen] = useState(false);
-  const [dismissedTargetsKey, setDismissedTargetsKey] = useState<string | null>(null);
 
   const [priceUpdateCoin, setPriceUpdateCoin] = useState<PriceUpdateCoin | null>(null);
   const [priceUpdateModalOpen, setPriceUpdateModalOpen] = useState(false);
@@ -179,11 +174,11 @@ export function useHomeLogic() {
     return state.coins.filter((coin) => selectedCoins.includes(coin.symbol));
   }, [state.coins, selectedCoins]);
 
-  // Compute nearing high/low targets across all coins
-  const nearingTargets = useMemo<NearingTargetCoin[]>(() => {
+  // Combined Target Alerts: Priority given to Reached, followed by Nearing (<5% distance)
+  const targetAlerts = useMemo<TargetAlertCoin[]>(() => {
     if (!state.coins || state.coins.length === 0) return [];
 
-    const targets: NearingTargetCoin[] = [];
+    const alerts: TargetAlertCoin[] = [];
 
     for (const coin of state.coins) {
       if (coin.currentPrice === null || coin.currentPrice === undefined) continue;
@@ -192,57 +187,77 @@ export function useHomeLogic() {
       const targetHigh = coin.targetHigh != null ? Number(coin.targetHigh) : null;
       const targetLow = coin.targetLow != null ? Number(coin.targetLow) : null;
 
-      // Check Target High (within 5%)
-      if (targetHigh !== null && !isNaN(targetHigh) && current >= targetHigh * 0.95) {
+      // Check Target High
+      if (targetHigh !== null && !isNaN(targetHigh)) {
+        const isReached = coin.targetHighReached || current >= targetHigh;
         const distPct = ((targetHigh - current) / targetHigh) * 100;
-        targets.push({
-          ...coin,
-          cardKey: `${coin.symbol}-high`,
-          targetType: "high",
-          targetPrice: targetHigh,
-          distance: distPct <= 0 ? 0 : distPct,
-          status: distPct <= 0 ? "Target Reached!" : `Within ${distPct.toFixed(1)}% of High`,
-          currentPrice: current,
-        });
+
+        if (isReached) {
+          alerts.push({
+            cardKey: `${coin.symbol}-high-reached`,
+            symbol: coin.symbol,
+            name: coin.name,
+            targetType: "high",
+            alertType: "reached",
+            targetPrice: targetHigh,
+            currentPrice: current,
+            distance: 0,
+            status: "Target High Reached!",
+          });
+        } else if (distPct <= 5) {
+          alerts.push({
+            cardKey: `${coin.symbol}-high-nearing`,
+            symbol: coin.symbol,
+            name: coin.name,
+            targetType: "high",
+            alertType: "nearing",
+            targetPrice: targetHigh,
+            currentPrice: current,
+            distance: Math.max(0, distPct),
+            status: `Within ${distPct.toFixed(1)}% of High`,
+          });
+        }
       }
 
-      // Check Target Low (within 5%)
-      if (targetLow !== null && !isNaN(targetLow) && current <= targetLow * 1.05) {
+      // Check Target Low
+      if (targetLow !== null && !isNaN(targetLow)) {
+        const isReached = coin.targetLowReached || current <= targetLow;
         const distPct = ((current - targetLow) / targetLow) * 100;
-        targets.push({
-          ...coin,
-          cardKey: `${coin.symbol}-low`,
-          targetType: "low",
-          targetPrice: targetLow,
-          distance: distPct <= 0 ? 0 : distPct,
-          status: distPct <= 0 ? "Target Reached!" : `Within ${distPct.toFixed(1)}% of Low`,
-          currentPrice: current,
-        });
+
+        if (isReached) {
+          alerts.push({
+            cardKey: `${coin.symbol}-low-reached`,
+            symbol: coin.symbol,
+            name: coin.name,
+            targetType: "low",
+            alertType: "reached",
+            targetPrice: targetLow,
+            currentPrice: current,
+            distance: 0,
+            status: "Target Low Reached!",
+          });
+        } else if (distPct <= 5) {
+          alerts.push({
+            cardKey: `${coin.symbol}-low-nearing`,
+            symbol: coin.symbol,
+            name: coin.name,
+            targetType: "low",
+            alertType: "nearing",
+            targetPrice: targetLow,
+            currentPrice: current,
+            distance: Math.max(0, distPct),
+            status: `Within ${distPct.toFixed(1)}% of Low`,
+          });
+        }
       }
     }
 
-    return targets.sort((a, b) => a.distance - b.distance);
+    return alerts.sort((a, b) => {
+      if (a.alertType === "reached" && b.alertType !== "reached") return -1;
+      if (a.alertType !== "reached" && b.alertType === "reached") return 1;
+      return a.distance - b.distance;
+    });
   }, [state.coins]);
-
-  const reachedTargets: ReachedTarget[] = useMemo(() => {
-    const entries: ReachedTarget[] = [];
-    for (const coin of state.coins) {
-      if (coin.targetHighReached && coin.targetHigh !== null) {
-        entries.push({ symbol: coin.symbol, name: coin.name, type: "high", value: coin.targetHigh });
-      }
-      if (coin.targetLowReached && coin.targetLow !== null) {
-        entries.push({ symbol: coin.symbol, name: coin.name, type: "low", value: coin.targetLow });
-      }
-    }
-    return entries;
-  }, [state.coins]);
-
-  const reachedTargetsKey = reachedTargets.map((t) => `${t.symbol}-${t.type}`).sort().join(",");
-  const showTargetBanner = reachedTargets.length > 0 && reachedTargetsKey !== dismissedTargetsKey;
-
-  function dismissTargetBanner() {
-    setDismissedTargetsKey(reachedTargetsKey);
-  }
 
   const loadRecentManualRecords = useCallback(async (symbol: string) => {
     setRecentManualLoading(true);
@@ -352,7 +367,7 @@ export function useHomeLogic() {
     ...state,
     allCoins: state.coins,
     coins: filteredCoins,
-    nearingTargets,
+    targetAlerts,
     selectedCoins,
     setSelectedCoins,
     portfolio,
@@ -380,9 +395,6 @@ export function useHomeLogic() {
     alertRecords,
     alertModalOpen,
     closeAlertModal,
-    reachedTargets,
-    showTargetBanner,
-    dismissTargetBanner,
     cronTriggering,
     triggerCronManually,
   };

@@ -23,11 +23,6 @@ function bannerVariant(status: string | null): "info" | "success" | "warning" | 
   return "info";
 }
 
-function targetBannerMessage(reachedTargets: { symbol: string; type: "high" | "low" }[]): string {
-  const parts = reachedTargets.map((t) => `${t.symbol} (${t.type === "high" ? "high" : "low"})`);
-  return `🎯 Target reached: ${parts.join(", ")}`;
-}
-
 function PriceDirectionArrow({ direction, inverse = false }: { direction: "up" | "down" | "flat" | null; inverse?: boolean }) {
   if (direction === "up") return <span className={inverse ? "text-green-300" : "text-green-600"}>▲</span>;
   if (direction === "down") return <span className={inverse ? "text-red-300" : "text-red-600"}>▼</span>;
@@ -130,7 +125,7 @@ export default function HomeTable() {
   const {
     coins,
     allCoins,
-    nearingTargets,
+    targetAlerts,
     selectedCoins,
     setSelectedCoins,
     portfolio,
@@ -162,9 +157,6 @@ export default function HomeTable() {
     alertRecords,
     alertModalOpen,
     closeAlertModal,
-    reachedTargets,
-    showTargetBanner,
-    dismissTargetBanner,
     cronTriggering,
     triggerCronManually,
   } = useHomeLogic();
@@ -194,7 +186,7 @@ export default function HomeTable() {
         onSaveEdit={saveEditRecord}
       />
 
-      {/* Header section with Title and Violet Run Cron Button right beside each other */}
+      {/* Header section with Title and Run Cron Button */}
       <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-gray-900">Coin Prices</h1>
@@ -217,81 +209,91 @@ export default function HomeTable() {
         message={error ? `Failed to load data: ${error}` : `Last cron run: ${formatDateTime(lastCronRun)} | Next run: ${nextCronLabel}`}
       />
 
-      {showTargetBanner && (
-        <AlertBanner variant="warning" message={targetBannerMessage(reachedTargets)} onDismiss={dismissTargetBanner} />
-      )}
-
-      {/* Nearing Target Price Scanner Section with Interactive Loading Spinner */}
+      {/* Unified Target Alerts & Scanner Section */}
       <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-bold uppercase tracking-wider text-gray-700 flex items-center gap-2">
-            🎯 Nearing Target Prices
+            🎯 Target Monitor &amp; Scanner
             {loading && (
               <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-violet-600 border-t-transparent" />
             )}
           </h2>
-          <span className="text-xs text-gray-400">Within 5% of Target Limit</span>
+          <span className="text-xs text-gray-400">Reached &amp; Within 5% of Limit</span>
         </div>
 
         {loading ? (
           <div className="flex items-center justify-center py-6 text-sm text-gray-500 gap-2">
             <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-violet-600 border-t-transparent" />
-            <span>Scanning coin price targets…</span>
+            <span>Scanning target prices…</span>
           </div>
-        ) : nearingTargets.length === 0 ? (
-          <p className="text-xs text-gray-500 py-1">No coins are currently nearing their high or low target limits.</p>
+        ) : targetAlerts.length === 0 ? (
+          <p className="text-xs text-gray-500 py-1">No target prices have been reached or are currently within 5% proximity.</p>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {nearingTargets.map((coin) => (
-              <div
-                key={coin.cardKey}
-                className={`rounded-lg border p-3 transition-all hover:shadow-md ${
-                  coin.targetType === "high"
-                    ? "border-green-200 bg-green-50/40"
-                    : "border-red-200 bg-red-50/40"
-                }`}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-bold text-gray-900 text-sm">{coin.symbol}</span>
-                  <span
-                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${
-                      coin.targetType === "high"
-                        ? "bg-green-100 text-green-800 border border-green-300"
-                        : "bg-red-100 text-red-800 border border-red-300"
-                    }`}
-                  >
-                    {coin.targetType === "high" ? "Tgt High" : "Tgt Low"}
-                  </span>
-                </div>
+            {targetAlerts.map((coin) => {
+              const isReached = coin.alertType === "reached";
+              const isHigh = coin.targetType === "high";
 
-                <div className="text-xs space-y-1 mb-2">
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Current:</span>
-                    <span className="font-semibold text-gray-900">{formatPhp(coin.currentPrice)}</span>
+              return (
+                <div
+                  key={coin.cardKey}
+                  className={`rounded-lg border p-3 transition-all hover:shadow-md ${
+                    isReached
+                      ? "border-amber-300 bg-amber-50/60 shadow-sm"
+                      : isHigh
+                      ? "border-green-200 bg-green-50/40"
+                      : "border-red-200 bg-red-50/40"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-bold text-gray-900 text-sm">{coin.symbol}</span>
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-extrabold tracking-wide uppercase ${
+                        isReached
+                          ? "bg-amber-600 text-white shadow-xs"
+                          : isHigh
+                          ? "bg-green-100 text-green-800 border border-green-300"
+                          : "bg-red-100 text-red-800 border border-red-300"
+                      }`}
+                    >
+                      {isReached && <span className="animate-pulse">🎯</span>}
+                      {isReached ? "Target Reached" : isHigh ? "Tgt High" : "Tgt Low"}
+                    </span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Target:</span>
-                    <span className="font-semibold text-gray-900">{formatPhp(coin.targetPrice)}</span>
-                  </div>
-                </div>
 
-                <div className="mt-2 flex items-center justify-between border-t border-gray-200/60 pt-2 text-xs">
-                  <span
-                    className={`font-medium ${
-                      coin.targetType === "high" ? "text-green-700" : "text-red-700"
-                    }`}
-                  >
-                    {coin.status}
-                  </span>
-                  <Link
-                    href={`/chart?symbol=${coin.symbol}`}
-                    className="text-xs font-semibold text-brand-600 hover:text-brand-800 underline"
-                  >
-                    View Chart →
-                  </Link>
+                  <div className="text-xs space-y-1 mb-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Current Price:</span>
+                      <span className="font-semibold text-gray-900">{formatPhp(coin.currentPrice)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Target ({coin.targetType.toUpperCase()}):</span>
+                      <span className="font-semibold text-gray-900">{formatPhp(coin.targetPrice)}</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 flex items-center justify-between border-t border-gray-200/80 pt-2 text-xs">
+                    <span
+                      className={`font-semibold ${
+                        isReached
+                          ? "text-amber-800"
+                          : isHigh
+                          ? "text-green-700"
+                          : "text-red-700"
+                      }`}
+                    >
+                      {coin.status}
+                    </span>
+                    <Link
+                      href={`/chart?symbol=${coin.symbol}`}
+                      className="text-xs font-bold text-brand-600 hover:text-brand-800 underline"
+                    >
+                      View Chart →
+                    </Link>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
