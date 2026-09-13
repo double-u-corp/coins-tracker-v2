@@ -17,6 +17,15 @@ export interface ReachedTarget {
   value: number;
 }
 
+export interface NearingTargetCoin extends CoinSummary {
+  cardKey: string;
+  targetType: "high" | "low";
+  targetPrice: number;
+  distance: number;
+  status: string;
+  currentPrice: number;
+}
+
 interface PriceUpdateCoin {
   symbol: string;
   name: string;
@@ -102,37 +111,35 @@ export function useHomeLogic() {
     }
   }, []);
 
-  // UPDATED: Manual Cron Trigger with AbortController timeout
-async function triggerCronManually() {
-  setCronTriggering(true);
+  async function triggerCronManually() {
+    setCronTriggering(true);
 
-  try {
-    const res = await fetch("/api/cron-manual", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
+    try {
+      const res = await fetch("/api/cron-manual", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
 
-    const data = (await res.json()) as
-      | { ok: true; ranAt: string; results: any[] }
-      | { ok: false; error: string };
+      const data = (await res.json()) as
+        | { ok: true; ranAt: string; results: any[] }
+        | { ok: false; error: string };
 
-    if (!res.ok || !data.ok) {
-      if (res.status === 401) {
-        throw new Error("You must be logged in to trigger a manual run.");
+      if (!res.ok || !data.ok) {
+        if (res.status === 401) {
+          throw new Error("You must be logged in to trigger a manual run.");
+        }
+        throw new Error(!data.ok ? data.error : `Request failed with status ${res.status}`);
       }
-      throw new Error(!data.ok ? data.error : `Request failed with status ${res.status}`);
-    }
 
-    // Refresh UI data after successful run
-    await loadSummary();
-  } catch (err: any) {
-    alert(err.message || "Failed to trigger manual update.");
-  } finally {
-    setCronTriggering(false);
+      await loadSummary();
+    } catch (err: any) {
+      alert(err.message || "Failed to trigger manual update.");
+    } finally {
+      setCronTriggering(false);
+    }
   }
-}
 
   useEffect(() => {
     loadSummary();
@@ -150,8 +157,10 @@ async function triggerCronManually() {
         if (!cancelled) setPortfolio(data.portfolio || []);
       })
       .catch((err) => console.error(err));
-      
-    return () => { cancelled = true; };
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function closeAlertModal() {
@@ -169,6 +178,51 @@ async function triggerCronManually() {
   const filteredCoins = useMemo(() => {
     return state.coins.filter((coin) => selectedCoins.includes(coin.symbol));
   }, [state.coins, selectedCoins]);
+
+  // Compute nearing high/low targets across all coins
+  const nearingTargets = useMemo<NearingTargetCoin[]>(() => {
+    if (!state.coins || state.coins.length === 0) return [];
+
+    const targets: NearingTargetCoin[] = [];
+
+    for (const coin of state.coins) {
+      if (coin.currentPrice === null || coin.currentPrice === undefined) continue;
+
+      const current = Number(coin.currentPrice);
+      const targetHigh = coin.targetHigh != null ? Number(coin.targetHigh) : null;
+      const targetLow = coin.targetLow != null ? Number(coin.targetLow) : null;
+
+      // Check Target High (within 5%)
+      if (targetHigh !== null && !isNaN(targetHigh) && current >= targetHigh * 0.95) {
+        const distPct = ((targetHigh - current) / targetHigh) * 100;
+        targets.push({
+          ...coin,
+          cardKey: `${coin.symbol}-high`,
+          targetType: "high",
+          targetPrice: targetHigh,
+          distance: distPct <= 0 ? 0 : distPct,
+          status: distPct <= 0 ? "Target Reached!" : `Within ${distPct.toFixed(1)}% of High`,
+          currentPrice: current,
+        });
+      }
+
+      // Check Target Low (within 5%)
+      if (targetLow !== null && !isNaN(targetLow) && current <= targetLow * 1.05) {
+        const distPct = ((current - targetLow) / targetLow) * 100;
+        targets.push({
+          ...coin,
+          cardKey: `${coin.symbol}-low`,
+          targetType: "low",
+          targetPrice: targetLow,
+          distance: distPct <= 0 ? 0 : distPct,
+          status: distPct <= 0 ? "Target Reached!" : `Within ${distPct.toFixed(1)}% of Low`,
+          currentPrice: current,
+        });
+      }
+    }
+
+    return targets.sort((a, b) => a.distance - b.distance);
+  }, [state.coins]);
 
   const reachedTargets: ReachedTarget[] = useMemo(() => {
     const entries: ReachedTarget[] = [];
@@ -296,8 +350,9 @@ async function triggerCronManually() {
 
   return {
     ...state,
-    allCoins: state.coins, 
-    coins: filteredCoins,  
+    allCoins: state.coins,
+    coins: filteredCoins,
+    nearingTargets,
     selectedCoins,
     setSelectedCoins,
     portfolio,

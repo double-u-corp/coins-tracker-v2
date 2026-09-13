@@ -115,49 +115,6 @@ export default function ChartView() {
     return { support, resistance };
   }, [points]);
 
-  const nearingTargets = useMemo(() => {
-    if (!allCoins || allCoins.length === 0) return [];
-
-    const targets = [];
-
-    for (const coin of allCoins) {
-      if (coin.currentPrice === null) continue;
-
-      const isNearHigh = coin.targetHigh !== null && coin.currentPrice >= coin.targetHigh * 0.95;
-      const isNearLow = coin.targetLow !== null && coin.currentPrice <= coin.targetLow * 1.05;
-
-      if (isNearHigh || isNearLow) {
-        let status = "";
-        let distance = 0;
-        let targetType: "high" | "low" | null = null;
-        let targetPrice = 0;
-
-        if (isNearHigh && coin.targetHigh !== null) {
-          targetType = "high";
-          targetPrice = coin.targetHigh;
-          distance = ((coin.targetHigh - coin.currentPrice) / coin.targetHigh) * 100;
-          status = distance <= 0 ? "Target Reached!" : `Within ${distance.toFixed(1)}% of High`;
-        } else if (isNearLow && coin.targetLow !== null) {
-          targetType = "low";
-          targetPrice = coin.targetLow;
-          distance = ((coin.currentPrice - coin.targetLow) / coin.targetLow) * 100;
-          status = distance <= 0 ? "Target Reached!" : `Within ${distance.toFixed(1)}% of Low`;
-        }
-
-        targets.push({
-          ...coin,
-          targetType,
-          targetPrice,
-          status,
-          distance: distance <= 0 ? 0 : distance,
-          currentPrice: coin.currentPrice,
-        });
-      }
-    }
-
-    return targets.sort((a, b) => a.distance - b.distance);
-  }, [allCoins]);
-
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -267,67 +224,6 @@ export default function ChartView() {
               Use the dropdown above to select a cryptocurrency to view its chart history, technical insights, and your trade logs.
             </p>
           </div>
-
-          {allCoins && allCoins.length > 0 && (
-            <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <h3 className="text-base font-semibold text-gray-900">🚨 Nearing Targets Scanner</h3>
-                  <p className="text-xs text-gray-500 mt-0.5">Coins within 5% of their configured limit targets.</p>
-                </div>
-              </div>
-
-              {nearingTargets.length === 0 ? (
-                <div className="rounded border border-gray-100 bg-gray-50 p-6 text-center text-sm text-gray-500">
-                  No coins are currently within 5% of their set target highs or lows.
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {nearingTargets.map((coin) => (
-                    <div
-                      key={coin.symbol}
-                      className={`rounded-lg border p-4 transition-all hover:shadow-md cursor-pointer ${
-                        coin.targetType === "high" ? "border-green-200 bg-green-50/30" : "border-red-200 bg-red-50/30"
-                      }`}
-                      onClick={() => setSymbol(coin.symbol)}
-                    >
-                      <div className="mb-2 flex items-center justify-between">
-                        <span className="font-bold text-gray-900">{coin.symbol}</span>
-                        <span
-                          className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                            coin.distance === 0
-                              ? "bg-brand-600 text-white"
-                              : coin.targetType === "high"
-                              ? "bg-green-100 text-green-800"
-                              : "bg-red-100 text-red-800"
-                          }`}
-                        >
-                          {coin.status}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between text-xs pt-1 border-t border-gray-100 mt-2">
-                        <div className="text-gray-900">
-                          <span className="text-[10px] font-semibold uppercase text-gray-500 mr-1">Price</span>
-                          <span className="font-medium">{formatPhp(coin.currentPrice)}</span>
-                        </div>
-                        <div
-                          className={
-                            coin.targetType === "high" ? "text-green-700" : "text-red-700"
-                          }
-                        >
-                          <span className="text-[10px] font-semibold uppercase opacity-75 mr-1">
-                            Tgt {coin.targetType}
-                          </span>
-                          <span className="font-medium">{formatPhp(coin.targetPrice)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
 
           {/* General Journal Block displayed when no coin is selected */}
           <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
