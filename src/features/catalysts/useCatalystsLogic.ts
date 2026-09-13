@@ -1,11 +1,29 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import type { JournalEntryView } from "@/validators/journalSchema";
+import { nowInManila, getDateKeyInZone, TRADER_TIMEZONE } from "../../lib/timezone";
 
 export interface CatalystPrompt {
   id: string;
-  category: "News" | "Daily" | "Weekly" | "Monthly" | "Macro";
+  category: "Live" | "Weekly" | "Monthly" | "Macro";
   title: string;
   prompt: string;
+  // Short, keyword-style query sent to the search API. Kept separate from
+  // `prompt` (which carries the full instructions for the LLM) because
+  // search engines return better results from a few keywords than from a
+  // paragraph of formatting rules.
+  searchQuery: string;
+  // "coin" = result depends on the currently selected coin.
+  // "global" = same result regardless of which coin is selected (market-wide
+  // or exchange-wide). Surfaced in the UI so switching coins doesn't
+  // silently look like it did nothing for these.
+  scope: "coin" | "global";
+  // Explicit search recency/depth profile — see catalyst-ai.ts. Set per
+  // prompt (not inferred from category) so a future category rename can't
+  // silently break freshness settings again.
+  searchProfile: "breaking" | "weekly" | "trend" | "authoritative";
+  // "markdown" = human-readable analyst summary (default).
+  // "json" = structured event list, rendered as a sorted list, not prose.
+  responseFormat?: "markdown" | "json";
 }
 
 export interface CachedAiLog {
@@ -51,20 +69,17 @@ export const AVAILABLE_TOKENS = [
 // Helper to inject tailored, category-specific execution rules
 const getCategoryRules = (category: CatalystPrompt["category"]) => {
   switch (category) {
-    case "News":
-      return " RULES: 1. Focus strictly on breaking developments, whale activity, or official announcements from the past 24-72 hours. 2. Explain the direct cause behind recent price action. 3. Include direct source links where available.";
-
-    case "Daily":
-      return " RULES: 1. Focus on live 24h market data: perpetual funding rates, open interest shifts, liquidations, and on-chain net flows. 2. Provide a clear 24h sentiment assessment (Bullish/Bearish/Neutral leverage).";
+    case "Live":
+      return " RULES: 1. Cover breaking news, whale activity, and official announcements from the past 24-72 hours, PLUS current 24h derivatives data (funding rates, open interest, liquidations) and on-chain net flows. 2. Provide a clear overall sentiment (Bullish/Bearish/Neutral) and explain the direct cause behind recent price action. 3. Include direct source links where available.";
 
     case "Weekly":
-      return " RULES: 1. Focus on events and updates within a 7-day lookback or lookahead window. 2. Highlight exchange listings (Binance, Coins.ph, OKX), new pairs, or weekly structural changes.";
+      return " RULES: 1. Focus on events and updates within a 7-day lookback or lookahead window. 2. Check BOTH major exchanges (Binance, Coinbase, OKX, Bybit) AND mid-tier/regional exchanges (KuCoin, Gate.io, MEXC, Bitget, HTX, LBank, Upbit, Bithumb, Coins.ph, PDAX) — many of these assets list on mid-tier or regional platforms before or instead of a Tier-1 listing, so do not limit the search to only the largest names. 3. Also flag any major DEX listing spike (Uniswap, PancakeSwap) if it signals new liquidity. 4. Note which specific exchange(s) each listing/pair applies to.";
 
     case "Monthly":
       return " RULES: 1. Focus on a 30-60 day horizon for scheduled token unlocks (% of circulating supply), major roadmap milestones, mainnet upgrades, or TGEs. 2. Highlight potential supply pressure.";
 
     case "Macro":
-return " RULES: 1. List upcoming scheduled US economic calendar dates for this month. 2. NEVER use Unicode citation brackets like 【...】. 3. Format ALL citations as standard Markdown links: [Source Name](https://url.com).";
+      return " RULES: 1. Cover the full macro picture in one pass: (a) upcoming FOMC/CPI/PCE/NFP calendar dates this month with exact ET release times where known, (b) current DXY and 10-year Treasury yield trend, (c) any active geopolitical or global financial risk affecting risk-on assets. 2. NEVER use Unicode citation brackets like 【...】. 3. Format ALL citations as standard Markdown links: [Source Name](https://url.com).";
     default:
       return "";
   }
@@ -85,32 +100,30 @@ const STATIC_MACRO_PROMPTS: CatalystPrompt[] = [
   {
     id: "weekly-coins-ph",
     category: "Weekly",
-    title: "Coins.ph Listings & Official Updates",
-    prompt: `What are the latest official announcements, new token listings, or updates from Coins.ph?${getCategoryRules("Weekly")}`,
+    title: "Coins.ph Platform Updates",
+    prompt: `What are the latest official announcements from Coins.ph specifically — new token listings, delistings, fee changes, or maintenance/platform updates? RULES: 1. Focus only on official Coins.ph announcements within a 7-day lookback or lookahead window. 2. Do not include general market-wide exchange news unrelated to Coins.ph itself.`,
+    searchQuery: "Coins.ph official announcement listing update",
+    scope: "global",
+    searchProfile: "weekly",
   },
   {
-    id: "macro-fed-calendar",
+    id: "macro-calendar-events",
     category: "Macro",
-    title: "Macro & Fed Calendar",
-    prompt: `What are the upcoming high-impact US macroeconomic events, FOMC meetings, Fed speeches, and economic reports scheduled for this month?${getCategoryRules("Macro")}`,
+    title: "Upcoming Macro Event Dates (FOMC, CPI, PCE, NFP)",
+    prompt: `List the top 6-8 scheduled US macroeconomic events for this month and next month: NFP, CPI, Core PCE, FOMC meetings, and major options expiries. For each, give the official US Eastern Time (ET) release date, and the release time in ET if you're confident of it. Only include events you can find explicitly in the search results — do not guess dates from general knowledge.`,
+    searchQuery: "US economic calendar CPI PCE NFP FOMC dates this month",
+    scope: "global",
+    searchProfile: "authoritative",
+    responseFormat: "json",
   },
   {
-    id: "macro-inflation",
+    id: "macro-briefing",
     category: "Macro",
-    title: "Inflation Reports (CPI & PCE)",
-    prompt: `When are the next US CPI and core PCE inflation reports scheduled, and what are the market expectations and consensus readings?${getCategoryRules("Macro")}`,
-  },
-  {
-    id: "macro-dxy-yields",
-    category: "Macro",
-    title: "US Dollar Index (DXY) & 10Y Yields",
-    prompt: `How are the US Dollar Index (DXY) and 10-year US Treasury yield trending this week, and how is it impacting crypto market risk appetite?${getCategoryRules("Macro")}`,
-  },
-  {
-    id: "macro-geopolitics",
-    category: "Macro",
-    title: "Geopolitics & Global Risk",
-    prompt: `Are there any major global financial market risks, banking developments, or geopolitical events currently impacting crypto and risk-on assets?${getCategoryRules("Macro")}`,
+    title: "Macro Briefing (DXY, Yields, Geopolitics)",
+    prompt: `Give a macro briefing for crypto markets covering: (1) how the US Dollar Index (DXY) and 10-year Treasury yield are trending this week and what that implies for crypto risk appetite, (2) any major geopolitical or global financial market risk currently affecting risk-on assets. Do not list specific FOMC/CPI/NFP calendar dates — that is covered separately.${getCategoryRules("Macro")}`,
+    searchQuery: "DXY treasury yield geopolitical risk crypto this week",
+    scope: "global",
+    searchProfile: "trend",
   },
 ];
 
@@ -136,34 +149,31 @@ export function useCatalystsLogic() {
 
     return [
       {
-        id: `coin-${key}-news-moving`,
-        category: "News",
-        title: `${selectedCoin} — Breaking News & Price Drivers`,
-        prompt: `Why is ${formattedToken} moving today? What are the top breaking news items, announcements, or whale moves driving this asset?${getCategoryRules("News")}`,
-      },
-      {
-        id: `coin-${key}-daily-derivatives`,
-        category: "Daily",
-        title: `${selectedCoin} — Derivatives & Leverage`,
-        prompt: `What do perpetual funding rates, open interest, and liquidation levels suggest about leverage and market positioning for ${formattedToken}?${getCategoryRules("Daily")}`,
-      },
-      {
-        id: `coin-${key}-daily-onchain`,
-        category: "Daily",
-        title: `${selectedCoin} — On-Chain Signals & Whale Flows`,
-        prompt: `What are the latest on-chain signals for ${formattedToken} — large exchange net inflows/outflows or wallet accumulation patterns?${getCategoryRules("Daily")}`,
+        id: `coin-${key}-live`,
+        category: "Live",
+        title: `${selectedCoin} — Live Pulse (News, Derivatives, On-Chain)`,
+        prompt: `Give a full live snapshot of ${formattedToken}: why it's moving, top breaking news/announcements/whale moves in the past 24-72h, current perpetual funding rates and open interest, and any notable exchange net inflow/outflow or on-chain accumulation.${getCategoryRules("Live")}`,
+        searchQuery: `${selectedCoin} crypto news funding rate whale flows today`,
+        scope: "coin",
+        searchProfile: "breaking",
       },
       {
         id: `coin-${key}-weekly-listings`,
         category: "Weekly",
-        title: `${selectedCoin} — Exchange Listings & Pairs`,
-        prompt: `What are the latest official announcements regarding new exchange listings or perpetual trading pairs (Binance, Coinbase, OKX, Coins.ph) for ${formattedToken}?${getCategoryRules("Weekly")}`,
+        title: `${selectedCoin} — Exchange Listings & Pairs (All Tiers)`,
+        prompt: `What are the latest official announcements regarding new exchange listings, delistings, or perpetual/spot trading pairs for ${formattedToken}? Check both major exchanges (Binance, Coinbase, OKX, Bybit) and mid-tier/regional exchanges (KuCoin, Gate.io, MEXC, Bitget, HTX, Upbit, Bithumb, Coins.ph, PDAX) — do not assume it only lists on the largest platforms.${getCategoryRules("Weekly")}`,
+        searchQuery: `${selectedCoin} new listing exchange KuCoin Gate MEXC Bitget Bybit`,
+        scope: "coin",
+        searchProfile: "weekly",
       },
       {
         id: `coin-${key}-monthly-unlocks`,
         category: "Monthly",
         title: `${selectedCoin} — Token Unlocks & Roadmap`,
         prompt: `What are the major scheduled token unlocks, mainnet upgrades, or governance milestones in the next 30-60 days for ${formattedToken}?${getCategoryRules("Monthly")}`,
+        searchQuery: `${selectedCoin} token unlock schedule mainnet upgrade`,
+        scope: "coin",
+        searchProfile: "authoritative",
       },
     ];
   }, [selectedCoin]);
@@ -237,10 +247,10 @@ export function useCatalystsLogic() {
 
   const checkIsPeriodCurrent = (timestamp: number, category: string) => {
     const runDate = new Date(timestamp);
-    const now = new Date();
+    const now = nowInManila();
 
-    if (category === "News" || category === "Daily") {
-      return runDate.toDateString() === now.toDateString();
+    if (category === "Live") {
+      return getDateKeyInZone(runDate, TRADER_TIMEZONE) === getDateKeyInZone(now, TRADER_TIMEZONE);
     }
     if (category === "Weekly" || category === "Macro") {
       const diffDays = (now.getTime() - runDate.getTime()) / (1000 * 3600 * 24);
@@ -271,12 +281,9 @@ export function useCatalystsLogic() {
     }
   };
 
-  const runAiSearch = async (
-    promptId: string,
-    promptText: string,
-    category: string,
-    force = false
-  ) => {
+  const runAiSearch = async (item: CatalystPrompt, force = false) => {
+    const { id: promptId, prompt: promptText, category, searchQuery, searchProfile, responseFormat } = item;
+
     setAiLoading((prev) => ({ ...prev, [promptId]: true }));
     setAiErrors((prev) => ({ ...prev, [promptId]: "" }));
 
@@ -287,8 +294,11 @@ export function useCatalystsLogic() {
         body: JSON.stringify({
           promptId,
           prompt: promptText,
+          searchQuery,
+          searchProfile,
           category,
           forceRefresh: force,
+          responseFormat: responseFormat || "markdown",
         }),
       });
 

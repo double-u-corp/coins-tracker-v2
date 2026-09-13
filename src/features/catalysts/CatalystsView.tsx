@@ -1,6 +1,52 @@
 import { useCatalystsLogic, AVAILABLE_TOKENS } from "./useCatalystsLogic";
 import JournalSidebar from "@/features/chart/JournalSidebar";
 import FormattedAiResponse from "@/components/FormattedAiResponse";
+import { extractJsonArray, attachManilaFields, sortEventsChronologically } from "../../lib/macroEvent";
+
+function MacroEventsList({ rawResponse }: { rawResponse: string }) {
+  let events;
+  try {
+    events = sortEventsChronologically(attachManilaFields(extractJsonArray(rawResponse)));
+  } catch (e) {
+    return (
+      <div className="text-xs text-red-600 bg-red-50 p-2.5 rounded border border-red-200">
+        ⚠️ Couldn't parse event data — try Re-Scan.
+      </div>
+    );
+  }
+
+  if (events.length === 0) {
+    return <p className="text-xs text-gray-500">No scheduled events found.</p>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {events.map((evt, idx) => (
+        <div
+          key={idx}
+          className={`flex items-center justify-between gap-3 p-2.5 rounded border text-xs ${
+            evt.severity === "high"
+              ? "bg-red-50 border-red-200"
+              : "bg-amber-50 border-amber-200"
+          }`}
+        >
+          <div className="flex-1">
+            <span className="font-bold text-gray-900">{evt.title}</span>
+            <span className="ml-2 uppercase text-[10px] font-semibold text-gray-500">{evt.type}</span>
+          </div>
+          <div className="text-right">
+            <div className="font-semibold text-gray-800">
+              {evt.manilaDateKey || evt.date}
+            </div>
+            <div className="text-gray-500">
+              {evt.manilaTimeLabel || (evt.approximateTime ? "time TBD" : "")}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function CatalystsView() {
   const {
@@ -60,7 +106,7 @@ export default function CatalystsView() {
       <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm space-y-6">
         {/* Category Filters */}
         <div className="flex gap-2 border-b border-gray-100 pb-4 overflow-x-auto">
-          {["All", "News", "Daily", "Weekly", "Monthly", "Macro"].map((cat) => (
+          {["All", "Live", "Weekly", "Monthly", "Macro"].map((cat) => (
             <button
               key={cat}
               onClick={() => setSelectedCategory(cat)}
@@ -74,6 +120,14 @@ export default function CatalystsView() {
             </button>
           ))}
         </div>
+
+        {(selectedCategory === "Macro" || selectedCategory === "All") && (
+          <div className="text-xs text-blue-800 bg-blue-50 border border-blue-200 rounded-md p-2.5">
+            🌐 Items marked <strong>All Coins</strong> are market-wide (Fed calendar, DXY, geopolitics,
+            Coins.ph listings) — they don't change when you switch the selected coin above. Only items
+            marked with the coin's own badge are specific to it.
+          </div>
+        )}
 
         {/* Active Prompts Grid */}
         <div className="space-y-4">
@@ -95,6 +149,20 @@ export default function CatalystsView() {
                       <span className="rounded bg-gray-200 text-gray-700 text-[10px] font-bold uppercase px-2 py-0.5">
                         {item.category}
                       </span>
+                      <span
+                        className={`rounded text-[10px] font-bold uppercase px-2 py-0.5 ${
+                          item.scope === "global"
+                            ? "bg-blue-100 text-blue-700"
+                            : "bg-purple-100 text-purple-700"
+                        }`}
+                        title={
+                          item.scope === "global"
+                            ? "Same result regardless of which coin is selected"
+                            : `Specific to ${selectedCoin}`
+                        }
+                      >
+                        {item.scope === "global" ? "🌐 All Coins" : `🎯 ${selectedCoin}`}
+                      </span>
                       <h3 className="font-semibold text-gray-900 text-sm">{item.title}</h3>
                       <span
                         className={`text-[10px] font-medium px-2 py-0.5 rounded border ${
@@ -115,7 +183,7 @@ export default function CatalystsView() {
                   </div>
 
                   <button
-                    onClick={() => runAiSearch(item.id, item.prompt, item.category, isCurrent)}
+                    onClick={() => runAiSearch(item, !isCurrent)}
                     disabled={isLoading}
                     className="px-3.5 py-2 rounded-md text-xs font-semibold bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 whitespace-nowrap shadow-sm"
                   >
@@ -132,7 +200,11 @@ export default function CatalystsView() {
                 {/* AI Analysis Result */}
                 {cachedData?.response && !isLoading && (
                   <div className="rounded-lg border border-purple-200 bg-purple-50/40 p-4 mt-2 space-y-3">
-                    <FormattedAiResponse text={cachedData.response} />
+                    {item.responseFormat === "json" ? (
+                      <MacroEventsList rawResponse={cachedData.response} />
+                    ) : (
+                      <FormattedAiResponse text={cachedData.response} />
+                    )}
                     <div className="pt-2 border-t border-purple-100 flex items-center justify-between">
                       <span className="text-[11px] text-gray-400 font-medium">
                         Last Updated: {new Date(cachedData.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
