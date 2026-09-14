@@ -230,7 +230,7 @@ export default function CalendarView() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Navigation Header / Back Button */}
+{/* Navigation Header / Back Button */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link 
           href="/" 
@@ -256,6 +256,13 @@ export default function CalendarView() {
             >
               <span>📈</span>
               <span>View Chart</span>
+            </Link>
+            <Link
+              href={`/manage?symbol=${selectedSymbol}`}
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-md hover:bg-emerald-100 transition-colors"
+            >
+              <span>⚙️</span>
+              <span>Manage Coin</span>
             </Link>
             <button
               type="button"

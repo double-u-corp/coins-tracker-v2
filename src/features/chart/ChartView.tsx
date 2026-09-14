@@ -135,6 +135,14 @@ export default function ChartView() {
               <span>📅</span>
               <span>View Calendar</span>
             </Link>
+
+            <Link
+              href={`/manage?symbol=${symbol}`}
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-md hover:bg-emerald-100 transition-colors"
+            >
+              <span>⚙️</span>
+              <span>Manage Coin</span>
+            </Link>
           </div>
         )}
       </div>
