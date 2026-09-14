@@ -1,4 +1,5 @@
-import { useCatalystsLogic, AVAILABLE_TOKENS } from "./useCatalystsLogic";
+import { useState } from "react";
+import { useCatalystsLogic, AVAILABLE_TOKENS, buildPortablePrompt } from "./useCatalystsLogic";
 import JournalSidebar from "@/features/chart/JournalSidebar";
 import FormattedAiResponse from "@/components/FormattedAiResponse";
 import { extractJsonArray, attachManilaFields, sortEventsChronologically } from "../../lib/macroEvents";
@@ -55,6 +56,8 @@ export default function CatalystsView() {
     selectedCategory,
     setSelectedCategory,
     filteredPrompts,
+    copiedId,
+    handleCopy,
     generalEntries,
     journalLoading,
     journalError,
@@ -73,6 +76,12 @@ export default function CatalystsView() {
     toggleDeepDive,
   } = useCatalystsLogic();
 
+  // Top-level view switch: the normal AI-scanner UI, or the Prompt Library
+  // — a plain list of the same prompts (wrapped to be self-contained) meant
+  // purely for copy-pasting into other AI platforms (Gemini, Copilot, a
+  // Groq chat UI, etc.), so research isn't dependent on a single model.
+  const [activeTab, setActiveTab] = useState<"scanner" | "library">("scanner");
+
   // Local, UI-only state for the "search on Google instead" escape hatch —
   // deliberately NOT routed through the AI pipeline at all: zero API cost,
   // zero hallucination risk, and gives the raw unfiltered result set for
@@ -83,7 +92,32 @@ export default function CatalystsView() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Top Banner & Token Selector */}
+      {/* Tab Switcher */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => setActiveTab("scanner")}
+          className={`px-4 py-2 rounded-md text-sm font-semibold transition ${
+            activeTab === "scanner"
+              ? "bg-purple-600 text-white shadow-sm"
+              : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+          }`}
+        >
+          ⚡ AI Scanner
+        </button>
+        <button
+          onClick={() => setActiveTab("library")}
+          className={`px-4 py-2 rounded-md text-sm font-semibold transition ${
+            activeTab === "library"
+              ? "bg-gray-700 text-white shadow-sm"
+              : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+          }`}
+        >
+          📚 Prompt Library
+        </button>
+      </div>
+
+      {/* Shared controls — visible on both tabs so filter/selection state is
+          never invisible depending on which tab you're looking at */}
       <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm space-y-4">
         <div>
           <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
@@ -129,12 +163,11 @@ export default function CatalystsView() {
             {isDeepDiveOn ? "Deep Dive: ON" : "Deep Dive: OFF"}
           </button>
         </div>
-      </div>
 
-      {/* Main Scanner Section */}
-      <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm space-y-6">
-        {/* Category Filters */}
-        <div className="flex gap-2 border-b border-gray-100 pb-4 overflow-x-auto">
+        {/* Category Filters — also shared, so both tabs always show what's
+            actually being filtered on, instead of one tab hiding the state
+            the other tab set. */}
+        <div className="flex gap-2 border-t border-gray-100 pt-4 overflow-x-auto">
           {["All", "Live", "Weekly", "Monthly", "Macro"].map((cat) => (
             <button
               key={cat}
@@ -149,7 +182,16 @@ export default function CatalystsView() {
             </button>
           ))}
         </div>
+        <p className="text-[10px] text-gray-400">
+          Showing <strong>{filteredPrompts.length}</strong> prompt{filteredPrompts.length === 1 ? "" : "s"} for{" "}
+          {selectedCategory === "All" ? "all categories" : `"${selectedCategory}"`} — this applies to both tabs.
+        </p>
+      </div>
 
+      {activeTab === "scanner" && (
+        <>
+      {/* Main Scanner Section */}
+      <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm space-y-6">
         {(selectedCategory === "Macro" || selectedCategory === "All") && (
           <div className="text-xs text-blue-800 bg-blue-50 border border-blue-200 rounded-md p-2.5">
             🌐 Items marked <strong>All Coins</strong> are market-wide (Fed calendar, DXY, geopolitics,
@@ -172,54 +214,59 @@ export default function CatalystsView() {
                 key={item.id}
                 className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50/50 p-4"
               >
-                <div className="flex flex-col sm:flex-row items-start justify-between gap-4">
-                  <div className="space-y-1 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="rounded bg-gray-200 text-gray-700 text-[10px] font-bold uppercase px-2 py-0.5">
-                        {item.category}
-                      </span>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="rounded bg-gray-200 text-gray-700 text-[10px] font-bold uppercase px-2 py-0.5">
+                      {item.category}
+                    </span>
+                    <span
+                      className={`rounded text-[10px] font-bold uppercase px-2 py-0.5 ${
+                        item.scope === "global"
+                          ? "bg-blue-100 text-blue-700"
+                          : "bg-purple-100 text-purple-700"
+                      }`}
+                      title={
+                        item.scope === "global"
+                          ? "Same result regardless of which coin is selected"
+                          : `Specific to ${selectedCoin}`
+                      }
+                    >
+                      {item.scope === "global" ? "🌐 All Coins" : `🎯 ${selectedCoin}`}
+                    </span>
+                    {item.tier === "deepDive" && (
                       <span
-                        className={`rounded text-[10px] font-bold uppercase px-2 py-0.5 ${
-                          item.scope === "global"
-                            ? "bg-blue-100 text-blue-700"
-                            : "bg-purple-100 text-purple-700"
-                        }`}
-                        title={
-                          item.scope === "global"
-                            ? "Same result regardless of which coin is selected"
-                            : `Specific to ${selectedCoin}`
-                        }
+                        className="rounded text-[10px] font-bold uppercase px-2 py-0.5 bg-orange-100 text-orange-700"
+                        title="More speculative — only shown because Deep Dive is enabled"
                       >
-                        {item.scope === "global" ? "🌐 All Coins" : `🎯 ${selectedCoin}`}
+                        🔬 Deep Dive
                       </span>
-                      {item.tier === "deepDive" && (
-                        <span
-                          className="rounded text-[10px] font-bold uppercase px-2 py-0.5 bg-orange-100 text-orange-700"
-                          title="More speculative — only shown because Deep Dive is enabled"
-                        >
-                          🔬 Deep Dive
-                        </span>
-                      )}
-                      <h3 className="font-semibold text-gray-900 text-sm">{item.title}</h3>
-                      <span
-                        className={`text-[10px] font-medium px-2 py-0.5 rounded border ${
-                          statusInfo.status === "current"
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                            : statusInfo.status === "expired"
-                            ? "bg-amber-50 text-amber-700 border-amber-200"
-                            : "bg-gray-100 text-gray-500 border-gray-200"
-                        }`}
-                      >
-                        {statusInfo.label}
-                      </span>
-                    </div>
-
-                    <p className="text-xs text-gray-600 font-mono bg-white p-2 rounded border border-gray-200 mt-1">
-                      &ldquo;{item.prompt}&rdquo;
-                    </p>
+                    )}
+                    <h3 className="font-semibold text-gray-900 text-sm">{item.title}</h3>
+                    <span
+                      className={`text-[10px] font-medium px-2 py-0.5 rounded border ${
+                        statusInfo.status === "current"
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          : statusInfo.status === "expired"
+                          ? "bg-amber-50 text-amber-700 border-amber-200"
+                          : "bg-gray-100 text-gray-500 border-gray-200"
+                      }`}
+                    >
+                      {statusInfo.label}
+                    </span>
                   </div>
 
-                  <div className="flex gap-2 shrink-0">
+                  <p className="text-xs text-gray-600 font-mono bg-white p-2 rounded border border-gray-200 mt-1">
+                    &ldquo;{item.prompt}&rdquo;
+                  </p>
+
+                  <div className="flex justify-end gap-2 pt-1 flex-wrap">
+                    <button
+                      onClick={() => handleCopy(`${item.id}-portable`, buildPortablePrompt(item.prompt))}
+                      title="Copy a self-contained version of this prompt to paste into Gemini, Copilot, or another AI"
+                      className="px-3.5 py-2 rounded-md text-xs font-semibold bg-gray-700 text-white hover:bg-gray-800 whitespace-nowrap shadow-sm"
+                    >
+                      {copiedId === `${item.id}-portable` ? "✅ Copied!" : "🤝 Copy for AI"}
+                    </button>
                     <button
                       onClick={() => openGoogleSearch(item.searchQuery)}
                       title={`Search Google for: ${item.searchQuery}`}
@@ -286,6 +333,65 @@ export default function CatalystsView() {
           onUpdate={updateJournalEntry}
         />
       </div>
+        </>
+      )}
+
+      {activeTab === "library" && (
+        <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm space-y-5">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+              <span>📚</span> Prompt Library — Cross-Check on Other AI Platforms
+            </h2>
+            <p className="text-xs text-gray-500 mt-1">
+              Each prompt below is self-contained (includes a web-search instruction and today's date) so you
+              can paste it directly into Gemini, Copilot, a Groq chat, or any other AI — widening your research
+              beyond a single model. Use the coin selector and category filters above to change which prompts
+              appear here.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            {filteredPrompts.map((item) => {
+              const libraryId = `${item.id}-library`;
+              return (
+                <div key={item.id} className="rounded-lg border border-gray-200 bg-gray-50/50 p-4 space-y-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="rounded bg-gray-200 text-gray-700 text-[10px] font-bold uppercase px-2 py-0.5">
+                      {item.category}
+                    </span>
+                    <span
+                      className={`rounded text-[10px] font-bold uppercase px-2 py-0.5 ${
+                        item.scope === "global" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
+                      }`}
+                    >
+                      {item.scope === "global" ? "🌐 All Coins" : `🎯 ${selectedCoin}`}
+                    </span>
+                    {item.tier === "deepDive" && (
+                      <span className="rounded text-[10px] font-bold uppercase px-2 py-0.5 bg-orange-100 text-orange-700">
+                        🔬 Deep Dive
+                      </span>
+                    )}
+                    <h3 className="font-semibold text-gray-900 text-sm">{item.title}</h3>
+                  </div>
+
+                  <p className="text-xs text-gray-600 font-mono bg-white p-2 rounded border border-gray-200 whitespace-pre-wrap">
+                    {buildPortablePrompt(item.prompt)}
+                  </p>
+
+                  <div className="flex justify-end">
+                    <button
+                      onClick={() => handleCopy(libraryId, buildPortablePrompt(item.prompt))}
+                      className="px-3.5 py-2 rounded-md text-xs font-semibold bg-gray-700 text-white hover:bg-gray-800 whitespace-nowrap shadow-sm"
+                    >
+                      {copiedId === libraryId ? "✅ Copied!" : "📋 Copy Prompt"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

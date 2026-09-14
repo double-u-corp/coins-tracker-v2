@@ -135,6 +135,17 @@ function buildCoinSearchQuery(token: string, suffix: string): string {
   return `${subject} ${suffix}`;
 }
 
+/** Wraps an internal prompt (written assuming OUR backend has already
+ * pre-fetched search context) into a self-contained prompt suitable for
+ * pasting into another AI platform's chat directly — Gemini, Copilot, a
+ * Groq chat UI, etc. Those platforms don't have our Tavily context, so they
+ * need an explicit instruction to search the web themselves, plus a date
+ * anchor since a pasted prompt has no other way to know "today." */
+export function buildPortablePrompt(basePrompt: string): string {
+  const today = getDateKeyInZone(nowInManila(), TRADER_TIMEZONE);
+  return `Please search the web for the most current, real information before answering — do not rely on your training data alone, and do not guess or fabricate specific numbers, dates, or sources if you can't find them. Today's date is ${today}.\n\n${basePrompt}`;
+}
+
 const STATIC_MACRO_PROMPTS: CatalystPrompt[] = [
   {
     id: "weekly-coins-ph",
@@ -517,6 +528,7 @@ export function useCatalystsLogic() {
     selectedCategory,
     setSelectedCategory,
     filteredPrompts,
+    allPrompts,
     copiedId,
     handleCopy,
     generalEntries,
