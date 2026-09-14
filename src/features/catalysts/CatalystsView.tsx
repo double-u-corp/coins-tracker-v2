@@ -1,7 +1,7 @@
 import { useCatalystsLogic, AVAILABLE_TOKENS } from "./useCatalystsLogic";
 import JournalSidebar from "@/features/chart/JournalSidebar";
 import FormattedAiResponse from "@/components/FormattedAiResponse";
-import { extractJsonArray, attachManilaFields, sortEventsChronologically } from "../../lib/macroEvent";
+import { extractJsonArray, attachManilaFields, sortEventsChronologically } from "../../lib/macroEvents";
 
 function MacroEventsList({ rawResponse }: { rawResponse: string }) {
   let events;
@@ -69,7 +69,17 @@ export default function CatalystsView() {
     runAiSearch,
     getPromptStatus,
     saveAiResponseToJournal,
+    isDeepDiveOn,
+    toggleDeepDive,
   } = useCatalystsLogic();
+
+  // Local, UI-only state for the "search on Google instead" escape hatch —
+  // deliberately NOT routed through the AI pipeline at all: zero API cost,
+  // zero hallucination risk, and gives the raw unfiltered result set for
+  // exactly the moment the AI summary isn't trusted or isn't finding it.
+  const openGoogleSearch = (query: string) => {
+    window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, "_blank", "noopener,noreferrer");
+  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -99,6 +109,25 @@ export default function CatalystsView() {
               {token}
             </button>
           ))}
+        </div>
+
+        <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+          <div>
+            <span className="text-xs font-semibold text-gray-700">🔬 Deep Dive for {selectedCoin}</span>
+            <p className="text-[10px] text-gray-500">
+              Adds Social Sentiment & Competitive Positioning scans — more speculative, so off by default.
+            </p>
+          </div>
+          <button
+            onClick={() => toggleDeepDive(selectedCoin)}
+            className={`px-3 py-1.5 rounded-md text-xs font-semibold transition whitespace-nowrap ${
+              isDeepDiveOn
+                ? "bg-orange-500 text-white hover:bg-orange-600"
+                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            }`}
+          >
+            {isDeepDiveOn ? "Deep Dive: ON" : "Deep Dive: OFF"}
+          </button>
         </div>
       </div>
 
@@ -143,7 +172,7 @@ export default function CatalystsView() {
                 key={item.id}
                 className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50/50 p-4"
               >
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex flex-col sm:flex-row items-start justify-between gap-4">
                   <div className="space-y-1 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="rounded bg-gray-200 text-gray-700 text-[10px] font-bold uppercase px-2 py-0.5">
@@ -163,6 +192,14 @@ export default function CatalystsView() {
                       >
                         {item.scope === "global" ? "🌐 All Coins" : `🎯 ${selectedCoin}`}
                       </span>
+                      {item.tier === "deepDive" && (
+                        <span
+                          className="rounded text-[10px] font-bold uppercase px-2 py-0.5 bg-orange-100 text-orange-700"
+                          title="More speculative — only shown because Deep Dive is enabled"
+                        >
+                          🔬 Deep Dive
+                        </span>
+                      )}
                       <h3 className="font-semibold text-gray-900 text-sm">{item.title}</h3>
                       <span
                         className={`text-[10px] font-medium px-2 py-0.5 rounded border ${
@@ -182,13 +219,22 @@ export default function CatalystsView() {
                     </p>
                   </div>
 
-                  <button
-                    onClick={() => runAiSearch(item, !isCurrent)}
-                    disabled={isLoading}
-                    className="px-3.5 py-2 rounded-md text-xs font-semibold bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 whitespace-nowrap shadow-sm"
-                  >
-                    {isLoading ? "Searching..." : cachedData ? "Re-Scan" : "Run Scan"}
-                  </button>
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      onClick={() => openGoogleSearch(item.searchQuery)}
+                      title={`Search Google for: ${item.searchQuery}`}
+                      className="px-3.5 py-2 rounded-md text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 whitespace-nowrap shadow-sm"
+                    >
+                      🔍 Google
+                    </button>
+                    <button
+                      onClick={() => runAiSearch(item, !isCurrent)}
+                      disabled={isLoading}
+                      className="px-3.5 py-2 rounded-md text-xs font-semibold bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 whitespace-nowrap shadow-sm"
+                    >
+                      {isLoading ? "Searching..." : cachedData ? "Re-Scan" : "Run Scan"}
+                    </button>
+                  </div>
                 </div>
 
                 {errorMsg && (
