@@ -6,9 +6,9 @@ import AlertBanner from "@/components/AlertBanner";
 import JournalSidebar from "./JournalSidebar";
 import TradingInsightCard from "./TradingInsightCard";
 import DCACalculator from "./DCACalculator";
-import StrategyPlaybook from "./StrategyPlaybook";
 import { useChartLogic, type ChartRange } from "./useChartLogic";
 import { formatPhp } from "@/lib/format";
+import { getSupportResistance } from "./Technicals";
 
 const PriceLineChart = dynamic(() => import("./PriceLineChart"), {
   ssr: false,
@@ -107,12 +107,7 @@ export default function ChartView() {
 
   const technicals = useMemo(() => {
     if (points.length === 0) return { support: null, resistance: null };
-
-    const recentData = points.slice(-Math.min(30, points.length));
-    const support = Math.min(...recentData.map((p) => p.low));
-    const resistance = Math.max(...recentData.map((p) => p.high));
-
-    return { support, resistance };
+    return getSupportResistance(points, 30);
   }, [points]);
 
   return (
@@ -313,12 +308,12 @@ export default function ChartView() {
             resistance={technicals.resistance}
           />
 
-          <StrategyPlaybook symbol={symbol} support={technicals.support} />
-
           <DCACalculator
             symbol={symbol}
             currentPrice={currentPrice}
             portfolio={activePortfolio}
+            support={technicals.support}
+            resistance={technicals.resistance}
           />
 
           <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">

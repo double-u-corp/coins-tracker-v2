@@ -1,0 +1,461 @@
+import type { ChartPoint } from "@/validators/recordSchema";
+
+/**
+ * Effective daily price used for ALL technical calculations below. Prefers
+ * a genuine end-of-day "close" if the stored point has one (e.g. the last
+ * of several intraday cron polls) — falls back to the high/low midpoint
+ * when only a daily range is available.
+ *
+ * Using a real close instead of (high+low)/2 everywhere matters: a day
+ * with a wide intraday swing that closed near its low will look
+ * artificially "bullish" under a midpoint proxy. If your cron jobs persist
+ * a `close` (or `last`) field on ChartPoint, this automatically starts
+ * using it with no other code changes required.
+ */
+export function getEffectivePrice(point: ChartPoint): number {
+  const withOptional = point as ChartPoint & { close?: number; last?: number };
+  if (typeof withOptional.close === "number") return withOptional.close;
+  if (typeof withOptional.last === "number") return withOptional.last;
+  return (point.high + point.low) / 2;
+}
+
+// ---------------------------------------------------------------------------
+// SMA
+// ---------------------------------------------------------------------------
+
+/** Full SMA series aligned to `points` (nulls where there isn't enough history yet). */
+export function calculateSMASeries(points: ChartPoint[], period: number): (number | null)[] {
+  const prices = points.map(getEffectivePrice);
+  const result: (number | null)[] = new Array(points.length).fill(null);
+  for (let i = period - 1; i < points.length; i++) {
+    let sum = 0;
+    for (let j = i - period + 1; j <= i; j++) sum += prices[j];
+    result[i] = sum / period;
+  }
+  return result;
+}
+
+/** SMA at a specific point in the series. `offset` counts back from the end
+ * (0 = latest, 1 = the point before that) — used to compare "today" vs
+ * "yesterday" for crossover detection without re-slicing arrays everywhere. */
+export function calculateSMAAt(points: ChartPoint[], period: number, offset = 0): number | null {
+  const endIndex = points.length - offset;
+  if (endIndex < period) return null;
+  const prices = points.slice(endIndex - period, endIndex).map(getEffectivePrice);
+  return prices.reduce((a, b) => a + b, 0) / period;
+}
+
+// ---------------------------------------------------------------------------
+// RSI (Wilder's smoothing)
+// ---------------------------------------------------------------------------
+
+export function calculateRSISeries(points: ChartPoint[], period = 14): (number | null)[] {
+  const prices = points.map(getEffectivePrice);
+  const result: (number | null)[] = new Array(points.length).fill(null);
+  if (points.length <= period) return result;
+
+  let gains = 0;
+  let losses = 0;
+  for (let i = 1; i <= period; i++) {
+    const diff = prices[i] - prices[i - 1];
+    diff >= 0 ? (gains += diff) : (losses += Math.abs(diff));
+  }
+  let avgGain = gains / period;
+  let avgLoss = losses / period;
+  result[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+
+  for (let i = period + 1; i < points.length; i++) {
+    const diff = prices[i] - prices[i - 1];
+    avgGain = (avgGain * (period - 1) + (diff > 0 ? diff : 0)) / period;
+    avgLoss = (avgLoss * (period - 1) + (diff < 0 ? Math.abs(diff) : 0)) / period;
+    result[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+  }
+  return result;
+}
+
+/** RSI at a point in the series, with the same `offset` convention as calculateSMAAt.
+ * Computes the full series once and indexes into it rather than re-running the
+ * recursive Wilder smoothing from scratch per call. */
+export function calculateRSIAt(points: ChartPoint[], period = 14, offset = 0): number | null {
+  const series = calculateRSISeries(points, period);
+  const idx = series.length - 1 - offset;
+  return idx >= 0 ? series[idx] : null;
+}
+
+// ---------------------------------------------------------------------------
+// Support / Resistance
+// ---------------------------------------------------------------------------
+
+export interface SupportResistance {
+  support: number;
+  resistance: number;
+}
+
+export function getSupportResistance(points: ChartPoint[], lookback = 30): SupportResistance {
+  const recentData = points.slice(-Math.min(lookback, points.length));
+  return {
+    support: Math.min(...recentData.map((p) => p.low)),
+    resistance: Math.max(...recentData.map((p) => p.high)),
+  };
+}
+
+/** Simplified Average True Range. True textbook ATR needs a prior close to
+ * capture overnight/session gaps; since ChartPoint isn't guaranteed one,
+ * this approximates true range as (high - low) per day, averaged over
+ * `period` days. Still a meaningfully better volatility measure for
+ * invalidation levels than an arbitrary fixed percentage — it will just
+ * slightly understate true range on gappy assets versus the textbook formula. */
+export function calculateATR(points: ChartPoint[], period = 14): number | null {
+  if (points.length < period) return null;
+  const recent = points.slice(-period);
+  const ranges = recent.map((p) => p.high - p.low);
+  return ranges.reduce((a, b) => a + b, 0) / period;
+}
+
+export type DivergenceSignal = "bullish" | "bearish" | null;
+
+/** Simplified regular RSI divergence check — compares the price/RSI pivot
+ * in an earlier window against the most recent window. This is a
+ * lightweight approximation, NOT full swing-point detection: it can miss
+ * multi-swing divergences or misfire on noisy/choppy data. Treat it as a
+ * hint worth a manual look, not a standalone signal to size a trade on. */
+export function detectRSIDivergence(points: ChartPoint[], lookback = 20, recentWindow = 5): DivergenceSignal {
+  if (points.length < lookback + 1) return null;
+  const rsiSeries = calculateRSISeries(points, 14);
+  const window = points.slice(-lookback);
+  const rsiWindow = rsiSeries.slice(-lookback);
+
+  const priorSlice = window.slice(0, lookback - recentWindow);
+  const priorRsiSlice = rsiWindow.slice(0, lookback - recentWindow);
+  const recentSlice = window.slice(lookback - recentWindow);
+  const recentRsiSlice = rsiWindow.slice(lookback - recentWindow);
+  if (priorSlice.length === 0 || recentSlice.length === 0) return null;
+
+  const priorLowIdx = priorSlice.reduce((minIdx, p, i) => (p.low < priorSlice[minIdx].low ? i : minIdx), 0);
+  const recentLowIdx = recentSlice.reduce((minIdx, p, i) => (p.low < recentSlice[minIdx].low ? i : minIdx), 0);
+  const priorLowRsi = priorRsiSlice[priorLowIdx];
+  const recentLowRsi = recentRsiSlice[recentLowIdx];
+  if (
+    recentSlice[recentLowIdx].low < priorSlice[priorLowIdx].low &&
+    priorLowRsi !== null &&
+    recentLowRsi !== null &&
+    recentLowRsi > priorLowRsi
+  ) {
+    return "bullish";
+  }
+
+  const priorHighIdx = priorSlice.reduce((maxIdx, p, i) => (p.high > priorSlice[maxIdx].high ? i : maxIdx), 0);
+  const recentHighIdx = recentSlice.reduce((maxIdx, p, i) => (p.high > recentSlice[maxIdx].high ? i : maxIdx), 0);
+  const priorHighRsi = priorRsiSlice[priorHighIdx];
+  const recentHighRsi = recentRsiSlice[recentHighIdx];
+  if (
+    recentSlice[recentHighIdx].high > priorSlice[priorHighIdx].high &&
+    priorHighRsi !== null &&
+    recentHighRsi !== null &&
+    recentHighRsi < priorHighRsi
+  ) {
+    return "bearish";
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Crossover / event detection — "something just happened" alerts, separate
+// from the steady-state confluence score below.
+// ---------------------------------------------------------------------------
+
+export function detectCrossoverEvent(points: ChartPoint[]): string | null {
+  const rsi = calculateRSIAt(points, 14);
+  if (rsi !== null && rsi >= 70) return `🔥 RSI Overbought (${rsi.toFixed(0)}) — caution on new entries.`;
+  if (rsi !== null && rsi <= 30) return `💎 RSI Oversold (${rsi.toFixed(0)}) — high-conviction accumulation zone.`;
+
+  const sma50 = calculateSMAAt(points, 50, 0);
+  const sma200 = calculateSMAAt(points, 200, 0);
+  const prevSma50 = calculateSMAAt(points, 50, 1);
+  const prevSma200 = calculateSMAAt(points, 200, 1);
+  if (prevSma50 !== null && prevSma200 !== null && sma50 !== null && sma200 !== null) {
+    if (prevSma50 <= prevSma200 && sma50 > sma200)
+      return "🚀 Golden Cross Detected! (50 SMA crossed above 200 SMA) — Strong Macro Bullish Signal.";
+    if (prevSma50 >= prevSma200 && sma50 < sma200)
+      return "⚠️ Death Cross Detected! (50 SMA crossed below 200 SMA) — Major Macro Bearish Warning.";
+  }
+
+  const sma20 = calculateSMAAt(points, 20, 0);
+  const prevSma20 = calculateSMAAt(points, 20, 1);
+  if (prevSma20 !== null && prevSma50 !== null && sma20 !== null && sma50 !== null) {
+    if (prevSma20 <= prevSma50 && sma20 > sma50)
+      return "📈 Bullish Momentum Cross! (20 SMA crossed above 50 SMA) — Upward Trend Accelerating.";
+    if (prevSma20 >= prevSma50 && sma20 < sma50)
+      return "📉 Bearish Momentum Cross! (20 SMA crossed below 50 SMA) — Short-term Trend Weakening.";
+  }
+
+  if (points.length >= 21 && sma20 !== null && prevSma20 !== null) {
+    const currentPrice = getEffectivePrice(points[points.length - 1]);
+    const prevPrice = getEffectivePrice(points[points.length - 2]);
+    if (prevPrice <= prevSma20 && currentPrice > sma20) return "⚡ Price Breakout! Price crossed above the 20 SMA.";
+    if (prevPrice >= prevSma20 && currentPrice < sma20) return "🔴 Price Breakdown! Price dropped below the 20 SMA.";
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Confluence scoring engine — replaces the old OR-chained tradeBias logic.
+//
+// Design goals this directly fixes vs. the previous implementation:
+// 1. Missing SMA data (new coins) is treated as "no signal," never silently
+//    folded into a bearish reading.
+// 2. A directional bias is only issued once there's a genuine minimum of
+//    history (RSI or 20 SMA available) — otherwise returns INSUFFICIENT DATA.
+// 3. The 50/200 SMA macro trend is now a weighted INPUT to the score, not a
+//    disconnected badge — so it's no longer possible to show "LONG / Buy
+//    Zone" while the macro trend is bearish without at least a visible
+//    counter-trend warning.
+// 4. Each signal's contribution is shown individually, so the reasoning is
+//    inspectable rather than a black-box verdict.
+// 5. A support/resistance-based invalidation level is attached to any
+//    directional call.
+// ---------------------------------------------------------------------------
+
+export type BiasLabel = "STRONG LONG" | "LONG" | "NEUTRAL" | "SHORT" | "STRONG SHORT" | "INSUFFICIENT DATA";
+
+export interface SignalContribution {
+  name: string;
+  weight: number; // positive = bullish contribution, negative = bearish, 0 = neutral/unavailable
+  detail: string;
+  available: boolean;
+}
+
+export interface ConfluenceResult {
+  bias: BiasLabel;
+  score: number;
+  maxPossibleScore: number;
+  confidence: number; // 0–1, fraction of signals that actually had enough data
+  isCounterTrend: boolean; // short-term bias direction disagrees with the macro trend
+  wasDowngradedFromMacroOnly: boolean; // a directional call was reduced to NEUTRAL because only the macro-trend signal supported it
+  macroTrend: "MACRO BULLISH" | "MACRO BEARISH" | "ACCUMULATING DATA";
+  divergence: DivergenceSignal;
+  atr: number | null;
+  signals: SignalContribution[];
+  currentPrice: number;
+  support: number;
+  resistance: number;
+  invalidationLevel: number | null;
+  invalidationNote: string | null;
+}
+
+export function computeConfluenceSignal(
+  points: ChartPoint[],
+  overrides?: { support?: number | null; resistance?: number | null }
+): ConfluenceResult {
+  const signals: SignalContribution[] = [];
+  let score = 0;
+  let maxPossible = 0;
+
+  const currentPrice = points.length > 0 ? getEffectivePrice(points[points.length - 1]) : 0;
+
+  // --- RSI ---
+  const rsi = calculateRSIAt(points, 14);
+  maxPossible += 2;
+  if (rsi !== null) {
+    let s = 0;
+    let detail = `RSI ${rsi.toFixed(0)} — neutral zone`;
+    if (rsi <= 30) {
+      s = 2;
+      detail = `RSI ${rsi.toFixed(0)} — oversold`;
+    } else if (rsi <= 40) {
+      s = 1;
+      detail = `RSI ${rsi.toFixed(0)} — leaning oversold`;
+    } else if (rsi >= 70) {
+      s = -2;
+      detail = `RSI ${rsi.toFixed(0)} — overbought`;
+    } else if (rsi >= 60) {
+      s = -1;
+      detail = `RSI ${rsi.toFixed(0)} — leaning overbought`;
+    }
+    score += s;
+    signals.push({ name: "RSI (14)", weight: s, detail, available: true });
+  } else {
+    signals.push({ name: "RSI (14)", weight: 0, detail: "Not enough history yet (needs 14+ days)", available: false });
+  }
+
+  // --- Price vs 20 SMA (short-term trend) ---
+  const sma20 = calculateSMAAt(points, 20);
+  maxPossible += 1;
+  if (sma20 !== null) {
+    const s = currentPrice > sma20 ? 1 : currentPrice < sma20 ? -1 : 0;
+    score += s;
+    signals.push({
+      name: "Price vs 20 SMA",
+      weight: s,
+      detail:
+        s > 0
+          ? "Price above 20 SMA — short-term uptrend"
+          : s < 0
+          ? "Price below 20 SMA — short-term downtrend"
+          : "Price sitting right at the 20 SMA",
+      available: true,
+    });
+  } else {
+    signals.push({ name: "Price vs 20 SMA", weight: 0, detail: "Not enough history yet (needs 20+ days)", available: false });
+  }
+
+  // --- 20 SMA vs 50 SMA (medium-term momentum) ---
+  const sma50 = calculateSMAAt(points, 50);
+  maxPossible += 1;
+  if (sma20 !== null && sma50 !== null) {
+    const s = sma20 > sma50 ? 1 : sma20 < sma50 ? -1 : 0;
+    score += s;
+    signals.push({
+      name: "20 SMA vs 50 SMA",
+      weight: s,
+      detail:
+        s > 0
+          ? "20 SMA above 50 SMA — medium-term momentum up"
+          : s < 0
+          ? "20 SMA below 50 SMA — medium-term momentum down"
+          : "20/50 SMA converging",
+      available: true,
+    });
+  } else {
+    signals.push({ name: "20 SMA vs 50 SMA", weight: 0, detail: "Not enough history yet (needs 50+ days)", available: false });
+  }
+
+  // --- 50 SMA vs 200 SMA (macro trend — double-weighted) ---
+  const sma200 = calculateSMAAt(points, 200);
+  const macroWeight = 2;
+  maxPossible += macroWeight;
+  let macroTrend: ConfluenceResult["macroTrend"] = "ACCUMULATING DATA";
+  let macroDirection = 0;
+  if (sma50 !== null && sma200 !== null) {
+    macroDirection = sma50 >= sma200 ? 1 : -1;
+    macroTrend = macroDirection > 0 ? "MACRO BULLISH" : "MACRO BEARISH";
+    const s = macroDirection * macroWeight;
+    score += s;
+    signals.push({
+      name: "50 SMA vs 200 SMA (Macro Trend)",
+      weight: s,
+      detail:
+        macroDirection > 0
+          ? "50 SMA above 200 SMA — macro uptrend regime"
+          : "50 SMA below 200 SMA — macro downtrend regime",
+      available: true,
+    });
+  } else {
+    signals.push({
+      name: "50 SMA vs 200 SMA (Macro Trend)",
+      weight: 0,
+      detail: "Not enough history yet (needs 200+ days)",
+      available: false,
+    });
+  }
+
+  // --- Position within the recent trading range ---
+  const { support, resistance } =
+    overrides?.support != null && overrides?.resistance != null
+      ? { support: overrides.support, resistance: overrides.resistance }
+      : getSupportResistance(points, 30);
+  const range = resistance - support;
+  const positionInRange = range > 0 ? (currentPrice - support) / range : 0.5;
+  maxPossible += 1;
+  {
+    let s = 0;
+    let detail = `Mid-range (${(positionInRange * 100).toFixed(0)}% of 30-day range)`;
+    if (positionInRange <= 0.25) {
+      s = 1;
+      detail = `Near range support (${(positionInRange * 100).toFixed(0)}% of range) — discount zone`;
+    } else if (positionInRange >= 0.75) {
+      s = -1;
+      detail = `Near range resistance (${(positionInRange * 100).toFixed(0)}% of range) — expensive zone`;
+    }
+    score += s;
+    signals.push({ name: "Position in 30-Day Range", weight: s, detail, available: points.length >= 5 });
+  }
+
+  const availableCount = signals.filter((s) => s.available).length;
+  const confidence = signals.length > 0 ? availableCount / signals.length : 0;
+
+  // Hard minimum: require at least 20 days of real history before ANY
+  // directional call, regardless of which individual indicators happen to
+  // be available. (Previously this checked `rsi !== null || sma20 !== null`,
+  // which could pass at just 15 days on RSI alone, against a barely-seeded
+  // 15-day range for the "position in range" signal too — too thin to trust.)
+  const hasMinimumData = points.length >= 20;
+
+  let bias: BiasLabel;
+  if (!hasMinimumData) {
+    bias = "INSUFFICIENT DATA";
+  } else if (score >= 4) {
+    bias = "STRONG LONG";
+  } else if (score >= 2) {
+    bias = "LONG";
+  } else if (score <= -4) {
+    bias = "STRONG SHORT";
+  } else if (score <= -2) {
+    bias = "SHORT";
+  } else {
+    bias = "NEUTRAL";
+  }
+
+  // Require at least one NON-macro signal to agree with the call's
+  // direction. Without this, the double-weighted macro-trend signal (±2)
+  // could single-handedly cross the ±2 threshold while every other signal
+  // sits neutral or offsetting — a lone trend reading isn't genuine
+  // multi-signal confluence.
+  let wasDowngradedFromMacroOnly = false;
+  if (bias !== "INSUFFICIENT DATA" && bias !== "NEUTRAL") {
+    const direction = bias.includes("LONG") ? 1 : -1;
+    const nonMacroConfirms = signals.some(
+      (s) => s.name !== "50 SMA vs 200 SMA (Macro Trend)" && s.available && Math.sign(s.weight) === direction
+    );
+    if (!nonMacroConfirms) {
+      bias = "NEUTRAL";
+      wasDowngradedFromMacroOnly = true;
+    }
+  }
+
+  const shortTermDirection = bias.includes("LONG") ? 1 : bias.includes("SHORT") ? -1 : 0;
+  const isCounterTrend = macroDirection !== 0 && shortTermDirection !== 0 && shortTermDirection !== macroDirection;
+
+  const divergence = detectRSIDivergence(points);
+  const atr = calculateATR(points, 14);
+
+  let invalidationLevel: number | null = null;
+  let invalidationNote: string | null = null;
+  if (bias.includes("LONG")) {
+    if (atr !== null) {
+      invalidationLevel = support - 1.5 * atr;
+      invalidationNote = `If price closes below ~${invalidationLevel.toFixed(2)} (support broken by more than the recent ATR-14 of ${atr.toFixed(2)}), this long thesis is invalidated.`;
+    } else {
+      invalidationLevel = support * 0.97;
+      invalidationNote = `If price closes below ~${invalidationLevel.toFixed(2)} (support broken), this long thesis is invalidated. (Flat 3% buffer — not enough history yet for a volatility-based ATR stop.)`;
+    }
+  } else if (bias.includes("SHORT")) {
+    if (atr !== null) {
+      invalidationLevel = resistance + 1.5 * atr;
+      invalidationNote = `If price closes above ~${invalidationLevel.toFixed(2)} (resistance reclaimed by more than the recent ATR-14 of ${atr.toFixed(2)}), re-evaluate — momentum may be turning.`;
+    } else {
+      invalidationLevel = resistance * 1.03;
+      invalidationNote = `If price closes above ~${invalidationLevel.toFixed(2)} (resistance reclaimed), re-evaluate. (Flat 3% buffer — not enough history yet for a volatility-based ATR stop.)`;
+    }
+  }
+
+  return {
+    bias,
+    score,
+    maxPossibleScore: maxPossible,
+    confidence,
+    isCounterTrend,
+    wasDowngradedFromMacroOnly,
+    macroTrend,
+    divergence,
+    atr,
+    signals,
+    currentPrice,
+    support,
+    resistance,
+    invalidationLevel,
+    invalidationNote,
+  };
+}

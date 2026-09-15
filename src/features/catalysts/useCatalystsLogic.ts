@@ -76,16 +76,16 @@ export const AVAILABLE_TOKENS = [
 const getCategoryRules = (category: CatalystPrompt["category"]) => {
   switch (category) {
     case "Live":
-      return " RULES: 1. Cover breaking news, whale activity, and official announcements from the past 24-72 hours, PLUS current 24h derivatives data (funding rates, open interest, liquidations) and on-chain net flows. 2. Provide a clear overall sentiment (Bullish/Bearish/Neutral) and explain the direct cause behind recent price action. 3. Include direct source links where available.";
+      return " RULES: 1. Cover breaking news, whale activity, and official announcements from the past 24-72 hours, PLUS current 24h derivatives data (funding rates, open interest, liquidations) and on-chain net flows. 2. Provide a clear overall sentiment (Bullish/Bearish/Neutral). 3. Explicitly list BOTH sides where the search results support them: (A) Key Bullish Drivers and (B) Key Bearish/Downside Risks (e.g., pending unlocks, contract/security concerns, team or insider selling, negative regulatory news) — do not only report the narrative matching the overall price direction. 4. Include direct source links where available.";
 
     case "Weekly":
-      return " RULES: 1. Focus on events and updates within a 7-day lookback or lookahead window. 2. Check BOTH major exchanges (Binance, Coinbase, OKX, Bybit) AND mid-tier/regional exchanges (KuCoin, Gate.io, MEXC, Bitget, HTX, LBank, Upbit, Bithumb, Coins.ph, PDAX) — many of these assets list on mid-tier or regional platforms before or instead of a Tier-1 listing, so do not limit the search to only the largest names. 3. Also flag any major DEX listing spike (Uniswap, PancakeSwap) if it signals new liquidity. 4. Note which specific exchange(s) each listing/pair applies to.";
+      return " RULES: 1. Focus on events and updates within a 7-day lookback or lookahead window. 2. Check BOTH major exchanges (Binance, Coinbase, OKX, Bybit) AND mid-tier/regional exchanges (KuCoin, Gate.io, MEXC, Bitget, HTX, LBank, Upbit, Bithumb, Coins.ph, PDAX) — many of these assets list on mid-tier or regional platforms before or instead of a Tier-1 listing, so do not limit the search to only the largest names. 3. Give EQUAL weight to negative exchange events — delistings, margin/leverage removal, and regional trading restrictions or bans are often more risk-relevant than new listings, so do not under-report them relative to positive listing news. 4. Also flag any major DEX listing spike (Uniswap, PancakeSwap) if it signals new liquidity. 5. Note which specific exchange(s) each event applies to.";
 
     case "Monthly":
       return " RULES: 1. Focus on a 30-60 day horizon for scheduled token unlocks (% of circulating supply), major roadmap milestones, mainnet upgrades, or TGEs. 2. Highlight potential supply pressure.";
 
     case "Macro":
-      return " RULES: 1. NEVER use Unicode citation brackets like 【...】. 2. Format ALL citations as standard Markdown links: [Source Name](https://url.com). 3. Stay strictly within the specific macro topic asked in this prompt — other macro topics are covered by separate, dedicated prompts, so do not add commentary outside your assigned scope.";
+      return " RULES: 1. Stay strictly within the specific macro topic asked in this prompt — other macro topics are covered by separate, dedicated prompts, so do not add commentary outside your assigned scope.";
     default:
       return "";
   }
@@ -122,6 +122,9 @@ const SEARCH_DISAMBIGUATORS: Record<string, string> = {
   POL: "Polygon MATIC crypto token",
   SKY: "Sky protocol MakerDAO crypto token",
   LINK: "Chainlink LINK crypto token",
+  ONDO: "Ondo Finance RWA crypto token",
+  XAUT: "Tether Gold XAUT crypto token",
+  ENA: "Ethena ENA synthetic dollar crypto token",
 };
 
 /** Builds a search-engine-friendly query for a coin-specific prompt. Uses an
@@ -188,7 +191,7 @@ const STATIC_MACRO_PROMPTS: CatalystPrompt[] = [
     id: "global-hacks-exploit-risks",
     category: "Live",
     title: "DeFi Hacks & Exploit Risk (Market-Wide)",
-    prompt: `Identify any recent or ongoing security exploits, reentrancy attacks, bridge hacks, smart contract vulnerabilities, or emergency protocol pauses across DeFi and major blockchains in the past 72 hours. Only report incidents confirmed by an official statement, security firm report, or credible news outlet — do not speculate about unconfirmed rumors or forum chatter. RULES: 1. Name the specific protocol/chain and approximate dollar amount affected where known. 2. NEVER use Unicode citation brackets like 【...】. 3. Format ALL citations as standard Markdown links: [Source Name](https://url.com).`,
+    prompt: `Identify any recent or ongoing security exploits, reentrancy attacks, bridge hacks, smart contract vulnerabilities, or emergency protocol pauses across DeFi and major blockchains in the past 72 hours. Only report incidents confirmed by an official statement, security firm report, or credible news outlet — do not speculate about unconfirmed rumors or forum chatter. RULES: 1. Name the specific protocol/chain and approximate dollar amount affected where known.`,
     searchQuery: "crypto exploit hack flash loan bridge drain compromise",
     scope: "global",
     searchProfile: "breaking",
@@ -229,8 +232,8 @@ export function useCatalystsLogic() {
         id: `coin-${key}-weekly-listings`,
         category: "Weekly",
         title: `${selectedCoin} — Exchange Listings & Pairs (All Tiers)`,
-        prompt: `What are the latest official announcements regarding new exchange listings, delistings, or perpetual/spot trading pairs for ${formattedToken}? Check both major exchanges (Binance, Coinbase, OKX, Bybit) and mid-tier/regional exchanges (KuCoin, Gate.io, MEXC, Bitget, HTX, Upbit, Bithumb, Coins.ph, PDAX) — do not assume it only lists on the largest platforms.${getCategoryRules("Weekly")}`,
-        searchQuery: buildCoinSearchQuery(selectedCoin, "new listing exchange KuCoin Gate MEXC Bitget Bybit"),
+        prompt: `What are the latest official announcements regarding new exchange listings, delistings, margin/leverage removals, or regional trading restrictions or bans for ${formattedToken}? Check both major exchanges (Binance, Coinbase, OKX, Bybit) and mid-tier/regional exchanges (KuCoin, Gate.io, MEXC, Bitget, HTX, Upbit, Bithumb, Coins.ph, PDAX) — do not assume it only lists on the largest platforms, and do not under-report delisting/restriction risk relative to new listings.${getCategoryRules("Weekly")}`,
+        searchQuery: buildCoinSearchQuery(selectedCoin, "new listing delisting margin removal restriction exchange KuCoin Gate MEXC Bitget Bybit"),
         scope: "coin",
         searchProfile: "weekly",
       },
@@ -247,7 +250,7 @@ export function useCatalystsLogic() {
         id: `coin-${key}-developer-github`,
         category: "Weekly",
         title: `${selectedCoin} — Developer & Protocol Activity`,
-        prompt: `What recent technical upgrades, core repository/development activity, mainnet or testnet announcements, hard forks, or protocol improvement proposals have been announced or deployed for ${formattedToken} in the past 7-10 days? RULES: 1. Only report items backed by an official blog post, GitHub release note, or credible technical news source — do not infer development activity that isn't explicitly reported. 2. NEVER use Unicode citation brackets like 【...】. 3. Format ALL citations as standard Markdown links: [Source Name](https://url.com).`,
+        prompt: `What recent technical upgrades, core repository/development activity, mainnet or testnet announcements, hard forks, or protocol improvement proposals have been announced or deployed for ${formattedToken} in the past 7-10 days? RULES: 1. Only report items backed by an official blog post, GitHub release note, or credible technical news source — do not infer development activity that isn't explicitly reported.`,
         searchQuery: buildCoinSearchQuery(selectedCoin, "github mainnet testnet upgrade hard fork protocol update"),
         scope: "coin",
         searchProfile: "weekly",
@@ -256,7 +259,7 @@ export function useCatalystsLogic() {
         id: `coin-${key}-ecosystem-grants`,
         category: "Monthly",
         title: `${selectedCoin} — Ecosystem, Grants & Partnerships`,
-        prompt: `What new strategic partnerships, institutional capital raises, ecosystem fund/grant allocations, or dApp/protocol integrations have been announced for ${formattedToken} in the last 30-60 days? RULES: 1. Only report partnerships/funding backed by an official announcement — do not speculate about rumored deals. 2. If nothing was found, say so plainly rather than describing generic ecosystem activity. 3. NEVER use Unicode citation brackets like 【...】. 4. Format ALL citations as standard Markdown links: [Source Name](https://url.com).`,
+        prompt: `What new strategic partnerships, institutional capital raises, ecosystem fund/grant allocations, or dApp/protocol integrations have been announced for ${formattedToken} in the last 30-60 days? RULES: 1. Only report partnerships/funding backed by an official announcement — do not speculate about rumored deals. 2. If nothing was found, say so plainly rather than describing generic ecosystem activity.`,
         searchQuery: buildCoinSearchQuery(selectedCoin, "ecosystem grant fund venture capital strategic partnership integration"),
         scope: "coin",
         searchProfile: "authoritative",
@@ -265,7 +268,7 @@ export function useCatalystsLogic() {
         id: `coin-${key}-institutional-adoption`,
         category: "Monthly",
         title: `${selectedCoin} — Institutional Adoption`,
-        prompt: `What institutional adoption signals exist for ${formattedToken} — spot ETF filings or approvals, corporate treasury purchases, institutional custody products, or major fund/asset-manager allocations — announced in the last 30-60 days? RULES: 1. Only report items backed by an official filing, press release, or credible financial news source. 2. If no genuine institutional activity is found, say so plainly — do not describe ordinary retail trading volume or exchange listings as institutional adoption. 3. NEVER use Unicode citation brackets like 【...】. 4. Format ALL citations as standard Markdown links: [Source Name](https://url.com).`,
+        prompt: `What institutional adoption signals exist for ${formattedToken} — spot ETF filings or approvals, corporate treasury purchases, institutional custody products, or major fund/asset-manager allocations — announced in the last 30-60 days? RULES: 1. Only report items backed by an official filing, press release, or credible financial news source. 2. If no genuine institutional activity is found, say so plainly — do not describe ordinary retail trading volume or exchange listings as institutional adoption.`,
         searchQuery: buildCoinSearchQuery(selectedCoin, "ETF filing institutional treasury custody adoption"),
         scope: "coin",
         searchProfile: "authoritative",
@@ -274,7 +277,7 @@ export function useCatalystsLogic() {
         id: `coin-${key}-governance-proposals`,
         category: "Weekly",
         title: `${selectedCoin} — Governance & Protocol Votes`,
-        prompt: `What active or recently passed governance proposals, DAO votes, or protocol parameter changes have been submitted for ${formattedToken} in the past 7-14 days? RULES: 1. Only report proposals found on an official governance forum, Snapshot page, or protocol blog — do not speculate about proposals not explicitly found. 2. If ${formattedToken} has no active on-chain/DAO governance process, say so plainly rather than describing unrelated updates. 3. NEVER use Unicode citation brackets like 【...】. 4. Format ALL citations as standard Markdown links: [Source Name](https://url.com).`,
+        prompt: `What active or recently passed governance proposals, DAO votes, or protocol parameter changes have been submitted for ${formattedToken} in the past 7-14 days? RULES: 1. Only report proposals found on an official governance forum, Snapshot page, or protocol blog — do not speculate about proposals not explicitly found. 2. If ${formattedToken} has no active on-chain/DAO governance process, say so plainly rather than describing unrelated updates.`,
         searchQuery: buildCoinSearchQuery(selectedCoin, "governance proposal DAO vote Snapshot protocol change"),
         scope: "coin",
         searchProfile: "weekly",
@@ -284,7 +287,7 @@ export function useCatalystsLogic() {
         id: `coin-${key}-social-sentiment`,
         category: "Live",
         title: `${selectedCoin} — Social & Community Sentiment`,
-        prompt: `What is the current social media and community sentiment around ${formattedToken} — based on discussion volume, notable commentary, or community reaction to recent events — over the past 24-72 hours? RULES: 1. This topic is HIGH RISK for fabrication — only report sentiment that is explicitly described in a news article, blog post, or aggregator report found in the search results. NEVER infer sentiment from social posts you cannot directly verify, and NEVER invent specific post counts, follower numbers, or engagement metrics. 2. If the search results don't describe social sentiment for this asset, say so plainly rather than guessing at a general mood. 3. NEVER use Unicode citation brackets like 【...】. 4. Format ALL citations as standard Markdown links: [Source Name](https://url.com).`,
+        prompt: `What is the current social media and community sentiment around ${formattedToken} — based on discussion volume, notable commentary, or community reaction to recent events — over the past 24-72 hours? RULES: 1. This topic is HIGH RISK for fabrication — only report sentiment that is explicitly described in a news article, blog post, or aggregator report found in the search results. NEVER infer sentiment from social posts you cannot directly verify, and NEVER invent specific post counts, follower numbers, or engagement metrics. 2. If the search results don't describe social sentiment for this asset, say so plainly rather than guessing at a general mood.`,
         searchQuery: buildCoinSearchQuery(selectedCoin, "community sentiment social media reaction discussion"),
         scope: "coin",
         searchProfile: "breaking",
@@ -294,7 +297,7 @@ export function useCatalystsLogic() {
         id: `coin-${key}-competitive-positioning`,
         category: "Monthly",
         title: `${selectedCoin} — Competitive Positioning`,
-        prompt: `How does ${formattedToken} compare to its closest competitors or peers in its sector — in terms of recent adoption, total value locked (TVL), market share, or notable partnerships — based on recent analysis or commentary? RULES: 1. Only make comparisons explicitly supported by the search results — do not invent competitor names, metrics, or rankings not present in the source material. 2. Name the specific competitor(s) actually referenced in the sources. 3. If no comparative analysis is found, say so plainly. 4. NEVER use Unicode citation brackets like 【...】. 5. Format ALL citations as standard Markdown links: [Source Name](https://url.com).`,
+        prompt: `How does ${formattedToken} compare to its closest competitors or peers in its sector — in terms of recent adoption, total value locked (TVL), market share, or notable partnerships — based on recent analysis or commentary? RULES: 1. Only make comparisons explicitly supported by the search results — do not invent competitor names, metrics, or rankings not present in the source material. 2. Name the specific competitor(s) actually referenced in the sources. 3. If no comparative analysis is found, say so plainly.`,
         searchQuery: buildCoinSearchQuery(selectedCoin, "competitor comparison market share TVL analysis"),
         scope: "coin",
         searchProfile: "trend",

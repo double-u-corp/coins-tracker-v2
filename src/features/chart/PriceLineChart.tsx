@@ -11,6 +11,7 @@ import {
 } from "recharts";
 import type { ChartPoint } from "@/validators/recordSchema";
 import { formatPhp } from "@/lib/format";
+import { calculateSMASeries, calculateRSISeries, getSupportResistance } from "./Technicals";
 
 export interface PriceLineChartProps {
   points?: ChartPoint[];
@@ -40,6 +41,58 @@ export default function PriceLineChart({
   const [showSma200, setShowSma200] = useState<boolean>(true);
   const [showRsi, setShowRsi] = useState<boolean>(false);
 
+  // All hooks must run unconditionally on every render — the "no data yet"
+  // placeholder is rendered conditionally further down instead, not via an
+  // early return before these. (An early return before useMemo here used to
+  // violate React's Hooks rules: the hook count would differ between an
+  // empty-points render and a populated one.)
+  const { chartData, fallbackLevels, liveEquilibrium } = useMemo(() => {
+    if (points.length === 0) {
+      return {
+        chartData: [] as Array<ChartPoint & Record<string, unknown>>,
+        fallbackLevels: { support: 0, resistance: 0 },
+        liveEquilibrium: 0,
+      };
+    }
+
+    const levels = getSupportResistance(points, 30);
+    const equilibrium = Number((levels.support + levels.resistance) / 2);
+
+    const sma20Series = calculateSMASeries(points, 20);
+    const sma50Series = calculateSMASeries(points, 50);
+    const sma200Series = calculateSMASeries(points, 200);
+    const rsiSeries = calculateRSISeries(points, 14);
+
+    const data = points.map((p, index) => {
+      const rawKeyLevel = "keyLevel" in p ? (p as any).keyLevel : undefined;
+      return {
+        ...p,
+        sma20: sma20Series[index] ?? undefined,
+        sma50: sma50Series[index] ?? undefined,
+        sma200: sma200Series[index] ?? undefined,
+        rsi: rsiSeries[index] !== null ? Number(rsiSeries[index]?.toFixed(2)) : undefined,
+        // Only preserve a REAL per-point keyLevel if the data actually has
+        // one. Do NOT backfill every historical point with today's static
+        // equilibrium snapshot — nothing downstream reads keyLevel except
+        // the LAST point (see currentKeyLevel below), so backfilling every
+        // row here was pure dead weight, and mixing "real per-point data"
+        // with "synthetic today's-value" under one field name is a latent
+        // bug risk if a future line chart ever plots keyLevel as a series.
+        keyLevel: rawKeyLevel !== undefined && rawKeyLevel !== null ? Number(rawKeyLevel) : undefined,
+      };
+    });
+
+    return { chartData: data, fallbackLevels: levels, liveEquilibrium: equilibrium };
+  }, [points]);
+
+  const support = externalSupport ?? fallbackLevels.support;
+  const resistance = externalResistance ?? fallbackLevels.resistance;
+  // The live reference line uses the last point's real keyLevel if the data
+  // provides one, otherwise falls back to the computed equilibrium — this
+  // fallback is applied ONCE, here, not smeared across every historical point.
+  const currentKeyLevel: number | undefined =
+    (chartData[chartData.length - 1]?.keyLevel as number | undefined) ?? liveEquilibrium;
+
   if (!points || points.length === 0) {
     return (
       <div className="w-full h-72 sm:h-96 flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-200 bg-gray-50/50">
@@ -50,58 +103,6 @@ export default function PriceLineChart({
       </div>
     );
   }
-
-  const chartData = useMemo(() => {
-    const recentData = points.slice(-Math.min(30, points.length));
-    const calcSupport = Math.min(...recentData.map((p) => p.low));
-    const calcResistance = Math.max(...recentData.map((p) => p.high));
-    const equilibrium = Number((calcSupport + calcResistance) / 2);
-
-    const rsiPeriod = 14;
-    const rsiValues: (number | null)[] = new Array(points.length).fill(null);
-    
-    if (points.length > rsiPeriod) {
-      let gains = 0, losses = 0;
-      for (let i = 1; i <= rsiPeriod; i++) {
-        const diff = ((points[i].high + points[i].low) / 2) - ((points[i - 1].high + points[i - 1].low) / 2);
-        diff >= 0 ? (gains += diff) : (losses += Math.abs(diff));
-      }
-      let avgGain = gains / rsiPeriod;
-      let avgLoss = losses / rsiPeriod;
-      rsiValues[rsiPeriod] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
-
-      for (let i = rsiPeriod + 1; i < points.length; i++) {
-        const diff = ((points[i].high + points[i].low) / 2) - ((points[i - 1].high + points[i - 1].low) / 2);
-        avgGain = (avgGain * (rsiPeriod - 1) + (diff > 0 ? diff : 0)) / rsiPeriod;
-        avgLoss = (avgLoss * (rsiPeriod - 1) + (diff < 0 ? Math.abs(diff) : 0)) / rsiPeriod;
-        rsiValues[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
-      }
-    }
-
-    return points.map((p, index, arr) => {
-      const calcSma = (period: number) => {
-        if (index < period - 1) return undefined;
-        let sum = 0;
-        for (let i = index - period + 1; i <= index; i++) sum += (arr[i].high + arr[i].low) / 2;
-        return sum / period;
-      };
-
-      const rawKeyLevel = "keyLevel" in p ? (p as any).keyLevel : undefined;
-
-      return {
-        ...p,
-        sma20: calcSma(20),
-        sma50: calcSma(50),
-        sma200: calcSma(200),
-        rsi: rsiValues[index] !== null ? Number(rsiValues[index]?.toFixed(2)) : undefined,
-        keyLevel: rawKeyLevel !== undefined && rawKeyLevel !== null ? Number(rawKeyLevel) : equilibrium,
-      };
-    });
-  }, [points]);
-
-  const support = externalSupport ?? Math.min(...chartData.slice(-30).map(d => d.low));
-  const resistance = externalResistance ?? Math.max(...chartData.slice(-30).map(d => d.high));
-  const currentKeyLevel: number | undefined = chartData[chartData.length - 1]?.keyLevel;
 
   return (
     <div className="w-full flex flex-col gap-3">
