@@ -220,6 +220,29 @@ export function detectCrossoverEvent(points: ChartPoint[]): string | null {
 
 export type BiasLabel = "STRONG LONG" | "LONG" | "NEUTRAL" | "SHORT" | "STRONG SHORT" | "INSUFFICIENT DATA";
 
+/** Shared badge color classes for BiasLabel — single source of truth so the
+ * detail card and any summary/scan view stay visually consistent. */
+export const BIAS_BADGE_CLASSES: Record<BiasLabel, string> = {
+  "STRONG LONG": "bg-emerald-600 text-white border-emerald-700",
+  LONG: "bg-emerald-100 text-emerald-800 border-emerald-300",
+  NEUTRAL: "bg-gray-100 text-gray-600 border-gray-200",
+  SHORT: "bg-rose-100 text-rose-800 border-rose-300",
+  "STRONG SHORT": "bg-rose-600 text-white border-rose-700",
+  "INSUFFICIENT DATA": "bg-amber-100 text-amber-700 border-amber-300",
+};
+
+/** Lower number = more actionable / worth looking at first when triaging a
+ * whole watchlist — strong directional calls before weak ones, weak calls
+ * before neutral, neutral before "we don't even have enough data yet." */
+export const BIAS_PRIORITY: Record<BiasLabel, number> = {
+  "STRONG LONG": 0,
+  "STRONG SHORT": 0,
+  LONG: 1,
+  SHORT: 1,
+  NEUTRAL: 2,
+  "INSUFFICIENT DATA": 3,
+};
+
 export interface SignalContribution {
   name: string;
   weight: number; // positive = bullish contribution, negative = bearish, 0 = neutral/unavailable

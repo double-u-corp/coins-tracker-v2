@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { ChartPoint } from "@/validators/recordSchema";
 import { formatPhp } from "@/lib/format";
-import { computeConfluenceSignal, detectCrossoverEvent, type BiasLabel } from "./Technicals";
+import { computeConfluenceSignal, detectCrossoverEvent, BIAS_BADGE_CLASSES, type BiasLabel } from "./Technicals";
 
 interface TradingInsightCardProps {
   points: ChartPoint[];
@@ -11,39 +11,33 @@ interface TradingInsightCardProps {
   resistance?: number | null;
 }
 
-const BIAS_STYLES: Record<BiasLabel, { badge: string; status: string; statusText: string; action: string }> = {
+const BIAS_STYLES: Record<BiasLabel, { status: string; statusText: string; action: string }> = {
   "STRONG LONG": {
-    badge: "bg-emerald-600 text-white border-emerald-700",
     status: "text-emerald-700 bg-emerald-100",
     statusText: "Strong Buy Zone",
     action: "Deploy Ladder Buy",
   },
   LONG: {
-    badge: "bg-emerald-100 text-emerald-800 border-emerald-300",
     status: "text-emerald-700 bg-emerald-100",
     statusText: "Buy Zone",
     action: "Deploy Ladder Buy",
   },
   NEUTRAL: {
-    badge: "bg-gray-100 text-gray-600 border-gray-200",
     status: "text-gray-700 bg-gray-100",
     statusText: "Neutral",
     action: "Wait for Setup",
   },
   SHORT: {
-    badge: "bg-rose-100 text-rose-800 border-rose-300",
     status: "text-rose-700 bg-rose-100",
     statusText: "Risk Off",
     action: "Hold PHP Cash",
   },
   "STRONG SHORT": {
-    badge: "bg-rose-600 text-white border-rose-700",
     status: "text-rose-700 bg-rose-100",
     statusText: "Strong Risk Off",
     action: "Hold PHP Cash",
   },
   "INSUFFICIENT DATA": {
-    badge: "bg-amber-100 text-amber-700 border-amber-300",
     status: "text-amber-700 bg-amber-100",
     statusText: "Accumulating Data",
     action: "Awaiting History",
@@ -84,7 +78,7 @@ export default function TradingInsightCard({
           Spot Trading Insights <span className="text-brand-600">({symbol}/PHP)</span>
         </h3>
         <div className="flex items-center gap-2">
-          <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold ${style.badge}`}>
+          <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold ${BIAS_BADGE_CLASSES[confluence.bias]}`}>
             BIAS: {confluence.bias}
           </span>
           <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-bold uppercase ${style.status}`}>

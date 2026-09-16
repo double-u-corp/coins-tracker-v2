@@ -8,7 +8,8 @@ import TradingInsightCard from "./TradingInsightCard";
 import DCACalculator from "./DCACalculator";
 import { useChartLogic, type ChartRange } from "./useChartLogic";
 import { formatPhp } from "@/lib/format";
-import { getSupportResistance } from "./Technicals";
+import { getSupportResistance, BIAS_BADGE_CLASSES, BIAS_PRIORITY } from "./Technicals";
+import { useCoinScanner } from "./useCoinScanner";
 
 const PriceLineChart = dynamic(() => import("./PriceLineChart"), {
   ssr: false,
@@ -52,6 +53,28 @@ export default function ChartView() {
   const [showHigh, setShowHigh] = useState(true);
   const [showLow, setShowLow] = useState(true);
   const [showKeyLevels, setShowKeyLevels] = useState(true);
+  const [showAllScanResults, setShowAllScanResults] = useState(false);
+
+  const { scanResults, isScanning, scanProgress, scanError, hasScanned, runScan } = useCoinScanner(allCoins);
+
+  const sortedScanResults = useMemo(() => {
+    return [...scanResults].sort((a, b) => {
+      const aBias = a.confluence?.bias ?? "INSUFFICIENT DATA";
+      const bBias = b.confluence?.bias ?? "INSUFFICIENT DATA";
+      const priorityDiff = BIAS_PRIORITY[aBias] - BIAS_PRIORITY[bBias];
+      if (priorityDiff !== 0) return priorityDiff;
+      const aScore = Math.abs(a.confluence?.score ?? 0);
+      const bScore = Math.abs(b.confluence?.score ?? 0);
+      return bScore - aScore;
+    });
+  }, [scanResults]);
+
+  const visibleScanResults = showAllScanResults
+    ? sortedScanResults
+    : sortedScanResults.filter((r) => {
+        const bias = r.confluence?.bias;
+        return bias === "STRONG LONG" || bias === "LONG" || bias === "STRONG SHORT" || bias === "SHORT" || r.error;
+      });
 
   const selectedCoin = useMemo(() => {
     return allCoins.find((c) => c.symbol === symbol) || null;
@@ -138,6 +161,93 @@ export default function ChartView() {
               <span>⚙️</span>
               <span>Manage Coin</span>
             </Link>
+          </div>
+        )}
+      </div>
+
+      {/* Morning Scan — check every tracked coin's confluence signal at once
+          instead of clicking through the dropdown one by one */}
+      <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h2 className="text-sm font-bold text-gray-900 flex items-center gap-1.5">
+              <span>🌅</span> Morning Scan
+            </h2>
+            <p className="text-xs text-gray-500">
+              Check every tracked coin's confluence signal at once — click a result to load its full chart below.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={runScan}
+            disabled={isScanning || allCoins.length === 0}
+            className="px-4 py-2 rounded-md text-sm font-semibold bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 whitespace-nowrap shadow-sm"
+          >
+            {isScanning ? `Scanning ${scanProgress.completed}/${scanProgress.total}…` : "🔍 Scan All Coins"}
+          </button>
+        </div>
+
+        {scanError && <AlertBanner variant="error" message={`Scan failed: ${scanError}`} />}
+
+        {hasScanned && !isScanning && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-gray-400">
+                {visibleScanResults.length} of {sortedScanResults.length} coins shown
+                {!showAllScanResults && " (LONG/SHORT signals only)"}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowAllScanResults((v) => !v)}
+                className="text-[11px] font-medium text-purple-700 hover:underline"
+              >
+                {showAllScanResults ? "Show signals only" : "Show all coins"}
+              </button>
+            </div>
+
+            {visibleScanResults.length === 0 ? (
+              <p className="text-xs text-gray-500 py-2">
+                No LONG or SHORT signals right now — every tracked coin is NEUTRAL or still accumulating history.
+                Try "Show all coins" to see the full breakdown.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {visibleScanResults.map((r) => (
+                  <button
+                    key={r.symbol}
+                    type="button"
+                    onClick={() => setSymbol(r.symbol)}
+                    className={`text-left rounded-md border p-2.5 transition hover:shadow-sm ${
+                      symbol === r.symbol ? "ring-2 ring-purple-400" : ""
+                    } ${r.error ? "border-gray-200 bg-gray-50" : "border-gray-200 bg-white"}`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-gray-900">{r.symbol}</span>
+                      {r.confluence && (
+                        <span
+                          className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${
+                            BIAS_BADGE_CLASSES[r.confluence.bias]
+                          }`}
+                        >
+                          {r.confluence.bias}
+                        </span>
+                      )}
+                    </div>
+                    {r.error ? (
+                      <p className="text-[10px] text-red-500 mt-1">Failed to load</p>
+                    ) : r.confluence ? (
+                      <p className="text-[10px] text-gray-500 mt-1">
+                        Score {r.confluence.score >= 0 ? "+" : ""}
+                        {r.confluence.score}/±{r.confluence.maxPossibleScore} ·{" "}
+                        {(r.confluence.confidence * 100).toFixed(0)}% data
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-gray-400 mt-1">No data</p>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
