@@ -77,3 +77,62 @@ export function useCoinScanner(allCoins: CoinSummary[]) {
 
   return { scanResults, isScanning, scanProgress, scanError, hasScanned, runScan };
 }
+
+/** Builds a full Markdown report of only the directional (LONG / SHORT /
+ * STRONG LONG / STRONG SHORT) results — every contributing signal, macro
+ * trend, counter-trend flag, divergence, and invalidation level included —
+ * suitable for pasting straight into a journal entry to track day over day.
+ * NEUTRAL and INSUFFICIENT DATA coins are deliberately excluded regardless
+ * of what's currently shown on screen; this is meant to be a durable record
+ * of what actually looked actionable that day, not the full watchlist dump. */
+export function formatScanResultsForJournal(results: ScanResult[]): string {
+  const dateStr = new Date().toISOString().slice(0, 10);
+
+  const isDirectional = (r: ScanResult) =>
+    r.confluence?.bias === "STRONG LONG" ||
+    r.confluence?.bias === "LONG" ||
+    r.confluence?.bias === "STRONG SHORT" ||
+    r.confluence?.bias === "SHORT";
+
+  const signalResults = results.filter(isDirectional);
+
+  if (signalResults.length === 0) {
+    return `## Morning Scan — ${dateStr}\n\nNo LONG or SHORT signals today. All tracked coins are NEUTRAL or still accumulating price history.`;
+  }
+
+  const longs = signalResults.filter((r) => r.confluence!.bias.includes("LONG"));
+  const shorts = signalResults.filter((r) => r.confluence!.bias.includes("SHORT"));
+
+  const formatCoin = (r: ScanResult): string => {
+    const c = r.confluence!;
+    const lines: string[] = [];
+    lines.push(
+      `**${r.symbol}** — ${c.bias} (Score: ${c.score >= 0 ? "+" : ""}${c.score}/±${c.maxPossibleScore}, ${(c.confidence * 100).toFixed(0)}% data confidence)`
+    );
+    lines.push(`- Price: ${c.currentPrice} | Support: ${c.support} | Resistance: ${c.resistance}`);
+    lines.push(`- Macro Trend: ${c.macroTrend}${c.isCounterTrend ? " ⚠️ COUNTER-TREND (disagrees with macro)" : ""}`);
+    if (c.divergence) {
+      lines.push(
+        `- Divergence: 🔍 Possible ${c.divergence} RSI divergence — worth a manual look, not a standalone signal`
+      );
+    }
+    for (const s of c.signals) {
+      if (!s.available) continue;
+      lines.push(`  - ${s.name}: ${s.detail}${s.weight !== 0 ? ` (${s.weight > 0 ? "+" : ""}${s.weight})` : ""}`);
+    }
+    if (c.invalidationNote) {
+      lines.push(`- Invalidation: ${c.invalidationNote}`);
+    }
+    return lines.join("\n");
+  };
+
+  const sections: string[] = [`## Morning Scan — ${dateStr}`];
+  if (longs.length > 0) {
+    sections.push(`\n### 🟢 LONG Signals (${longs.length})\n\n${longs.map(formatCoin).join("\n\n")}`);
+  }
+  if (shorts.length > 0) {
+    sections.push(`\n### 🔴 SHORT Signals (${shorts.length})\n\n${shorts.map(formatCoin).join("\n\n")}`);
+  }
+
+  return sections.join("\n");
+}

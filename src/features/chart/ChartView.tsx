@@ -9,7 +9,7 @@ import DCACalculator from "./DCACalculator";
 import { useChartLogic, type ChartRange } from "./useChartLogic";
 import { formatPhp } from "@/lib/format";
 import { getSupportResistance, BIAS_BADGE_CLASSES, BIAS_PRIORITY } from "./Technicals";
-import { useCoinScanner } from "./useCoinScanner";
+import { useCoinScanner, formatScanResultsForJournal } from "./useCoinScanner";
 
 const PriceLineChart = dynamic(() => import("./PriceLineChart"), {
   ssr: false,
@@ -54,6 +54,7 @@ export default function ChartView() {
   const [showLow, setShowLow] = useState(true);
   const [showKeyLevels, setShowKeyLevels] = useState(true);
   const [showAllScanResults, setShowAllScanResults] = useState(false);
+  const [scanCopied, setScanCopied] = useState(false);
 
   const { scanResults, isScanning, scanProgress, scanError, hasScanned, runScan } = useCoinScanner(allCoins);
 
@@ -75,6 +76,21 @@ export default function ChartView() {
         const bias = r.confluence?.bias;
         return bias === "STRONG LONG" || bias === "LONG" || bias === "STRONG SHORT" || bias === "SHORT" || r.error;
       });
+
+  const directionalSignalCount = scanResults.filter(
+    (r) =>
+      r.confluence?.bias === "STRONG LONG" ||
+      r.confluence?.bias === "LONG" ||
+      r.confluence?.bias === "STRONG SHORT" ||
+      r.confluence?.bias === "SHORT"
+  ).length;
+
+  const handleCopyScanResults = () => {
+    const text = formatScanResultsForJournal(scanResults);
+    navigator.clipboard.writeText(text);
+    setScanCopied(true);
+    setTimeout(() => setScanCopied(false), 2000);
+  };
 
   const selectedCoin = useMemo(() => {
     return allCoins.find((c) => c.symbol === symbol) || null;
@@ -191,18 +207,33 @@ export default function ChartView() {
 
         {hasScanned && !isScanning && (
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <span className="text-[11px] text-gray-400">
                 {visibleScanResults.length} of {sortedScanResults.length} coins shown
                 {!showAllScanResults && " (LONG/SHORT signals only)"}
               </span>
-              <button
-                type="button"
-                onClick={() => setShowAllScanResults((v) => !v)}
-                className="text-[11px] font-medium text-purple-700 hover:underline"
-              >
-                {showAllScanResults ? "Show signals only" : "Show all coins"}
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleCopyScanResults}
+                  disabled={directionalSignalCount === 0}
+                  title={
+                    directionalSignalCount === 0
+                      ? "No LONG/SHORT signals to copy right now"
+                      : "Copy full details of LONG/SHORT signals for your journal"
+                  }
+                  className="text-[11px] font-semibold text-white bg-gray-700 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed rounded px-2.5 py-1 transition"
+                >
+                  {scanCopied ? "✅ Copied!" : `📋 Copy for Journal (${directionalSignalCount})`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAllScanResults((v) => !v)}
+                  className="text-[11px] font-medium text-purple-700 hover:underline"
+                >
+                  {showAllScanResults ? "Show signals only" : "Show all coins"}
+                </button>
+              </div>
             </div>
 
             {visibleScanResults.length === 0 ? (
