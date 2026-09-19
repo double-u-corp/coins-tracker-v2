@@ -432,6 +432,7 @@ export interface ConfluenceResult {
   macroTrend: "MACRO BULLISH" | "MACRO BEARISH" | "ACCUMULATING DATA";
   divergence: DivergenceSignal;
   liquiditySweep: LiquiditySweepResult | null;
+  usedIntradaySwings: boolean;
   atr: number | null;
   signals: SignalContribution[];
   currentPrice: number;
@@ -445,7 +446,18 @@ export interface ConfluenceResult {
 
 export function computeConfluenceSignal(
   points: ChartPoint[],
-  overrides?: { support?: number | null; resistance?: number | null; currentPrice?: number | null }
+  overrides?: {
+    support?: number | null;
+    resistance?: number | null;
+    currentPrice?: number | null;
+    // Finer-grained series (e.g. 3-hour bars) used SPECIFICALLY for swing
+    // structure and the entry ladder, since those care about recent
+    // turning points and daily bars confirm swings too slowly (3+ days of
+    // lag). Everything else (RSI, SMA20/50/200, macro trend) still needs
+    // real daily history and keeps using `points` regardless. Falls back
+    // to `points` when omitted — this stays fully functional without it.
+    intradayPoints?: ChartPoint[] | null;
+  }
 ): ConfluenceResult {
   const signals: SignalContribution[] = [];
   let score = 0;
@@ -578,7 +590,12 @@ export function computeConfluenceSignal(
   }
 
   // --- Swing structure (higher-highs/higher-lows vs lower-highs/lower-lows) ---
-  const swingPoints = detectSwingPoints(points, 3);
+  // Prefer intraday resolution for swing detection when available — daily
+  // bars take 3+ days to confirm a swing, intraday bars confirm within
+  // hours. Falls back to daily points otherwise (same behavior as before).
+  const swingSeries = overrides?.intradayPoints && overrides.intradayPoints.length > 0 ? overrides.intradayPoints : points;
+  const usedIntradaySwings = !!(overrides?.intradayPoints && overrides.intradayPoints.length > 0);
+  const swingPoints = detectSwingPoints(swingSeries, 3);
   const swingStructure = getSwingStructure(swingPoints);
   maxPossible += 1;
   if (swingStructure.available) {
@@ -683,7 +700,7 @@ export function computeConfluenceSignal(
   let exitSuggestion: ConfluenceResult["exitSuggestion"] = null;
 
   if (bias !== "INSUFFICIENT DATA") {
-    const ladder = buildEntryLadder(points, support, currentPrice);
+    const ladder = buildEntryLadder(swingSeries, support, currentPrice);
 
     if (bias.includes("LONG")) {
       entrySuggestion = {
@@ -721,6 +738,7 @@ export function computeConfluenceSignal(
     macroTrend,
     divergence,
     liquiditySweep,
+    usedIntradaySwings,
     atr,
     signals,
     currentPrice,

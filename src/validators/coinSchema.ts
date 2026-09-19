@@ -66,6 +66,12 @@ export const monthQuerySchema = z
 /** Validates the `years` query param for the chart page — 1 to 5, matching the retention window. */
 export const chartYearsQuerySchema = z.coerce.number().int().min(1).max(5);
 
+/** Validates the `hours` query param for the intraday chart (granularity=3h)
+ * — capped at 30 days' worth of hours, which is already generous for
+ * swing/entry-ladder purposes and far below the 3-year Record retention
+ * window, so there's no risk of this ever requesting pruned data. */
+export const chartHoursQuerySchema = z.coerce.number().int().min(1).max(24 * 30);
+
 /** Validates the `granularity` query param for the chart page. */
 export const chartGranularitySchema = z.enum(["daily", "weekly", "monthly", "yearly"]);
 export type ChartGranularity = z.infer<typeof chartGranularitySchema>;

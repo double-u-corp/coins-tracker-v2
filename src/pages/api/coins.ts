@@ -5,6 +5,7 @@ import { chartBucketKey } from "@/lib/chartBucket";
 import {
   addCoinSchema,
   chartGranularitySchema,
+  chartHoursQuerySchema,
   chartYearsQuerySchema,
   coinSymbolQuerySchema,
   monthQuerySchema,
@@ -199,21 +200,89 @@ async function handleChart(
     orderBy: { createdAt: "asc" },
   });
 
-  const buckets = new Map<string, { label: string; high: number; low: number }>();
+  const buckets = new Map<string, { label: string; high: number; low: number; close: number }>();
   for (const record of records) {
     const { period, label } = chartBucketKey(record.createdAt, granularityResult.data);
     const existing = buckets.get(period);
     if (!existing) {
-      buckets.set(period, { label, high: record.price, low: record.price });
+      buckets.set(period, { label, high: record.price, low: record.price, close: record.price });
     } else {
       existing.high = Math.max(existing.high, record.price);
       existing.low = Math.min(existing.low, record.price);
+      // Records within a bucket are processed in createdAt-ascending order
+      // (see the query above), so simply overwriting `close` on every
+      // record in this bucket naturally leaves it holding the LAST price
+      // seen once the loop moves past this bucket — a real close, not the
+      // high/low midpoint approximation the rest of the app falls back to
+      // when this field is absent.
+      existing.close = record.price;
     }
   }
 
   const points: ChartPoint[] = Array.from(buckets.entries())
-    .map(([period, { label, high, low }]) => ({ period, label, high, low }))
+    .map(([period, { label, high, low, close }]) => ({ period, label, high, low, close }))
     .sort((a, b) => a.period.localeCompare(b.period));
+
+  res.status(200).json({ points });
+}
+
+/**
+ * GET /api/coins?type=chart&symbol=X&granularity=3h&hours=1-720
+ * Returns RAW Record rows directly as points — one point per cron run that
+ * actually wrote a row, NOT aggregated into fixed-width time buckets like
+ * handleChart does for daily/weekly/monthly/yearly. This is deliberate:
+ * Records are only written when a run sets a new high or low for that day
+ * (see cronLogic.ts), so they're naturally spaced close to the cron
+ * interval during normal volatility but can have real gaps during flat
+ * stretches — forcing that into fixed 3-hour buckets would either invent
+ * empty buckets or risk merging/misaligning against actual run times.
+ * Passing the real observed points through as-is is more honest, and it's
+ * exactly what swing/entry-ladder detection (see Technicals.tsx) needs: a
+ * genuine time-ordered sequence of distinct observed prices, not synthetic
+ * period boundaries. Each point's high/low/close are all just that
+ * record's single price — there's no meaningful "range" for one instant.
+ */
+async function handleIntradayChart(
+  res: NextApiResponse<ChartResponse | ErrorResponse>,
+  symbolRaw: string,
+  hoursRaw: string
+) {
+  const symbolResult = coinSymbolQuerySchema.safeParse(symbolRaw);
+  const hoursResult = chartHoursQuerySchema.safeParse(hoursRaw || "72");
+
+  if (!symbolResult.success || !symbolResult.data) {
+    return res.status(400).json({ error: "A valid `symbol` query param is required" });
+  }
+  if (!hoursResult.success) {
+    return res.status(400).json({ error: "`hours` must be a number between 1 and 720" });
+  }
+
+  const coin = await prisma.coin.findUnique({ where: { symbol: symbolResult.data } });
+  if (!coin) {
+    return res.status(200).json({ points: [] });
+  }
+
+  const cutoff = new Date(Date.now() - hoursResult.data * 60 * 60 * 1000);
+
+  const records = await prisma.record.findMany({
+    where: { coinId: coin.id, createdAt: { gte: cutoff } },
+    select: { price: true, createdAt: true },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const points: ChartPoint[] = records.map((record) => ({
+    period: record.createdAt.toISOString(),
+    label: record.createdAt.toLocaleString("en-US", {
+      timeZone: "Asia/Manila",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }),
+    high: record.price,
+    low: record.price,
+    close: record.price,
+  }));
 
   res.status(200).json({ points });
 }
@@ -297,12 +366,15 @@ export default async function handler(
       return res.status(405).json({ error: "Method not allowed" });
     }
 
-    const { type, symbol, month, years, granularity } = req.query;
+    const { type, symbol, month, years, granularity, hours } = req.query;
 
     if (type === "calendar") {
       return await handleCalendar(res, String(symbol ?? ""), String(month ?? ""));
     }
     if (type === "chart") {
+      if (String(granularity ?? "") === "3h") {
+        return await handleIntradayChart(res, String(symbol ?? ""), String(hours ?? ""));
+      }
       return await handleChart(res, String(symbol ?? ""), String(years ?? ""), String(granularity ?? ""));
     }
     if (type === "alerts") {

@@ -30,6 +30,26 @@ async function fetchCoinPoints(symbol: string): Promise<ChartPoint[]> {
   return data.points;
 }
 
+// OPTIONAL — expects a backend endpoint that doesn't exist yet. Serves
+// finer-grained bars (e.g. 3-hour, matching an 8x/day price-check cadence)
+// used specifically for swing detection, which needs a real intraday
+// series to confirm swings within hours instead of 3+ days on daily bars.
+// Expected contract once built: `{ points: ChartPoint[] }`, same shape as
+// the daily endpoint, just at higher time resolution.
+// Fails SILENTLY (returns null, not a thrown error) so the scan keeps
+// working exactly as it does today until this endpoint is added —
+// swing/ladder computation just falls back to daily-bar resolution.
+async function fetchIntradayPoints(symbol: string): Promise<ChartPoint[] | null> {
+  try {
+    const res = await fetch(`/api/coins?type=chart&symbol=${symbol}&granularity=3h&hours=72`);
+    if (!res.ok) return null;
+    const data: { points: ChartPoint[] } = await res.json();
+    return data.points?.length > 0 ? data.points : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Saves this run's result and returns the consecutive-signal streak
  * computed server-side from the coin's prior scan history. Best-effort:
  * if the save fails, the scan itself still succeeds — streak is enrichment,
@@ -72,10 +92,13 @@ export function useCoinScanner(allCoins: CoinSummary[]) {
         const coin = allCoins[cursor];
         cursor += 1;
         try {
-          const points = await fetchCoinPoints(coin.symbol);
+          const [points, intradayPoints] = await Promise.all([
+            fetchCoinPoints(coin.symbol),
+            fetchIntradayPoints(coin.symbol),
+          ]);
           const confluence =
             points.length > 0
-              ? computeConfluenceSignal(points, { currentPrice: coin.currentPrice })
+              ? computeConfluenceSignal(points, { currentPrice: coin.currentPrice, intradayPoints })
               : null;
           const streak = confluence ? await persistAndGetStreak(coin.symbol, confluence.bias, confluence.score) : 0;
           results.push({

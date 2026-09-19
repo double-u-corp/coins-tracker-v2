@@ -498,6 +498,7 @@ export default function ChartView() {
             activePortfolio={activePortfolio}
             support={technicals.support}
             resistance={technicals.resistance}
+            currentPrice={currentPrice}
           />
 
           <DCACalculator

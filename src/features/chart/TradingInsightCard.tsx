@@ -9,6 +9,7 @@ interface TradingInsightCardProps {
   activePortfolio?: { holdings: number; spent: number } | null;
   support?: number | null;
   resistance?: number | null;
+  currentPrice?: number | null;
 }
 
 const BIAS_STYLES: Record<BiasLabel, { status: string; statusText: string; action: string }> = {
@@ -50,13 +51,14 @@ export default function TradingInsightCard({
   activePortfolio,
   support,
   resistance,
+  currentPrice,
 }: TradingInsightCardProps) {
   const result = useMemo(() => {
     if (!symbol || points.length === 0) return null;
-    const confluence = computeConfluenceSignal(points, { support, resistance });
+    const confluence = computeConfluenceSignal(points, { support, resistance, currentPrice });
     const crossoverAlert = detectCrossoverEvent(points);
     return { confluence, crossoverAlert };
-  }, [symbol, points, support, resistance]);
+  }, [symbol, points, support, resistance, currentPrice]);
 
   if (!symbol || points.length === 0 || !result) {
     return (
@@ -142,6 +144,9 @@ export default function TradingInsightCard({
             {confluence.entrySuggestion && (
               <div className="text-xs text-gray-700 space-y-1">
                 <span className="font-semibold text-emerald-700">Entry Ladder:</span>
+                <span className="text-[10px] text-gray-400 ml-1">
+                  ({confluence.usedIntradaySwings ? "intraday swings" : "daily swings"})
+                </span>
                 <ul className="space-y-0.5 pl-3">
                   {confluence.entrySuggestion.ladder.map((level, idx) => (
                     <li key={idx} className="flex items-center justify-between">

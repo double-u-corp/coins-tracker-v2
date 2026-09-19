@@ -64,6 +64,12 @@ export const chartPointSchema = z.object({
   label: z.string(), // human-readable label for the x-axis
   high: z.number(),
   low: z.number(),
+  // The last record's price within this bucket (chronologically), i.e. an
+  // actual close rather than an approximation. Optional because it's only
+  // populated by handleChart/handleIntradayChart going forward — older
+  // cached responses or any other producer of ChartPoint simply omit it,
+  // and every consumer already treats it as optional.
+  close: z.number().optional(),
 });
 
 export type ChartPoint = z.infer<typeof chartPointSchema>;
