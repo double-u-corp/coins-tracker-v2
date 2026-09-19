@@ -118,16 +118,62 @@ export default function TradingInsightCard({
           </div>
         )}
 
+        {confluence.liquiditySweep && (
+          <div className="rounded-md border border-cyan-200 bg-cyan-50 p-3 text-xs font-semibold text-cyan-900">
+            {confluence.liquiditySweep.type === "bullish"
+              ? `🎣 Liquidity Sweep — price wicked below ~${confluence.liquiditySweep.sweptLevel.toFixed(2)} to ~${confluence.liquiditySweep.extremePrice.toFixed(2)} and reclaimed it (${confluence.liquiditySweep.daysAgo}d ago). Classic stop-hunt pattern — often precedes a bounce, not a breakdown.`
+              : `🎣 Liquidity Sweep — price wicked above ~${confluence.liquiditySweep.sweptLevel.toFixed(2)} to ~${confluence.liquiditySweep.extremePrice.toFixed(2)} and fell back below it (${confluence.liquiditySweep.daysAgo}d ago). Classic stop-hunt pattern — often precedes a drop, not a breakout.`}
+          </div>
+        )}
+
         {crossoverAlert && (
           <div className="rounded-md border border-indigo-200 bg-indigo-50/70 p-3 text-xs font-semibold text-indigo-900">
             {crossoverAlert}
           </div>
         )}
 
-        {!isInsufficient && confluence.invalidationNote && (
-          <div className="rounded-md border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700">
-            <span className="font-semibold text-gray-900">Invalidation: </span>
-            {confluence.invalidationNote}
+        {!isInsufficient && (confluence.entrySuggestion || confluence.exitSuggestion || confluence.invalidationNote) && (
+          <div className="rounded-md border border-gray-200 bg-gray-50 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                Entry / Stop / Target — Suggestion Only
+              </span>
+            </div>
+            {confluence.entrySuggestion && (
+              <div className="text-xs text-gray-700 space-y-1">
+                <span className="font-semibold text-emerald-700">Entry Ladder:</span>
+                <ul className="space-y-0.5 pl-3">
+                  {confluence.entrySuggestion.ladder.map((level, idx) => (
+                    <li key={idx} className="flex items-center justify-between">
+                      <span>
+                        ~{formatPhp(level.price)}{" "}
+                        <span className="text-gray-400">
+                          ({level.basis === "swing-low" ? "swing low" : "support"})
+                        </span>
+                      </span>
+                      <span className="font-semibold text-emerald-700">{level.allocationPct}%</span>
+                    </li>
+                  ))}
+                </ul>
+                <p>{confluence.entrySuggestion.note}</p>
+              </div>
+            )}
+            {confluence.invalidationNote && (
+              <div className="text-xs text-gray-700">
+                <span className="font-semibold text-rose-700">Stop: </span>
+                {confluence.invalidationNote}
+              </div>
+            )}
+            {confluence.exitSuggestion && (
+              <div className="text-xs text-gray-700">
+                <span className="font-semibold text-blue-700">Target ~{formatPhp(confluence.exitSuggestion.price)}: </span>
+                {confluence.exitSuggestion.note}
+              </div>
+            )}
+            <p className="text-[10px] text-gray-400 pt-1 border-t border-gray-200">
+              These are technical reference levels only, not instructions — news, fundamentals, and your own risk
+              tolerance can override any of this. You're responsible for the call either way.
+            </p>
           </div>
         )}
 

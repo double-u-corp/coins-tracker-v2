@@ -236,7 +236,11 @@ async function summarizeWithGroq(
 export default async function handler(req: NextApiRequest, res: NextApiResponse<ResponseData>) {
   if (req.method === "GET") {
     try {
-      const logs = await prisma.catalystLog.findMany();
+      // Exclude ChartScan rows — those belong to the coin scanner feature,
+      // which shares this table but is a separate consumer. Without this
+      // filter, every Catalysts page load would also fetch and discard
+      // every tracked coin's scan history for no reason.
+      const logs = await prisma.catalystLog.findMany({ where: { category: { not: "ChartScan" } } });
       const mappedLogs: Record<string, { timestamp: number; response: string; category: string }> = {};
 
       logs.forEach((log) => {

@@ -7,6 +7,8 @@ export interface ScanResult {
   name: string;
   confluence: ConfluenceResult | null;
   error: string | null;
+  streak: number;
+  scannedAt: string; // ISO timestamp, captured at the moment this coin's scan completed
 }
 
 // Fetch a bounded number of coins at once rather than firing one request per
@@ -26,6 +28,25 @@ async function fetchCoinPoints(symbol: string): Promise<ChartPoint[]> {
   if (!res.ok) throw new Error(`Failed to load ${symbol} (${res.status})`);
   const data: { points: ChartPoint[] } = await res.json();
   return data.points;
+}
+
+/** Saves this run's result and returns the consecutive-signal streak
+ * computed server-side from the coin's prior scan history. Best-effort:
+ * if the save fails, the scan itself still succeeds — streak is enrichment,
+ * not load-bearing for the actual technical read. */
+async function persistAndGetStreak(symbol: string, bias: string, score: number): Promise<number> {
+  try {
+    const res = await fetch("/api/chart-scan-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbol, bias, score }),
+    });
+    if (!res.ok) return 0;
+    const data: { streak?: number } = await res.json();
+    return data.streak ?? 0;
+  } catch {
+    return 0;
+  }
 }
 
 export function useCoinScanner(allCoins: CoinSummary[]) {
@@ -52,10 +73,28 @@ export function useCoinScanner(allCoins: CoinSummary[]) {
         cursor += 1;
         try {
           const points = await fetchCoinPoints(coin.symbol);
-          const confluence = points.length > 0 ? computeConfluenceSignal(points) : null;
-          results.push({ symbol: coin.symbol, name: coin.name, confluence, error: null });
+          const confluence =
+            points.length > 0
+              ? computeConfluenceSignal(points, { currentPrice: coin.currentPrice })
+              : null;
+          const streak = confluence ? await persistAndGetStreak(coin.symbol, confluence.bias, confluence.score) : 0;
+          results.push({
+            symbol: coin.symbol,
+            name: coin.name,
+            confluence,
+            error: null,
+            streak,
+            scannedAt: new Date().toISOString(),
+          });
         } catch (err) {
-          results.push({ symbol: coin.symbol, name: coin.name, confluence: null, error: (err as Error).message });
+          results.push({
+            symbol: coin.symbol,
+            name: coin.name,
+            confluence: null,
+            error: (err as Error).message,
+            streak: 0,
+            scannedAt: new Date().toISOString(),
+          });
         }
         setScanProgress((prev) => ({ ...prev, completed: prev.completed + 1 }));
       }
@@ -64,8 +103,6 @@ export function useCoinScanner(allCoins: CoinSummary[]) {
     try {
       const workerCount = Math.min(SCAN_CONCURRENCY, allCoins.length);
       await Promise.all(Array.from({ length: workerCount }, () => worker()));
-      // Preserve the original watchlist order isn't useful here — the view
-      // layer sorts by signal priority, so raw completion order is fine.
       setScanResults(results);
       setHasScanned(true);
     } catch (err) {
@@ -76,6 +113,58 @@ export function useCoinScanner(allCoins: CoinSummary[]) {
   }, [allCoins]);
 
   return { scanResults, isScanning, scanProgress, scanError, hasScanned, runScan };
+}
+
+/** Formats a single coin's full confluence breakdown — every contributing
+ * signal, macro trend, counter-trend flag, divergence, and invalidation
+ * level. Shared by both the per-card copy button and the bulk journal report
+ * below, so the two never drift out of sync with each other. */
+export function formatSingleScanResult(r: ScanResult): string {
+  if (!r.confluence) return `**${r.symbol}** — no data available.`;
+  const c = r.confluence;
+  const scannedAtLabel = new Date(r.scannedAt).toLocaleString("en-US", {
+    timeZone: "Asia/Manila",
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+  const lines: string[] = [];
+  lines.push(
+    `**${r.symbol}** — ${c.bias} (Score: ${c.score >= 0 ? "+" : ""}${c.score}/±${c.maxPossibleScore}, ${(c.confidence * 100).toFixed(0)}% data confidence)`
+  );
+  lines.push(`- Scanned: ${scannedAtLabel} (Manila time)`);
+  if (r.streak >= 2) {
+    lines.push(`- 🔥 ${r.streak}-day consecutive ${c.bias.includes("LONG") ? "LONG" : "SHORT"} streak`);
+  }
+  lines.push(`- Price: ${c.currentPrice} | Support: ${c.support} | Resistance: ${c.resistance}`);
+  lines.push(`- Macro Trend: ${c.macroTrend}${c.isCounterTrend ? " ⚠️ COUNTER-TREND (disagrees with macro)" : ""}`);
+  if (c.divergence) {
+    lines.push(
+      `- Divergence: 🔍 Possible ${c.divergence} RSI divergence — worth a manual look, not a standalone signal`
+    );
+  }
+  if (c.liquiditySweep) {
+    lines.push(
+      `- Liquidity Sweep: 🎣 ${c.liquiditySweep.type} sweep of ${c.liquiditySweep.sweptLevel} (extreme ${c.liquiditySweep.extremePrice}, ${c.liquiditySweep.daysAgo}d ago)`
+    );
+  }
+  for (const s of c.signals) {
+    if (!s.available) continue;
+    lines.push(`  - ${s.name}: ${s.detail}${s.weight !== 0 ? ` (${s.weight > 0 ? "+" : ""}${s.weight})` : ""}`);
+  }
+  if (c.invalidationNote) {
+    if (c.entrySuggestion) {
+      lines.push(`- Entry Ladder:`);
+      for (const level of c.entrySuggestion.ladder) {
+        lines.push(`  - ~${level.price} (${level.basis}) — ${level.allocationPct}%`);
+      }
+      lines.push(`  ${c.entrySuggestion.note}`);
+    }
+    lines.push(`- Invalidation: ${c.invalidationNote}`);
+    if (c.exitSuggestion) {
+      lines.push(`- Target ~${c.exitSuggestion.price}: ${c.exitSuggestion.note}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 /** Builds a full Markdown report of only the directional (LONG / SHORT /
@@ -103,35 +192,12 @@ export function formatScanResultsForJournal(results: ScanResult[]): string {
   const longs = signalResults.filter((r) => r.confluence!.bias.includes("LONG"));
   const shorts = signalResults.filter((r) => r.confluence!.bias.includes("SHORT"));
 
-  const formatCoin = (r: ScanResult): string => {
-    const c = r.confluence!;
-    const lines: string[] = [];
-    lines.push(
-      `**${r.symbol}** — ${c.bias} (Score: ${c.score >= 0 ? "+" : ""}${c.score}/±${c.maxPossibleScore}, ${(c.confidence * 100).toFixed(0)}% data confidence)`
-    );
-    lines.push(`- Price: ${c.currentPrice} | Support: ${c.support} | Resistance: ${c.resistance}`);
-    lines.push(`- Macro Trend: ${c.macroTrend}${c.isCounterTrend ? " ⚠️ COUNTER-TREND (disagrees with macro)" : ""}`);
-    if (c.divergence) {
-      lines.push(
-        `- Divergence: 🔍 Possible ${c.divergence} RSI divergence — worth a manual look, not a standalone signal`
-      );
-    }
-    for (const s of c.signals) {
-      if (!s.available) continue;
-      lines.push(`  - ${s.name}: ${s.detail}${s.weight !== 0 ? ` (${s.weight > 0 ? "+" : ""}${s.weight})` : ""}`);
-    }
-    if (c.invalidationNote) {
-      lines.push(`- Invalidation: ${c.invalidationNote}`);
-    }
-    return lines.join("\n");
-  };
-
   const sections: string[] = [`## Morning Scan — ${dateStr}`];
   if (longs.length > 0) {
-    sections.push(`\n### 🟢 LONG Signals (${longs.length})\n\n${longs.map(formatCoin).join("\n\n")}`);
+    sections.push(`\n### 🟢 LONG Signals (${longs.length})\n\n${longs.map(formatSingleScanResult).join("\n\n")}`);
   }
   if (shorts.length > 0) {
-    sections.push(`\n### 🔴 SHORT Signals (${shorts.length})\n\n${shorts.map(formatCoin).join("\n\n")}`);
+    sections.push(`\n### 🔴 SHORT Signals (${shorts.length})\n\n${shorts.map(formatSingleScanResult).join("\n\n")}`);
   }
 
   return sections.join("\n");

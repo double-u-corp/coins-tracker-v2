@@ -9,7 +9,7 @@ import DCACalculator from "./DCACalculator";
 import { useChartLogic, type ChartRange } from "./useChartLogic";
 import { formatPhp } from "@/lib/format";
 import { getSupportResistance, BIAS_BADGE_CLASSES, BIAS_PRIORITY } from "./Technicals";
-import { useCoinScanner, formatScanResultsForJournal } from "./useCoinScanner";
+import { useCoinScanner, formatScanResultsForJournal, formatSingleScanResult } from "./useCoinScanner";
 
 const PriceLineChart = dynamic(() => import("./PriceLineChart"), {
   ssr: false,
@@ -55,6 +55,7 @@ export default function ChartView() {
   const [showKeyLevels, setShowKeyLevels] = useState(true);
   const [showAllScanResults, setShowAllScanResults] = useState(false);
   const [scanCopied, setScanCopied] = useState(false);
+  const [cardCopiedSymbol, setCardCopiedSymbol] = useState<string | null>(null);
 
   const { scanResults, isScanning, scanProgress, scanError, hasScanned, runScan } = useCoinScanner(allCoins);
 
@@ -64,6 +65,8 @@ export default function ChartView() {
       const bBias = b.confluence?.bias ?? "INSUFFICIENT DATA";
       const priorityDiff = BIAS_PRIORITY[aBias] - BIAS_PRIORITY[bBias];
       if (priorityDiff !== 0) return priorityDiff;
+      const streakDiff = (b.streak ?? 0) - (a.streak ?? 0);
+      if (streakDiff !== 0) return streakDiff;
       const aScore = Math.abs(a.confluence?.score ?? 0);
       const bScore = Math.abs(b.confluence?.score ?? 0);
       return bScore - aScore;
@@ -90,6 +93,12 @@ export default function ChartView() {
     navigator.clipboard.writeText(text);
     setScanCopied(true);
     setTimeout(() => setScanCopied(false), 2000);
+  };
+
+  const handleCopyCard = (r: (typeof scanResults)[number]) => {
+    navigator.clipboard.writeText(formatSingleScanResult(r));
+    setCardCopiedSymbol(r.symbol);
+    setTimeout(() => setCardCopiedSymbol(null), 2000);
   };
 
   const selectedCoin = useMemo(() => {
@@ -244,38 +253,80 @@ export default function ChartView() {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 {visibleScanResults.map((r) => (
-                  <button
+                  <div
                     key={r.symbol}
-                    type="button"
-                    onClick={() => setSymbol(r.symbol)}
-                    className={`text-left rounded-md border p-2.5 transition hover:shadow-sm ${
+                    className={`rounded-md border p-2.5 transition hover:shadow-sm ${
                       symbol === r.symbol ? "ring-2 ring-purple-400" : ""
                     } ${r.error ? "border-gray-200 bg-gray-50" : "border-gray-200 bg-white"}`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-bold text-gray-900">{r.symbol}</span>
-                      {r.confluence && (
-                        <span
-                          className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${
-                            BIAS_BADGE_CLASSES[r.confluence.bias]
-                          }`}
-                        >
-                          {r.confluence.bias}
-                        </span>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => setSymbol(r.symbol)}
+                        className="text-xs font-bold text-gray-900 hover:underline text-left"
+                        title={`Load ${r.symbol} chart`}
+                      >
+                        {r.symbol}
+                      </button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {r.streak >= 2 && (
+                          <span
+                            className="rounded-md border border-orange-300 bg-orange-50 px-1.5 py-0.5 text-[10px] font-bold text-orange-700"
+                            title={`${r.streak} consecutive scan runs with the same signal direction`}
+                          >
+                            🔥{r.streak}
+                          </span>
+                        )}
+                        {r.confluence && (
+                          <span
+                            className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${
+                              BIAS_BADGE_CLASSES[r.confluence.bias]
+                            }`}
+                          >
+                            {r.confluence.bias}
+                          </span>
+                        )}
+                        {r.confluence && (
+                          <button
+                            type="button"
+                            onClick={() => handleCopyCard(r)}
+                            title="Copy this coin's full details"
+                            className="text-[11px] px-1.5 py-0.5 rounded hover:bg-gray-100 text-gray-500"
+                          >
+                            {cardCopiedSymbol === r.symbol ? "✅" : "📋"}
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    {r.error ? (
-                      <p className="text-[10px] text-red-500 mt-1">Failed to load</p>
-                    ) : r.confluence ? (
-                      <p className="text-[10px] text-gray-500 mt-1">
-                        Score {r.confluence.score >= 0 ? "+" : ""}
-                        {r.confluence.score}/±{r.confluence.maxPossibleScore} ·{" "}
-                        {(r.confluence.confidence * 100).toFixed(0)}% data
-                      </p>
-                    ) : (
-                      <p className="text-[10px] text-gray-400 mt-1">No data</p>
-                    )}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setSymbol(r.symbol)}
+                      className="block w-full text-left mt-1"
+                      title={`Load ${r.symbol} chart`}
+                    >
+                      {r.error ? (
+                        <p className="text-[10px] text-red-500">Failed to load</p>
+                      ) : r.confluence ? (
+                        <p className="text-[10px] text-gray-500">
+                          Score {r.confluence.score >= 0 ? "+" : ""}
+                          {r.confluence.score}/±{r.confluence.maxPossibleScore} ·{" "}
+                          {(r.confluence.confidence * 100).toFixed(0)}% data
+                          {r.streak >= 2 && ` · ${r.streak}-day streak`}
+                          <br />
+                          <span className="text-gray-400">
+                            {new Date(r.scannedAt).toLocaleTimeString("en-US", {
+                              timeZone: "Asia/Manila",
+                              hour: "numeric",
+                              minute: "2-digit",
+                            })}{" "}
+                            Manila
+                          </span>
+                        </p>
+                      ) : (
+                        <p className="text-[10px] text-gray-400">No data</p>
+                      )}
+                    </button>
+                  </div>
                 ))}
               </div>
             )}

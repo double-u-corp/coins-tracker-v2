@@ -165,6 +165,178 @@ export function detectRSIDivergence(points: ChartPoint[], lookback = 20, recentW
 // from the steady-state confluence score below.
 // ---------------------------------------------------------------------------
 
+export interface SwingPoint {
+  index: number;
+  price: number;
+  type: "high" | "low";
+}
+
+/** Identifies swing highs/lows using a simple fractal method: a swing low
+ * is a candle whose low is lower than the low of `strength` candles on
+ * both sides of it; a swing high mirrors this for highs. This is a
+ * standard, widely-used simplification (the same idea behind a basic
+ * ZigZag indicator) — not full Elliott-wave analysis. It can produce
+ * closely-spaced, noisy swings in a choppy market, and the most recent
+ * `strength` candles can never be confirmed as swings yet (a swing point
+ * is only confirmable once price has moved away from it on both sides). */
+export function detectSwingPoints(points: ChartPoint[], strength = 3): SwingPoint[] {
+  const swings: SwingPoint[] = [];
+  for (let i = strength; i < points.length - strength; i++) {
+    const windowLows = points.slice(i - strength, i + strength + 1).map((p) => p.low);
+    const windowHighs = points.slice(i - strength, i + strength + 1).map((p) => p.high);
+    if (points[i].low === Math.min(...windowLows)) {
+      swings.push({ index: i, price: points[i].low, type: "low" });
+    }
+    if (points[i].high === Math.max(...windowHighs)) {
+      swings.push({ index: i, price: points[i].high, type: "high" });
+    }
+  }
+  return swings;
+}
+
+/** Reads the last two confirmed swing lows and the last two confirmed
+ * swing highs to classify market structure — higher-highs-and-higher-lows
+ * (bullish structure), lower-highs-and-lower-lows (bearish structure), or
+ * mixed (no clear structural trend). This is a genuinely different read
+ * from the SMA-based trend signals: it's about the SHAPE of price action,
+ * not moving averages. */
+export function getSwingStructure(
+  swings: SwingPoint[]
+): { direction: 1 | -1 | 0; available: boolean; detail: string } {
+  const lows = swings.filter((s) => s.type === "low");
+  const highs = swings.filter((s) => s.type === "high");
+  if (lows.length < 2 || highs.length < 2) {
+    return { direction: 0, available: false, detail: "Not enough confirmed swing points yet" };
+  }
+
+  const [prevLow, lastLow] = lows.slice(-2);
+  const [prevHigh, lastHigh] = highs.slice(-2);
+  const higherLows = lastLow.price > prevLow.price;
+  const higherHighs = lastHigh.price > prevHigh.price;
+
+  if (higherHighs && higherLows) {
+    return { direction: 1, available: true, detail: "Higher highs & higher lows — bullish structure" };
+  }
+  if (!higherHighs && !higherLows) {
+    return { direction: -1, available: true, detail: "Lower highs & lower lows — bearish structure" };
+  }
+  return { direction: 0, available: true, detail: "Mixed swing structure — no clear structural trend" };
+}
+
+export interface LadderLevel {
+  price: number;
+  allocationPct: number;
+  basis: "swing-low" | "support";
+}
+
+/** Builds a 2-3 tranche entry ladder anchored to actual confirmed swing
+ * lows near/below the current price, falling back to the plain support
+ * level when there isn't enough confirmed swing structure yet. Deeper
+ * (lower) tranches get a larger suggested allocation, since a fill there
+ * is a better price if it happens — this mirrors how a real trader
+ * typically sizes a ladder, not an equal split. */
+export function buildEntryLadder(points: ChartPoint[], support: number, currentPrice: number): LadderLevel[] {
+  const swings = detectSwingPoints(points, 3);
+  const swingLows = swings
+    .filter((s) => s.type === "low" && s.price <= currentPrice * 1.01)
+    .map((s) => s.price)
+    .sort((a, b) => b - a); // closest to current price first
+
+  const dedup: number[] = [];
+  for (const lvl of swingLows) {
+    if (dedup.every((d) => Math.abs(d - lvl) / d > 0.01)) dedup.push(lvl);
+    if (dedup.length >= 3) break;
+  }
+  if (dedup.every((d) => Math.abs(d - support) / support > 0.01)) {
+    dedup.push(support);
+  }
+  const levels = dedup.sort((a, b) => b - a).slice(0, 3);
+
+  if (levels.length === 0) {
+    return [{ price: support, allocationPct: 100, basis: "support" }];
+  }
+
+  const weights = levels.length === 3 ? [30, 30, 40] : levels.length === 2 ? [40, 60] : [100];
+  return levels.map((price, i) => ({
+    price,
+    allocationPct: weights[i],
+    basis: Math.abs(price - support) / support < 0.01 ? "support" : "swing-low",
+  }));
+}
+
+export interface LiquiditySweepResult {
+  type: "bullish" | "bearish";
+  sweptLevel: number; // the prior support/resistance level that got pierced
+  extremePrice: number; // the actual wick low/high reached during the sweep
+  daysAgo: number; // how many days ago the sweep candle occurred
+}
+
+/** Detects a liquidity sweep: price recently pierced a support/resistance
+ * level established just before that window (where stop-loss orders
+ * typically cluster), then closed back on the "right" side of it — a
+ * classic stop-hunt pattern that often precedes a reversal in the swept
+ * direction's favor. This is a simplified, single-level check against the
+ * two most recent windows, not full swing-structure analysis — treat it as
+ * a supporting clue, not a standalone trigger. */
+export function detectLiquiditySweep(
+  points: ChartPoint[],
+  lookback = 20,
+  recentWindow = 5,
+  currentPriceOverride?: number | null
+): LiquiditySweepResult | null {
+  if (points.length < lookback + 1) return null;
+
+  const window = points.slice(-lookback);
+  const priorSlice = window.slice(0, lookback - recentWindow);
+  const recentSlice = window.slice(lookback - recentWindow);
+  if (priorSlice.length === 0 || recentSlice.length === 0) return null;
+
+  const priorSupport = Math.min(...priorSlice.map((p) => p.low));
+  const priorResistance = Math.max(...priorSlice.map((p) => p.high));
+  const currentPrice =
+    currentPriceOverride != null ? currentPriceOverride : getEffectivePrice(points[points.length - 1]);
+
+  // Bullish sweep: a recent candle's LOW pierced below the prior support,
+  // but current price has reclaimed back above it.
+  let sweepLowIdx = -1;
+  let sweepLow = Infinity;
+  recentSlice.forEach((p, i) => {
+    if (p.low < priorSupport && p.low < sweepLow) {
+      sweepLow = p.low;
+      sweepLowIdx = i;
+    }
+  });
+  if (sweepLowIdx !== -1 && currentPrice > priorSupport) {
+    return {
+      type: "bullish",
+      sweptLevel: priorSupport,
+      extremePrice: sweepLow,
+      daysAgo: recentSlice.length - sweepLowIdx,
+    };
+  }
+
+  // Bearish sweep: a recent candle's HIGH pierced above the prior
+  // resistance, but current price has fallen back below it.
+  let sweepHighIdx = -1;
+  let sweepHigh = -Infinity;
+  recentSlice.forEach((p, i) => {
+    if (p.high > priorResistance && p.high > sweepHigh) {
+      sweepHigh = p.high;
+      sweepHighIdx = i;
+    }
+  });
+  if (sweepHighIdx !== -1 && currentPrice < priorResistance) {
+    return {
+      type: "bearish",
+      sweptLevel: priorResistance,
+      extremePrice: sweepHigh,
+      daysAgo: recentSlice.length - sweepHighIdx,
+    };
+  }
+
+  return null;
+}
+
 export function detectCrossoverEvent(points: ChartPoint[]): string | null {
   const rsi = calculateRSIAt(points, 14);
   if (rsi !== null && rsi >= 70) return `🔥 RSI Overbought (${rsi.toFixed(0)}) — caution on new entries.`;
@@ -259,6 +431,7 @@ export interface ConfluenceResult {
   wasDowngradedFromMacroOnly: boolean; // a directional call was reduced to NEUTRAL because only the macro-trend signal supported it
   macroTrend: "MACRO BULLISH" | "MACRO BEARISH" | "ACCUMULATING DATA";
   divergence: DivergenceSignal;
+  liquiditySweep: LiquiditySweepResult | null;
   atr: number | null;
   signals: SignalContribution[];
   currentPrice: number;
@@ -266,17 +439,25 @@ export interface ConfluenceResult {
   resistance: number;
   invalidationLevel: number | null;
   invalidationNote: string | null;
+  entrySuggestion: { ladder: LadderLevel[]; note: string } | null;
+  exitSuggestion: { price: number; note: string } | null;
 }
 
 export function computeConfluenceSignal(
   points: ChartPoint[],
-  overrides?: { support?: number | null; resistance?: number | null }
+  overrides?: { support?: number | null; resistance?: number | null; currentPrice?: number | null }
 ): ConfluenceResult {
   const signals: SignalContribution[] = [];
   let score = 0;
   let maxPossible = 0;
 
-  const currentPrice = points.length > 0 ? getEffectivePrice(points[points.length - 1]) : 0;
+  // Prefer a live/monitored price over the last chart point's derived
+  // value — daily chart data can lag behind the actual latest tick (e.g.
+  // if today's bucket hasn't been updated by the most recent cron run
+  // yet), which would otherwise silently feed a stale price into the
+  // "Price vs 20 SMA" and "Position in Range" signals.
+  const derivedPrice = points.length > 0 ? getEffectivePrice(points[points.length - 1]) : 0;
+  const currentPrice = overrides?.currentPrice != null ? overrides.currentPrice : derivedPrice;
 
   // --- RSI ---
   const rsi = calculateRSIAt(points, 14);
@@ -396,6 +577,22 @@ export function computeConfluenceSignal(
     signals.push({ name: "Position in 30-Day Range", weight: s, detail, available: points.length >= 5 });
   }
 
+  // --- Swing structure (higher-highs/higher-lows vs lower-highs/lower-lows) ---
+  const swingPoints = detectSwingPoints(points, 3);
+  const swingStructure = getSwingStructure(swingPoints);
+  maxPossible += 1;
+  if (swingStructure.available) {
+    score += swingStructure.direction;
+    signals.push({
+      name: "Swing Structure",
+      weight: swingStructure.direction,
+      detail: swingStructure.detail,
+      available: true,
+    });
+  } else {
+    signals.push({ name: "Swing Structure", weight: 0, detail: swingStructure.detail, available: false });
+  }
+
   const availableCount = signals.filter((s) => s.available).length;
   const confidence = signals.length > 0 ? availableCount / signals.length : 0;
 
@@ -442,12 +639,22 @@ export function computeConfluenceSignal(
   const isCounterTrend = macroDirection !== 0 && shortTermDirection !== 0 && shortTermDirection !== macroDirection;
 
   const divergence = detectRSIDivergence(points);
+  const liquiditySweep = detectLiquiditySweep(points, 20, 5, currentPrice);
   const atr = calculateATR(points, 14);
 
   let invalidationLevel: number | null = null;
   let invalidationNote: string | null = null;
   if (bias.includes("LONG")) {
-    if (atr !== null) {
+    if (liquiditySweep?.type === "bullish") {
+      // The naive support level was already tested — price wicked below it
+      // and reclaimed. Anchor the stop just below that ACTUAL tested low
+      // instead of the generic ATR buffer below the naive support: the
+      // naive level is exactly where a stop hunt would target again, while
+      // the sweep low is a level that's already been defended once.
+      const buffer = atr !== null ? 0.5 * atr : liquiditySweep.sweptLevel * 0.01;
+      invalidationLevel = liquiditySweep.extremePrice - buffer;
+      invalidationNote = `Support near ${liquiditySweep.sweptLevel.toFixed(2)} was already swept and reclaimed (low of ~${liquiditySweep.extremePrice.toFixed(2)}, ${liquiditySweep.daysAgo} day(s) ago) — the stop is anchored just below that tested low rather than the naive support line, since that naive line is exactly what a repeat stop-hunt would target. If price closes below ~${invalidationLevel.toFixed(2)}, this long thesis is invalidated.`;
+    } else if (atr !== null) {
       invalidationLevel = support - 1.5 * atr;
       invalidationNote = `If price closes below ~${invalidationLevel.toFixed(2)} (support broken by more than the recent ATR-14 of ${atr.toFixed(2)}), this long thesis is invalidated.`;
     } else {
@@ -455,12 +662,52 @@ export function computeConfluenceSignal(
       invalidationNote = `If price closes below ~${invalidationLevel.toFixed(2)} (support broken), this long thesis is invalidated. (Flat 3% buffer — not enough history yet for a volatility-based ATR stop.)`;
     }
   } else if (bias.includes("SHORT")) {
-    if (atr !== null) {
+    if (liquiditySweep?.type === "bearish") {
+      const buffer = atr !== null ? 0.5 * atr : liquiditySweep.sweptLevel * 0.01;
+      invalidationLevel = liquiditySweep.extremePrice + buffer;
+      invalidationNote = `Resistance near ${liquiditySweep.sweptLevel.toFixed(2)} was already swept and rejected (high of ~${liquiditySweep.extremePrice.toFixed(2)}, ${liquiditySweep.daysAgo} day(s) ago) — the stop is anchored just above that tested high rather than the naive resistance line, for the same stop-hunt reason. If price closes above ~${invalidationLevel.toFixed(2)}, re-evaluate — momentum may be turning.`;
+    } else if (atr !== null) {
       invalidationLevel = resistance + 1.5 * atr;
       invalidationNote = `If price closes above ~${invalidationLevel.toFixed(2)} (resistance reclaimed by more than the recent ATR-14 of ${atr.toFixed(2)}), re-evaluate — momentum may be turning.`;
     } else {
       invalidationLevel = resistance * 1.03;
       invalidationNote = `If price closes above ~${invalidationLevel.toFixed(2)} (resistance reclaimed), re-evaluate. (Flat 3% buffer — not enough history yet for a volatility-based ATR stop.)`;
+    }
+  }
+
+  // Entry/exit reference levels — a suggestion only, not a directive. Entry
+  // is now a real ladder anchored to confirmed swing lows (not just a flat
+  // support line) so it mirrors how a trader would actually stage limit
+  // orders. Exit stays a single resistance-based target for now.
+  let entrySuggestion: ConfluenceResult["entrySuggestion"] = null;
+  let exitSuggestion: ConfluenceResult["exitSuggestion"] = null;
+
+  if (bias !== "INSUFFICIENT DATA") {
+    const ladder = buildEntryLadder(points, support, currentPrice);
+
+    if (bias.includes("LONG")) {
+      entrySuggestion = {
+        ladder,
+        note:
+          liquiditySweep?.type === "bullish"
+            ? `The deepest tranche sits near a level that was already tested and defended — price swept to ~${liquiditySweep.extremePrice.toFixed(2)} and reclaimed, which is somewhat higher-conviction than an untested level.`
+            : currentPrice <= support * 1.02
+            ? "Price is already near the lower end of this ladder — current conditions look like a reasonable entry zone, not just the target."
+            : "Rather than buying all at once, consider splitting across these tranches — deeper fills are lower-risk if they happen, at the cost of maybe not filling at all if price never pulls back that far.",
+      };
+      exitSuggestion = {
+        price: resistance,
+        note: "Near-term target — worth considering taking some profit if price reaches this level.",
+      };
+    } else {
+      entrySuggestion = {
+        ladder,
+        note: "Technicals don't support buying at the current price — these are the levels worth waiting for, staged from least to most aggressive, before considering a fresh entry.",
+      };
+      exitSuggestion = {
+        price: resistance,
+        note: "If you're already holding, this is a level worth watching to trim or take profit rather than a fresh buy target.",
+      };
     }
   }
 
@@ -473,6 +720,7 @@ export function computeConfluenceSignal(
     wasDowngradedFromMacroOnly,
     macroTrend,
     divergence,
+    liquiditySweep,
     atr,
     signals,
     currentPrice,
@@ -480,5 +728,7 @@ export function computeConfluenceSignal(
     resistance,
     invalidationLevel,
     invalidationNote,
+    entrySuggestion,
+    exitSuggestion,
   };
 }
