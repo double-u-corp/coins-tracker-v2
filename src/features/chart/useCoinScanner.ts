@@ -1,12 +1,13 @@
 import { useCallback, useState } from "react";
 import type { ChartPoint, CoinSummary } from "@/validators/recordSchema";
-import { computeConfluenceSignal, type ConfluenceResult } from "./Technicals";
+import { computeConfluenceSignal, isLongExtended, type ConfluenceResult } from "./Technicals";
 
 export interface ScanResult {
   symbol: string;
   name: string;
   confluence: ConfluenceResult | null;
   error: string | null;
+  /** Always 0 — scan-log / streak API removed; field kept so UI stays compatible. */
   streak: number;
   scannedAt: string; // ISO timestamp, captured at the moment this coin's scan completed
 }
@@ -30,42 +31,26 @@ async function fetchCoinPoints(symbol: string): Promise<ChartPoint[]> {
   return data.points;
 }
 
-// OPTIONAL — expects a backend endpoint that doesn't exist yet. Serves
-// finer-grained bars (e.g. 3-hour, matching an 8x/day price-check cadence)
-// used specifically for swing detection, which needs a real intraday
-// series to confirm swings within hours instead of 3+ days on daily bars.
-// Expected contract once built: `{ points: ChartPoint[] }`, same shape as
-// the daily endpoint, just at higher time resolution.
-// Fails SILENTLY (returns null, not a thrown error) so the scan keeps
-// working exactly as it does today until this endpoint is added —
-// swing/ladder computation just falls back to daily-bar resolution.
+// 336 hours (14 days) rather than a shorter window — at 3-hour granularity
+// that's ~112 candles. detectSwingPoints(strength=3) needs a 7-bar window
+// per candidate, so finding 2 confirmed highs AND 2 confirmed lows from a
+// much shorter window (e.g. 72h/~24 candles) is often mathematically not
+// going to happen, especially with real gaps in the data (Records only log
+// on a new intraday high/low, not every check).
+const INTRADAY_HOURS = 336;
+
+/** Fetches the intraday series used specifically for swing structure and
+ * the entry ladder. Fails SILENTLY (returns null, not a thrown error) —
+ * if this endpoint is ever unavailable, the confluence engine falls back
+ * to daily-bar swing detection rather than breaking the scan. */
 async function fetchIntradayPoints(symbol: string): Promise<ChartPoint[] | null> {
   try {
-    const res = await fetch(`/api/coins?type=chart&symbol=${symbol}&granularity=3h&hours=72`);
+    const res = await fetch(`/api/coins?type=chart&symbol=${symbol}&granularity=3h&hours=${INTRADAY_HOURS}`);
     if (!res.ok) return null;
     const data: { points: ChartPoint[] } = await res.json();
     return data.points?.length > 0 ? data.points : null;
   } catch {
     return null;
-  }
-}
-
-/** Saves this run's result and returns the consecutive-signal streak
- * computed server-side from the coin's prior scan history. Best-effort:
- * if the save fails, the scan itself still succeeds — streak is enrichment,
- * not load-bearing for the actual technical read. */
-async function persistAndGetStreak(symbol: string, bias: string, score: number): Promise<number> {
-  try {
-    const res = await fetch("/api/chart-scan-log", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ symbol, bias, score }),
-    });
-    if (!res.ok) return 0;
-    const data: { streak?: number } = await res.json();
-    return data.streak ?? 0;
-  } catch {
-    return 0;
   }
 }
 
@@ -100,13 +85,12 @@ export function useCoinScanner(allCoins: CoinSummary[]) {
             points.length > 0
               ? computeConfluenceSignal(points, { currentPrice: coin.currentPrice, intradayPoints })
               : null;
-          const streak = confluence ? await persistAndGetStreak(coin.symbol, confluence.bias, confluence.score) : 0;
           results.push({
             symbol: coin.symbol,
             name: coin.name,
             confluence,
             error: null,
-            streak,
+            streak: 0,
             scannedAt: new Date().toISOString(),
           });
         } catch (err) {
@@ -138,10 +122,15 @@ export function useCoinScanner(allCoins: CoinSummary[]) {
   return { scanResults, isScanning, scanProgress, scanError, hasScanned, runScan };
 }
 
-/** Formats a single coin's full confluence breakdown — every contributing
- * signal, macro trend, counter-trend flag, divergence, and invalidation
- * level. Shared by both the per-card copy button and the bulk journal report
- * below, so the two never drift out of sync with each other. */
+function biasCircle(bias: string): string {
+  if (bias.includes("LONG")) return "🟢";
+  if (bias.includes("SHORT")) return "🔴";
+  return "⚪";
+}
+
+/** Formats a single coin's full confluence breakdown — scannable journal
+ * copy with status circle + bold critical terms. Shared by the per-card
+ * copy button and the bulk journal report. */
 export function formatSingleScanResult(r: ScanResult): string {
   if (!r.confluence) return `**${r.symbol}** — no data available.`;
   const c = r.confluence;
@@ -150,16 +139,23 @@ export function formatSingleScanResult(r: ScanResult): string {
     dateStyle: "medium",
     timeStyle: "short",
   });
+  const circle = biasCircle(c.bias);
+  const extended = isLongExtended(c);
   const lines: string[] = [];
+
   lines.push(
-    `**${r.symbol}** — ${c.bias} (Score: ${c.score >= 0 ? "+" : ""}${c.score}/±${c.maxPossibleScore}, ${(c.confidence * 100).toFixed(0)}% data confidence)`
+    `${circle} **${r.symbol}** — **${c.bias}** (Score: **${c.score >= 0 ? "+" : ""}${c.score}**/±${c.maxPossibleScore}, ${(c.confidence * 100).toFixed(0)}% data)`
   );
-  lines.push(`- Scanned: ${scannedAtLabel} (Manila time)`);
-  if (r.streak >= 2) {
-    lines.push(`- 🔥 ${r.streak}-day consecutive ${c.bias.includes("LONG") ? "LONG" : "SHORT"} streak`);
+  lines.push(`- Scanned: ${scannedAtLabel} (Manila)`);
+  if (extended) {
+    lines.push(`- ⏳ **Extended — wait for pullback into ladder** (do not chase)`);
   }
-  lines.push(`- Price: ${c.currentPrice} | Support: ${c.support} | Resistance: ${c.resistance}`);
-  lines.push(`- Macro Trend: ${c.macroTrend}${c.isCounterTrend ? " ⚠️ COUNTER-TREND (disagrees with macro)" : ""}`);
+  lines.push(
+    `- **Price:** ${c.currentPrice} | **Support:** ${c.support} | **Resistance:** ${c.resistance}`
+  );
+  lines.push(
+    `- **Macro:** ${c.macroTrend}${c.isCounterTrend ? " ⚠️ COUNTER-TREND (disagrees with macro)" : ""}`
+  );
   if (c.divergence) {
     lines.push(
       `- Divergence: 🔍 Possible ${c.divergence} RSI divergence — worth a manual look, not a standalone signal`
@@ -167,36 +163,43 @@ export function formatSingleScanResult(r: ScanResult): string {
   }
   if (c.liquiditySweep) {
     lines.push(
-      `- Liquidity Sweep: 🎣 ${c.liquiditySweep.type} sweep of ${c.liquiditySweep.sweptLevel} (extreme ${c.liquiditySweep.extremePrice}, ${c.liquiditySweep.daysAgo}d ago)`
+      `- **Sweep:** 🎣 ${c.liquiditySweep.type} · ${c.liquiditySweep.sweptLevel} (extreme ${c.liquiditySweep.extremePrice}, ${c.liquiditySweep.daysAgo}d ago)`
     );
   }
-  for (const s of c.signals) {
-    if (!s.available) continue;
-    lines.push(`  - ${s.name}: ${s.detail}${s.weight !== 0 ? ` (${s.weight > 0 ? "+" : ""}${s.weight})` : ""}`);
+
+  const signalBits = c.signals
+    .filter((s) => s.available)
+    .map((s) => `${s.detail}${s.weight !== 0 ? ` (${s.weight > 0 ? "+" : ""}${s.weight})` : ""}`);
+  if (signalBits.length > 0) {
+    lines.push(`- Signals: ${signalBits.join(" · ")}`);
   }
-  if (c.invalidationNote) {
-    if (c.entrySuggestion) {
-      lines.push(`- Entry Ladder:`);
-      for (const level of c.entrySuggestion.ladder) {
-        lines.push(`  - ~${level.price} (${level.basis}) — ${level.allocationPct}%`);
-      }
-      lines.push(`  ${c.entrySuggestion.note}`);
+
+  if (c.entrySuggestion) {
+    lines.push(`- **Entry ladder:**`);
+    for (const level of c.entrySuggestion.ladder) {
+      lines.push(`  - **~${level.price}** (${level.basis}) — ${level.allocationPct}%`);
     }
-    lines.push(`- Invalidation: ${c.invalidationNote}`);
-    if (c.exitSuggestion) {
-      lines.push(`- Target ~${c.exitSuggestion.price}: ${c.exitSuggestion.note}`);
+    lines.push(`  ${c.entrySuggestion.note}`);
+  }
+  if (c.invalidationLevel != null || c.invalidationNote) {
+    const stop =
+      c.invalidationLevel != null
+        ? `close below **~${c.invalidationLevel.toFixed(2)}**`
+        : c.invalidationNote;
+    lines.push(`- **Invalidation:** ${stop}`);
+    if (c.invalidationLevel != null && c.invalidationNote) {
+      lines.push(`  ${c.invalidationNote}`);
     }
+  }
+  if (c.exitSuggestion) {
+    lines.push(`- **Target:** **~${c.exitSuggestion.price}** — ${c.exitSuggestion.note}`);
   }
   return lines.join("\n");
 }
 
 /** Builds a full Markdown report of only the directional (LONG / SHORT /
- * STRONG LONG / STRONG SHORT) results — every contributing signal, macro
- * trend, counter-trend flag, divergence, and invalidation level included —
- * suitable for pasting straight into a journal entry to track day over day.
- * NEUTRAL and INSUFFICIENT DATA coins are deliberately excluded regardless
- * of what's currently shown on screen; this is meant to be a durable record
- * of what actually looked actionable that day, not the full watchlist dump. */
+ * STRONG LONG / STRONG SHORT) results — suitable for pasting into a journal.
+ * NEUTRAL and INSUFFICIENT DATA are excluded on purpose. */
 export function formatScanResultsForJournal(results: ScanResult[]): string {
   const dateStr = new Date().toISOString().slice(0, 10);
 
@@ -209,18 +212,30 @@ export function formatScanResultsForJournal(results: ScanResult[]): string {
   const signalResults = results.filter(isDirectional);
 
   if (signalResults.length === 0) {
-    return `## Morning Scan — ${dateStr}\n\nNo LONG or SHORT signals today. All tracked coins are NEUTRAL or still accumulating price history.`;
+    return `## Watchlist Scan — ${dateStr}\n\nNo LONG or SHORT signals today. All tracked coins are NEUTRAL or still accumulating price history.`;
   }
 
   const longs = signalResults.filter((r) => r.confluence!.bias.includes("LONG"));
+  const longsReady = longs.filter((r) => !isLongExtended(r.confluence!));
+  const longsExtended = longs.filter((r) => isLongExtended(r.confluence!));
   const shorts = signalResults.filter((r) => r.confluence!.bias.includes("SHORT"));
 
-  const sections: string[] = [`## Morning Scan — ${dateStr}`];
-  if (longs.length > 0) {
-    sections.push(`\n### 🟢 LONG Signals (${longs.length})\n\n${longs.map(formatSingleScanResult).join("\n\n")}`);
+  const sections: string[] = [`## Watchlist Scan — ${dateStr}`];
+
+  if (longsReady.length > 0) {
+    sections.push(
+      `\n### 🟢 LONG — near ladder / ready (${longsReady.length})\n\n${longsReady.map(formatSingleScanResult).join("\n\n")}`
+    );
+  }
+  if (longsExtended.length > 0) {
+    sections.push(
+      `\n### ⏳ LONG — extended, wait for pullback (${longsExtended.length})\n\n${longsExtended.map(formatSingleScanResult).join("\n\n")}`
+    );
   }
   if (shorts.length > 0) {
-    sections.push(`\n### 🔴 SHORT Signals (${shorts.length})\n\n${shorts.map(formatSingleScanResult).join("\n\n")}`);
+    sections.push(
+      `\n### 🔴 SHORT — hold cash / do not buy (${shorts.length})\n\n${shorts.map(formatSingleScanResult).join("\n\n")}`
+    );
   }
 
   return sections.join("\n");

@@ -213,11 +213,17 @@ export function getSwingStructure(
   const [prevHigh, lastHigh] = highs.slice(-2);
   const higherLows = lastLow.price > prevLow.price;
   const higherHighs = lastHigh.price > prevHigh.price;
+  const lowerLows = lastLow.price < prevLow.price;
+  const lowerHighs = lastHigh.price < prevHigh.price;
 
   if (higherHighs && higherLows) {
     return { direction: 1, available: true, detail: "Higher highs & higher lows — bullish structure" };
   }
-  if (!higherHighs && !higherLows) {
+  // Requires STRICTLY lower highs AND lower lows — not just "not higher."
+  // The old `!higherHighs && !higherLows` check was also true for EQUAL
+  // pivots (a flat double-top/double-bottom), misclassifying genuinely
+  // neutral/sideways consolidation as bearish structure.
+  if (lowerHighs && lowerLows) {
     return { direction: -1, available: true, detail: "Lower highs & lower lows — bearish structure" };
   }
   return { direction: 0, available: true, detail: "Mixed swing structure — no clear structural trend" };
@@ -444,13 +450,37 @@ export interface ConfluenceResult {
   exitSuggestion: { price: number; note: string } | null;
 }
 
+/**
+ * Buy-low helper for LONG / STRONG LONG only.
+ * True when price has already run (upper range and/or clearly above the
+ * top entry-ladder tranche) — bias can stay bullish, but the user should
+ * wait for a pullback into the ladder instead of chasing.
+ */
+export function isLongExtended(c: ConfluenceResult): boolean {
+  if (!c.bias.includes("LONG")) return false;
+
+  const range = c.resistance - c.support;
+  const positionInRange = range > 0 ? (c.currentPrice - c.support) / range : 0.5;
+  // Upper 40% of the 30-day range → treat as extended for spot entries
+  if (positionInRange >= 0.6) return true;
+
+  const ladder = c.entrySuggestion?.ladder;
+  if (ladder && ladder.length > 0) {
+    const topLadder = Math.max(...ladder.map((l) => l.price));
+    // More than ~3% above the highest planned buy level → wait for dip
+    if (topLadder > 0 && c.currentPrice > topLadder * 1.03) return true;
+  }
+
+  return false;
+}
+
 export function computeConfluenceSignal(
   points: ChartPoint[],
   overrides?: {
     support?: number | null;
     resistance?: number | null;
     currentPrice?: number | null;
-    // Finer-grained series (e.g. 3-hour bars) used SPECIFICALLY for swing
+    // Finer-grained series (3-hour bars) used SPECIFICALLY for swing
     // structure and the entry ladder, since those care about recent
     // turning points and daily bars confirm swings too slowly (3+ days of
     // lag). Everything else (RSI, SMA20/50/200, macro trend) still needs
@@ -578,7 +608,16 @@ export function computeConfluenceSignal(
   {
     let s = 0;
     let detail = `Mid-range (${(positionInRange * 100).toFixed(0)}% of 30-day range)`;
-    if (positionInRange <= 0.25) {
+    if (positionInRange > 1) {
+      // Price has broken ABOVE the established range. The mean-reversion
+      // framing below (near-resistance = bearish/"expensive") is backwards
+      // here — a genuine breakout is often bullish continuation, not a
+      // sell signal. Treated as neutral rather than guessing a direction
+      // this specific signal isn't well-positioned to call.
+      detail = `Trading above the 30-day range (${((positionInRange - 1) * 100).toFixed(0)}% beyond resistance) — breakout, range no longer applies`;
+    } else if (positionInRange < 0) {
+      detail = `Trading below the 30-day range (${(Math.abs(positionInRange) * 100).toFixed(0)}% beyond support) — breakdown, range no longer applies`;
+    } else if (positionInRange <= 0.25) {
       s = 1;
       detail = `Near range support (${(positionInRange * 100).toFixed(0)}% of range) — discount zone`;
     } else if (positionInRange >= 0.75) {
@@ -590,9 +629,9 @@ export function computeConfluenceSignal(
   }
 
   // --- Swing structure (higher-highs/higher-lows vs lower-highs/lower-lows) ---
-  // Prefer intraday resolution for swing detection when available — daily
-  // bars take 3+ days to confirm a swing, intraday bars confirm within
-  // hours. Falls back to daily points otherwise (same behavior as before).
+  // Prefer intraday resolution when available — daily bars take 3+ days to
+  // confirm a swing, intraday bars confirm within hours. Falls back to
+  // daily points otherwise (identical to prior behavior).
   const swingSeries = overrides?.intradayPoints && overrides.intradayPoints.length > 0 ? overrides.intradayPoints : points;
   const usedIntradaySwings = !!(overrides?.intradayPoints && overrides.intradayPoints.length > 0);
   const swingPoints = detectSwingPoints(swingSeries, 3);
@@ -719,11 +758,11 @@ export function computeConfluenceSignal(
     } else {
       entrySuggestion = {
         ladder,
-        note: "Technicals don't support buying at the current price — these are the levels worth waiting for, staged from least to most aggressive, before considering a fresh entry.",
+        note: "Technicals don't support buying at the current price — this isn't a signal to short (spot only, no leverage here). These are buyback levels worth waiting for on a pullback, staged from least to most aggressive.",
       };
       exitSuggestion = {
         price: resistance,
-        note: "If you're already holding, this is a level worth watching to trim or take profit rather than a fresh buy target.",
+        note: "If you're already holding, this is a level worth watching to trim or take profit — not a fresh buy target.",
       };
     }
   }

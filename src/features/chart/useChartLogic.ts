@@ -58,6 +58,13 @@ export function useChartLogic() {
   const [chartLoading, setChartLoading] = useState(false);
   const [chartError, setChartError] = useState<string | null>(null);
 
+  // Intraday series used specifically for swing structure / entry ladder in
+  // TradingInsightCard, so this view matches the Morning Scan's confluence
+  // read for the same coin instead of silently falling back to daily-only
+  // swing detection. Best-effort: null on failure, no error surfaced —
+  // Technicals.tsx already falls back to daily bars when this is absent.
+  const [intradayPoints, setIntradayPoints] = useState<ChartPoint[] | null>(null);
+
   const [entries, setEntries] = useState<JournalEntryView[]>([]);
   const [journalLoading, setJournalLoading] = useState(false);
   const [journalError, setJournalError] = useState<string | null>(null);
@@ -125,6 +132,22 @@ export function useChartLogic() {
       .catch((err) => setChartError((err as Error).message))
       .finally(() => setChartLoading(false));
   }, [symbol, range]);
+
+  // 336 hours (14 days) matches useCoinScanner's Morning Scan window exactly
+  // — both views need to agree on swing structure for the same coin, so
+  // they use the identical lookback, not just the same endpoint.
+  const loadIntradayChart = useCallback(() => {
+    if (!symbol) {
+      setIntradayPoints(null);
+      return;
+    }
+    fetch(`/api/coins?type=chart&symbol=${symbol}&granularity=3h&hours=336`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { points: ChartPoint[] } | null) => {
+        setIntradayPoints(data?.points?.length ? data.points : null);
+      })
+      .catch(() => setIntradayPoints(null));
+  }, [symbol]);
 
   const loadJournal = useCallback(() => {
     setJournalLoading(true);
@@ -194,6 +217,10 @@ export function useChartLogic() {
   }, [loadChart]);
 
   useEffect(() => {
+    loadIntradayChart();
+  }, [loadIntradayChart]);
+
+  useEffect(() => {
     loadJournal();
   }, [loadJournal]);
 
@@ -245,6 +272,7 @@ export function useChartLogic() {
     points,
     chartLoading,
     chartError,
+    intradayPoints,
     entries,
     journalLoading,
     journalError,

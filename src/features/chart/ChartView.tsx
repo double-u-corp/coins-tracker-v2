@@ -8,7 +8,7 @@ import TradingInsightCard from "./TradingInsightCard";
 import DCACalculator from "./DCACalculator";
 import { useChartLogic, type ChartRange } from "./useChartLogic";
 import { formatPhp } from "@/lib/format";
-import { getSupportResistance, BIAS_BADGE_CLASSES, BIAS_PRIORITY } from "./Technicals";
+import { getSupportResistance, BIAS_BADGE_CLASSES, BIAS_PRIORITY, isLongExtended } from "./Technicals";
 import { useCoinScanner, formatScanResultsForJournal, formatSingleScanResult } from "./useCoinScanner";
 
 const PriceLineChart = dynamic(() => import("./PriceLineChart"), {
@@ -39,6 +39,7 @@ export default function ChartView() {
     points,
     chartLoading,
     chartError,
+    intradayPoints,
     entries,
     journalLoading,
     journalError,
@@ -65,8 +66,10 @@ export default function ChartView() {
       const bBias = b.confluence?.bias ?? "INSUFFICIENT DATA";
       const priorityDiff = BIAS_PRIORITY[aBias] - BIAS_PRIORITY[bBias];
       if (priorityDiff !== 0) return priorityDiff;
-      const streakDiff = (b.streak ?? 0) - (a.streak ?? 0);
-      if (streakDiff !== 0) return streakDiff;
+      // Buy-low: among LONGs, near-ladder setups before extended "wait for dip"
+      const aExt = a.confluence ? (isLongExtended(a.confluence) ? 1 : 0) : 0;
+      const bExt = b.confluence ? (isLongExtended(b.confluence) ? 1 : 0) : 0;
+      if (aExt !== bExt) return aExt - bExt;
       const aScore = Math.abs(a.confluence?.score ?? 0);
       const bScore = Math.abs(b.confluence?.score ?? 0);
       return bScore - aScore;
@@ -190,16 +193,19 @@ export default function ChartView() {
         )}
       </div>
 
-      {/* Morning Scan — check every tracked coin's confluence signal at once
+      {/* Watchlist Scan — check every tracked coin's confluence signal at once
           instead of clicking through the dropdown one by one */}
       <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
             <h2 className="text-sm font-bold text-gray-900 flex items-center gap-1.5">
-              <span>🌅</span> Morning Scan
+              <span>📡</span> Watchlist Scan
             </h2>
             <p className="text-xs text-gray-500">
               Check every tracked coin's confluence signal at once — click a result to load its full chart below.
+            </p>
+            <p className="text-[11px] text-gray-400 mt-0.5">
+              Suggested: ~08:15 and ~20:15 Manila
             </p>
           </div>
           <button
@@ -311,8 +317,23 @@ export default function ChartView() {
                           Score {r.confluence.score >= 0 ? "+" : ""}
                           {r.confluence.score}/±{r.confluence.maxPossibleScore} ·{" "}
                           {(r.confluence.confidence * 100).toFixed(0)}% data
-                          {r.streak >= 2 && ` · ${r.streak}-day streak`}
                           <br />
+                          {isLongExtended(r.confluence) ? (
+                            <span className="text-amber-700 font-semibold">
+                              ⏳ Extended — wait for pullback into ladder
+                            </span>
+                          ) : r.confluence.bias.includes("LONG") ? (
+                            <span className="text-emerald-700 font-medium">
+                              Near ladder / ready to stage
+                            </span>
+                          ) : r.confluence.bias.includes("SHORT") ? (
+                            <span className="text-rose-600 font-medium">
+                              Hold cash — do not buy
+                            </span>
+                          ) : null}
+                          {(isLongExtended(r.confluence) ||
+                            r.confluence.bias.includes("LONG") ||
+                            r.confluence.bias.includes("SHORT")) && <br />}
                           <span className="text-gray-400">
                             {new Date(r.scannedAt).toLocaleTimeString("en-US", {
                               timeZone: "Asia/Manila",
@@ -499,6 +520,7 @@ export default function ChartView() {
             support={technicals.support}
             resistance={technicals.resistance}
             currentPrice={currentPrice}
+            intradayPoints={intradayPoints}
           />
 
           <DCACalculator

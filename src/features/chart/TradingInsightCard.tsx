@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { ChartPoint } from "@/validators/recordSchema";
 import { formatPhp } from "@/lib/format";
-import { computeConfluenceSignal, detectCrossoverEvent, BIAS_BADGE_CLASSES, type BiasLabel } from "./Technicals";
+import { computeConfluenceSignal, detectCrossoverEvent, BIAS_BADGE_CLASSES, isLongExtended, type BiasLabel } from "./Technicals";
 
 interface TradingInsightCardProps {
   points: ChartPoint[];
@@ -10,6 +10,7 @@ interface TradingInsightCardProps {
   support?: number | null;
   resistance?: number | null;
   currentPrice?: number | null;
+  intradayPoints?: ChartPoint[] | null;
 }
 
 const BIAS_STYLES: Record<BiasLabel, { status: string; statusText: string; action: string }> = {
@@ -52,13 +53,14 @@ export default function TradingInsightCard({
   support,
   resistance,
   currentPrice,
+  intradayPoints,
 }: TradingInsightCardProps) {
   const result = useMemo(() => {
     if (!symbol || points.length === 0) return null;
-    const confluence = computeConfluenceSignal(points, { support, resistance, currentPrice });
+    const confluence = computeConfluenceSignal(points, { support, resistance, currentPrice, intradayPoints });
     const crossoverAlert = detectCrossoverEvent(points);
     return { confluence, crossoverAlert };
-  }, [symbol, points, support, resistance, currentPrice]);
+  }, [symbol, points, support, resistance, currentPrice, intradayPoints]);
 
   if (!symbol || points.length === 0 || !result) {
     return (
@@ -112,6 +114,13 @@ export default function TradingInsightCard({
           </div>
         )}
 
+        {!isInsufficient && isLongExtended(confluence) && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-900">
+            ⏳ Extended — wait for pullback into the entry ladder. Bias is still bullish, but price has
+            already run (upper range and/or above the top ladder tranche). Do not chase; stage buys on a dip.
+          </div>
+        )}
+
         {confluence.divergence && (
           <div className="rounded-md border border-purple-200 bg-purple-50 p-3 text-xs font-semibold text-purple-900">
             {confluence.divergence === "bullish"
@@ -144,9 +153,6 @@ export default function TradingInsightCard({
             {confluence.entrySuggestion && (
               <div className="text-xs text-gray-700 space-y-1">
                 <span className="font-semibold text-emerald-700">Entry Ladder:</span>
-                <span className="text-[10px] text-gray-400 ml-1">
-                  ({confluence.usedIntradaySwings ? "intraday swings" : "daily swings"})
-                </span>
                 <ul className="space-y-0.5 pl-3">
                   {confluence.entrySuggestion.ladder.map((level, idx) => (
                     <li key={idx} className="flex items-center justify-between">
@@ -237,7 +243,7 @@ export default function TradingInsightCard({
               : confluence.bias.includes("LONG")
               ? "Multiple signals align bullish. Execute tranches near support, respecting the invalidation level above."
               : confluence.bias.includes("SHORT")
-              ? "Multiple signals align bearish or price is extended. Maintain cash reserves and wait for a better entry."
+              ? "Multiple signals align bearish or price is extended. This means wait, not short — hold cash and watch for a pullback into the entry ladder above."
               : "Signals are mixed or offsetting. No strong edge either way — wait for clearer confluence."}
           </p>
         </div>
