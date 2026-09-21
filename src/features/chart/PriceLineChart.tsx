@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -25,6 +25,98 @@ export interface PriceLineChartProps {
   resistance?: number | null;
 }
 
+type ActivePoint = {
+  label: string;
+  high?: number;
+  low?: number;
+  sma20?: number;
+  sma50?: number;
+  sma200?: number;
+  rsi?: number;
+};
+
+function useIsMobile(breakpointPx = 640) {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia(`(max-width: ${breakpointPx - 1}px)`);
+    const apply = () => setIsMobile(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, [breakpointPx]);
+
+  return isMobile;
+}
+
+/** Compact desktop floating tooltip — only shows series that have values. */
+function DesktopTooltipContent({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+
+  return (
+    <div className="rounded-lg border border-gray-100 bg-white px-3 py-2 shadow-md text-xs max-w-[200px]">
+      <div className="mb-1.5 font-semibold text-gray-600 border-b border-gray-100 pb-1">{label}</div>
+      <ul className="space-y-0.5">
+        {payload.map((entry: any) => {
+          if (entry.value == null) return null;
+          const isRsi = entry.name === "RSI";
+          return (
+            <li key={entry.dataKey} className="flex items-center justify-between gap-3">
+              <span className="flex items-center gap-1.5 text-gray-500">
+                <span
+                  className="inline-block h-2 w-2 rounded-full shrink-0"
+                  style={{ backgroundColor: entry.color }}
+                />
+                {entry.name}
+              </span>
+              <span className="font-semibold text-gray-900 tabular-nums">
+                {isRsi ? entry.value : formatPhp(Number(entry.value))}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+/** Fixed strip under the chart on mobile — never covers the plot. */
+function MobileReadout({ point }: { point: ActivePoint | null }) {
+  if (!point) {
+    return (
+      <div className="rounded-md border border-dashed border-gray-200 bg-gray-50 px-3 py-2 text-[11px] text-gray-400 text-center sm:hidden">
+        Tap the chart to inspect a date
+      </div>
+    );
+  }
+
+  const rows: { label: string; value: string; color: string }[] = [];
+  if (point.high != null) rows.push({ label: "High", value: formatPhp(point.high), color: "#22c55e" });
+  if (point.low != null) rows.push({ label: "Low", value: formatPhp(point.low), color: "#ef4444" });
+  if (point.sma20 != null) rows.push({ label: "20 SMA", value: formatPhp(point.sma20), color: "#f59e0b" });
+  if (point.sma50 != null) rows.push({ label: "50 SMA", value: formatPhp(point.sma50), color: "#3b82f6" });
+  if (point.sma200 != null) rows.push({ label: "200 SMA", value: formatPhp(point.sma200), color: "#a855f7" });
+  if (point.rsi != null) rows.push({ label: "RSI", value: String(point.rsi), color: "#6366f1" });
+
+  return (
+    <div className="rounded-md border border-gray-200 bg-white px-3 py-2 shadow-sm sm:hidden">
+      <div className="text-[11px] font-bold text-gray-800 mb-1.5">{point.label}</div>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+        {rows.map((r) => (
+          <div key={r.label} className="flex items-center justify-between gap-1 text-[11px]">
+            <span className="flex items-center gap-1 text-gray-500">
+              <span className="inline-block h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: r.color }} />
+              {r.label}
+            </span>
+            <span className="font-semibold text-gray-900 tabular-nums">{r.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function PriceLineChart({
   points = [],
   journalLabels,
@@ -40,12 +132,14 @@ export default function PriceLineChart({
   const [showSma50, setShowSma50] = useState<boolean>(true);
   const [showSma200, setShowSma200] = useState<boolean>(true);
   const [showRsi, setShowRsi] = useState<boolean>(false);
+  const isMobile = useIsMobile(640);
+  const [mobilePoint, setMobilePoint] = useState<ActivePoint | null>(null);
 
-  // All hooks must run unconditionally on every render — the "no data yet"
-  // placeholder is rendered conditionally further down instead, not via an
-  // early return before these. (An early return before useMemo here used to
-  // violate React's Hooks rules: the hook count would differ between an
-  // empty-points render and a populated one.)
+  // Clear mobile readout when data set changes (e.g. new coin / range)
+  useEffect(() => {
+    setMobilePoint(null);
+  }, [points]);
+
   const { chartData, fallbackLevels, liveEquilibrium } = useMemo(() => {
     if (points.length === 0) {
       return {
@@ -71,13 +165,6 @@ export default function PriceLineChart({
         sma50: sma50Series[index] ?? undefined,
         sma200: sma200Series[index] ?? undefined,
         rsi: rsiSeries[index] !== null ? Number(rsiSeries[index]?.toFixed(2)) : undefined,
-        // Only preserve a REAL per-point keyLevel if the data actually has
-        // one. Do NOT backfill every historical point with today's static
-        // equilibrium snapshot — nothing downstream reads keyLevel except
-        // the LAST point (see currentKeyLevel below), so backfilling every
-        // row here was pure dead weight, and mixing "real per-point data"
-        // with "synthetic today's-value" under one field name is a latent
-        // bug risk if a future line chart ever plots keyLevel as a series.
         keyLevel: rawKeyLevel !== undefined && rawKeyLevel !== null ? Number(rawKeyLevel) : undefined,
       };
     });
@@ -87,17 +174,42 @@ export default function PriceLineChart({
 
   const support = externalSupport ?? fallbackLevels.support;
   const resistance = externalResistance ?? fallbackLevels.resistance;
-  // The live reference line uses the last point's real keyLevel if the data
-  // provides one, otherwise falls back to the computed equilibrium — this
-  // fallback is applied ONCE, here, not smeared across every historical point.
   const currentKeyLevel: number | undefined =
     (chartData[chartData.length - 1]?.keyLevel as number | undefined) ?? liveEquilibrium;
+
+  const handleChartInteraction = useCallback(
+    (state: any) => {
+      if (!isMobile) return;
+      if (state?.activePayload?.length && state.activeLabel != null) {
+        const row = state.activePayload[0]?.payload ?? {};
+        setMobilePoint({
+          label: String(state.activeLabel),
+          high: row.high,
+          low: row.low,
+          sma20: row.sma20,
+          sma50: row.sma50,
+          sma200: row.sma200,
+          rsi: row.rsi,
+        });
+      }
+    },
+    [isMobile]
+  );
+
+  const clearMobilePoint = useCallback(() => {
+    if (isMobile) setMobilePoint(null);
+  }, [isMobile]);
 
   if (!points || points.length === 0) {
     return (
       <div className="w-full h-72 sm:h-96 flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-200 bg-gray-50/50">
         <svg className="w-8 h-8 text-gray-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z" />
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.5}
+            d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"
+          />
         </svg>
         <span className="text-sm font-medium text-gray-400">Waiting for chart data...</span>
       </div>
@@ -106,9 +218,11 @@ export default function PriceLineChart({
 
   return (
     <div className="w-full flex flex-col gap-3">
-      
-      <div className="flex w-full overflow-x-auto pb-1 -mx-1 px-1 gap-2 scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-        <style dangerouslySetInnerHTML={{__html: `::-webkit-scrollbar { display: none; }`}} />
+      <div
+        className="flex w-full overflow-x-auto pb-1 -mx-1 px-1 gap-2 scrollbar-hide"
+        style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+      >
+        <style dangerouslySetInnerHTML={{ __html: `::-webkit-scrollbar { display: none; }` }} />
         <IndicatorPill active={showSma20} onClick={() => setShowSma20(!showSma20)} color="amber" label="20 SMA" />
         <IndicatorPill active={showSma50} onClick={() => setShowSma50(!showSma50)} color="blue" label="50 SMA" />
         <IndicatorPill active={showSma200} onClick={() => setShowSma200(!showSma200)} color="purple" label="200 SMA" />
@@ -117,19 +231,23 @@ export default function PriceLineChart({
 
       <div className="h-64 sm:h-96 w-full -ml-2 sm:ml-0">
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={chartData} >
+          <ComposedChart
+            data={chartData}
+            onMouseMove={(state) => handleChartInteraction(state)}
+            onMouseLeave={() => clearMobilePoint()}
+          >
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-            
-            <XAxis 
-              dataKey="label" 
-              stroke="#9ca3af" 
-              fontSize={10} 
-              tickLine={false} 
+
+            <XAxis
+              dataKey="label"
+              stroke="#9ca3af"
+              fontSize={10}
+              tickLine={false}
               axisLine={false}
               minTickGap={20}
             />
-            
-<YAxis
+
+            <YAxis
               orientation="right"
               stroke="#9ca3af"
               fontSize={10}
@@ -137,101 +255,137 @@ export default function PriceLineChart({
               tickLine={false}
               axisLine={false}
               tickFormatter={(val) => {
-                if (window.innerWidth < 640 && val >= 1000) {
+                if (typeof window !== "undefined" && window.innerWidth < 640 && val >= 1000) {
                   return `${(val / 1000).toFixed(0)}k`;
                 }
                 return formatPhp(val);
               }}
               domain={["auto", "auto"]}
             />
-            
-            <Tooltip
-              contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-              formatter={(value: any, name: string) => [
-                value !== undefined ? (name === "RSI" ? value : formatPhp(Number(value))) : "N/A",
-                name.toUpperCase(),
-              ]}
-              labelStyle={{ color: "#6b7280", fontSize: '12px', marginBottom: '4px' }}
-            />
 
-            {showHigh && <Line type="monotone" dataKey="high" stroke="#22c55e" strokeWidth={1.5} dot={false} name="High" />}
-            {showLow && <Line type="monotone" dataKey="low" stroke="#ef4444" strokeWidth={1.5} dot={false} name="Low" />}
-            {showSma20 && <Line type="monotone" dataKey="sma20" stroke="#f59e0b" strokeWidth={1.5} dot={false} name="20 SMA" />}
-            {showSma50 && <Line type="monotone" dataKey="sma50" stroke="#3b82f6" strokeWidth={1.5} dot={false} name="50 SMA" />}
-            {showSma200 && <Line type="monotone" dataKey="sma200" stroke="#a855f7" strokeWidth={1.5} strokeDasharray="4 4" dot={false} name="200 SMA" />}
+            {/* Desktop: floating tooltip. Mobile: cursor only — values live in the strip below. */}
+            {isMobile ? (
+              <Tooltip
+                content={() => null}
+                cursor={{ stroke: "#94a3b8", strokeWidth: 1, strokeDasharray: "4 4" }}
+              />
+            ) : (
+              <Tooltip
+                content={<DesktopTooltipContent />}
+                cursor={{ stroke: "#94a3b8", strokeWidth: 1, strokeDasharray: "4 4" }}
+              />
+            )}
+
+            {showHigh && (
+              <Line type="monotone" dataKey="high" stroke="#22c55e" strokeWidth={1.5} dot={false} name="High" />
+            )}
+            {showLow && (
+              <Line type="monotone" dataKey="low" stroke="#ef4444" strokeWidth={1.5} dot={false} name="Low" />
+            )}
+            {showSma20 && (
+              <Line type="monotone" dataKey="sma20" stroke="#f59e0b" strokeWidth={1.5} dot={false} name="20 SMA" />
+            )}
+            {showSma50 && (
+              <Line type="monotone" dataKey="sma50" stroke="#3b82f6" strokeWidth={1.5} dot={false} name="50 SMA" />
+            )}
+            {showSma200 && (
+              <Line
+                type="monotone"
+                dataKey="sma200"
+                stroke="#a855f7"
+                strokeWidth={1.5}
+                strokeDasharray="4 4"
+                dot={false}
+                name="200 SMA"
+              />
+            )}
 
             {showKeyLevels && currentKeyLevel !== undefined && (
-              <ReferenceLine 
-                y={currentKeyLevel} 
-                stroke="#8b5cf6" 
-                strokeWidth={1} 
+              <ReferenceLine
+                y={currentKeyLevel}
+                stroke="#8b5cf6"
+                strokeWidth={1}
                 strokeOpacity={0.7}
-                strokeDasharray="4 4" 
-                label={{ 
-                  value: `Key Level: ${formatPhp(currentKeyLevel)}`, 
-                  fill: "#8b5cf6", 
-                  fontSize: 10, 
-                  position: "insideTopLeft" 
-                }} 
+                strokeDasharray="4 4"
+                label={{
+                  value: `Key Level: ${formatPhp(currentKeyLevel)}`,
+                  fill: "#8b5cf6",
+                  fontSize: 10,
+                  position: "insideTopLeft",
+                }}
               />
             )}
 
             {showBreakEven && breakEvenPrice != null && (
-              <ReferenceLine 
-                y={breakEvenPrice} 
-                stroke="#3b82f6" 
-                strokeDasharray="3 3" 
-                label={{ 
-                  value: `Break Even: ${formatPhp(breakEvenPrice)}`, 
-                  fill: "#3b82f6", 
-                  fontSize: 10, 
-                  position: "insideTopLeft" 
-                }} 
+              <ReferenceLine
+                y={breakEvenPrice}
+                stroke="#3b82f6"
+                strokeDasharray="3 3"
+                label={{
+                  value: `Break Even: ${formatPhp(breakEvenPrice)}`,
+                  fill: "#3b82f6",
+                  fontSize: 10,
+                  position: "insideTopLeft",
+                }}
               />
             )}
-            
+
             {resistance && (
-              <ReferenceLine 
-                y={resistance} 
-                stroke="#ef4444" 
-                strokeWidth={1} 
-                strokeOpacity={0.5} 
-                strokeDasharray="4 4" 
-                label={{ 
-                  value: `Resistance: ${formatPhp(resistance)}`, 
-                  fill: "#ef4444", 
-                  fontSize: 10, 
-                  position: "insideBottomLeft" 
-                }} 
+              <ReferenceLine
+                y={resistance}
+                stroke="#ef4444"
+                strokeWidth={1}
+                strokeOpacity={0.5}
+                strokeDasharray="4 4"
+                label={{
+                  value: `Resistance: ${formatPhp(resistance)}`,
+                  fill: "#ef4444",
+                  fontSize: 10,
+                  position: "insideBottomLeft",
+                }}
               />
             )}
-            
+
             {support && (
-              <ReferenceLine 
-                y={support} 
-                stroke="#10b981" 
-                strokeWidth={1} 
-                strokeOpacity={0.5} 
-                strokeDasharray="4 4" 
-                label={{ 
-                  value: `Support: ${formatPhp(support)}`, 
-                  fill: "#10b981", 
-                  fontSize: 10, 
-                  position: "insideTopLeft" 
-                }} 
+              <ReferenceLine
+                y={support}
+                stroke="#10b981"
+                strokeWidth={1}
+                strokeOpacity={0.5}
+                strokeDasharray="4 4"
+                label={{
+                  value: `Support: ${formatPhp(support)}`,
+                  fill: "#10b981",
+                  fontSize: 10,
+                  position: "insideTopLeft",
+                }}
               />
             )}
           </ComposedChart>
         </ResponsiveContainer>
       </div>
 
+      {/* Mobile-only: values sit under the chart so the plot stays visible */}
+      {isMobile && <MobileReadout point={mobilePoint} />}
+
       {showRsi && (
         <div className="h-20 sm:h-28 w-full -ml-2 sm:ml-0 mt-1">
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartData} >
+            <ComposedChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-              <YAxis orientation="right" domain={[0, 100]} ticks={[30, 70]} stroke="#9ca3af" fontSize={9} tickLine={false} axisLine={false} width={55} />
-              <Tooltip formatter={(value: any) => [value ?? "N/A", "RSI"]} labelStyle={{ display: 'none' }} />
+              <YAxis
+                orientation="right"
+                domain={[0, 100]}
+                ticks={[30, 70]}
+                stroke="#9ca3af"
+                fontSize={9}
+                tickLine={false}
+                axisLine={false}
+                width={55}
+              />
+              {!isMobile && (
+                <Tooltip formatter={(value: any) => [value ?? "N/A", "RSI"]} labelStyle={{ display: "none" }} />
+              )}
               <ReferenceLine y={70} stroke="#ef4444" strokeOpacity={0.3} strokeDasharray="3 3" />
               <ReferenceLine y={30} stroke="#10b981" strokeOpacity={0.3} strokeDasharray="3 3" />
               <Line type="monotone" dataKey="rsi" stroke="#6366f1" strokeWidth={1.5} dot={false} name="RSI" />
@@ -243,7 +397,17 @@ export default function PriceLineChart({
   );
 }
 
-function IndicatorPill({ active, onClick, color, label }: { active: boolean, onClick: () => void, color: string, label: string }) {
+function IndicatorPill({
+  active,
+  onClick,
+  color,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  color: string;
+  label: string;
+}) {
   const colorMap: Record<string, string> = {
     amber: active ? "bg-amber-100 text-amber-700 border-amber-300" : "bg-white text-gray-500 border-gray-200",
     blue: active ? "bg-blue-100 text-blue-700 border-blue-300" : "bg-white text-gray-500 border-gray-200",
