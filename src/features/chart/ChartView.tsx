@@ -66,6 +66,10 @@ export default function ChartView() {
       const bBias = b.confluence?.bias ?? "INSUFFICIENT DATA";
       const priorityDiff = BIAS_PRIORITY[aBias] - BIAS_PRIORITY[bBias];
       if (priorityDiff !== 0) return priorityDiff;
+      // Cross / key-level flags first (user priority triage)
+      const aFlags = a.priorityFlags?.length ?? 0;
+      const bFlags = b.priorityFlags?.length ?? 0;
+      if (aFlags !== bFlags) return bFlags - aFlags;
       // Buy-low: among LONGs, near-ladder setups before extended "wait for dip"
       const aExt = a.confluence ? (isLongExtended(a.confluence) ? 1 : 0) : 0;
       const bExt = b.confluence ? (isLongExtended(b.confluence) ? 1 : 0) : 0;
@@ -334,6 +338,25 @@ export default function ChartView() {
                           {(isLongExtended(r.confluence) ||
                             r.confluence.bias.includes("LONG") ||
                             r.confluence.bias.includes("SHORT")) && <br />}
+                          {r.priorityFlags && r.priorityFlags.length > 0 && (
+                            <span className="mt-1 flex flex-wrap gap-1">
+                              {r.priorityFlags.slice(0, 4).map((f) => (
+                                <span
+                                  key={f.id}
+                                  className={`inline-block rounded border px-1 py-0.5 text-[9px] font-bold ${
+                                    f.tone === "bull"
+                                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                      : f.tone === "bear"
+                                      ? "border-rose-200 bg-rose-50 text-rose-800"
+                                      : "border-gray-200 bg-gray-50 text-gray-600"
+                                  }`}
+                                  title="Priority check: SMA cross or key level"
+                                >
+                                  {f.label}
+                                </span>
+                              ))}
+                            </span>
+                          )}
                           <span className="text-gray-400">
                             {new Date(r.scannedAt).toLocaleTimeString("en-US", {
                               timeZone: "Asia/Manila",
@@ -497,6 +520,7 @@ export default function ChartView() {
             ) : (
               <PriceLineChart
                 points={points}
+                intradayPoints={intradayPoints}
                 journalLabels={journalLabelsInView}
                 showHigh={showHigh}
                 showLow={showLow}

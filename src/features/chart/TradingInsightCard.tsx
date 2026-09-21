@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { ChartPoint } from "@/validators/recordSchema";
 import { formatPhp } from "@/lib/format";
 import { computeConfluenceSignal, detectCrossoverEvent, BIAS_BADGE_CLASSES, isLongExtended, type BiasLabel } from "./Technicals";
@@ -46,6 +46,66 @@ const BIAS_STYLES: Record<BiasLabel, { status: string; statusText: string; actio
   },
 };
 
+
+/** Prompt for an agent to double-check entry — technicals + live news/trends (not model memory). */
+export function formatEntryReviewPrompt(
+  symbol: string,
+  confluence: ReturnType<typeof computeConfluenceSignal>,
+  crossoverAlert: string | null
+): string {
+  const c = confluence;
+  const lines: string[] = [];
+  lines.push(`You are a cautious spot-trading reviewer (PHP pairs, buy-low only — no shorting).`);
+  lines.push(`Double-check whether **${symbol}** is reasonable to stage ladder buys right now.`);
+  lines.push(``);
+  lines.push(`## Rules for your answer`);
+  lines.push(`- Start from the technical snapshot below (primary filter for entry timing).`);
+  lines.push(`- You MAY search for current/upcoming news and market trends for this coin or related market.`);
+  lines.push(`- Do NOT rely on your training data or "memory" of headlines — those may be outdated or wrong.`);
+  lines.push(`- Prefer fresh search results; if you cannot verify a claim, say so explicitly.`);
+  lines.push(`- Do NOT invent news. Unverified or speculative headlines should not drive a READY verdict.`);
+  lines.push(`- If technicals are thin or price is extended above the ladder, lean WAIT even if news is bullish.`);
+  lines.push(`- Prefer pullbacks into the entry ladder over chasing.`);
+  lines.push(``);
+  lines.push(`## Snapshot`);
+  lines.push(`- Bias: **${c.bias}** (score ${c.score >= 0 ? "+" : ""}${c.score}/±${c.maxPossibleScore}, ${(c.confidence * 100).toFixed(0)}% data confidence)`);
+  lines.push(`- Macro: ${c.macroTrend}${c.isCounterTrend ? " — COUNTER-TREND vs short-term bias" : ""}`);
+  lines.push(`- Price: ${c.currentPrice} | Support: ${c.support} | Resistance: ${c.resistance}`);
+  if (c.invalidationLevel != null) lines.push(`- Invalidation / stop reference: ~${c.invalidationLevel}`);
+  if (c.liquiditySweep) {
+    lines.push(
+      `- Liquidity sweep: ${c.liquiditySweep.type} · level ${c.liquiditySweep.sweptLevel} (extreme ${c.liquiditySweep.extremePrice}, ${c.liquiditySweep.daysAgo}d ago)`
+    );
+  }
+  if (c.divergence) lines.push(`- RSI divergence hint: ${c.divergence} (not standalone)`);
+  if (crossoverAlert) lines.push(`- Event: ${crossoverAlert}`);
+  lines.push(`- Signal confluence:`);
+  for (const s of c.signals) {
+    if (!s.available) continue;
+    lines.push(`  - ${s.name}: ${s.detail}${s.weight !== 0 ? ` (${s.weight > 0 ? "+" : ""}${s.weight})` : ""}`);
+  }
+  if (c.entrySuggestion) {
+    lines.push(`- Entry ladder:`);
+    for (const lvl of c.entrySuggestion.ladder) {
+      lines.push(`  - ~${lvl.price} (${lvl.basis}) — ${lvl.allocationPct}%`);
+    }
+    lines.push(`  Note: ${c.entrySuggestion.note}`);
+  }
+  if (c.exitSuggestion) {
+    lines.push(`- Target ~${c.exitSuggestion.price}: ${c.exitSuggestion.note}`);
+  }
+  if (c.invalidationNote) lines.push(`- Invalidation detail: ${c.invalidationNote}`);
+  lines.push(``);
+  lines.push(`## Respond with`);
+  lines.push(`1. Verdict: READY TO STAGE / WAIT FOR PULLBACK / SKIP`);
+  lines.push(`2. Why (up to 3 bullets on technicals + up to 2 on verified news/trends, if any)`);
+  lines.push(`3. If staging: which ladder tranche(s) and what invalidates the idea`);
+  lines.push(`4. Risk note for a spot buyer who does not short`);
+  lines.push(`5. News caveat: list only items you actually found via search (or write "none verified")`);
+  return lines.join("\n");
+}
+
+
 export default function TradingInsightCard({
   points,
   symbol,
@@ -55,6 +115,8 @@ export default function TradingInsightCard({
   currentPrice,
   intradayPoints,
 }: TradingInsightCardProps) {
+  const [agentCopied, setAgentCopied] = useState(false);
+
   const result = useMemo(() => {
     if (!symbol || points.length === 0) return null;
     const confluence = computeConfluenceSignal(points, { support, resistance, currentPrice, intradayPoints });
@@ -75,13 +137,28 @@ export default function TradingInsightCard({
   const style = BIAS_STYLES[confluence.bias];
   const isInsufficient = confluence.bias === "INSUFFICIENT DATA";
 
+  const handleCopyAgentPrompt = () => {
+    const prompt = formatEntryReviewPrompt(symbol, confluence, crossoverAlert);
+    navigator.clipboard.writeText(prompt);
+    setAgentCopied(true);
+    setTimeout(() => setAgentCopied(false), 2000);
+  };
+
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
       <div className="mb-3 flex items-center justify-between flex-wrap gap-2">
         <h3 className="text-sm font-semibold text-gray-900">
           Spot Trading Insights <span className="text-brand-600">({symbol}/PHP)</span>
         </h3>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={handleCopyAgentPrompt}
+            title="Copy a review prompt for an agent (technicals only — no news search)"
+            className="rounded-md border border-gray-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
+          >
+            {agentCopied ? "✅ Copied agent prompt" : "📋 Copy for agent review"}
+          </button>
           <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold ${BIAS_BADGE_CLASSES[confluence.bias]}`}>
             BIAS: {confluence.bias}
           </span>

@@ -378,6 +378,69 @@ export function detectCrossoverEvent(points: ChartPoint[]): string | null {
   return null;
 }
 
+/** Compact priority tags for Watchlist Scan cards — SMA crosses + key-level position. */
+export type PriorityFlag = {
+  id: string;
+  label: string;
+  tone: "bull" | "bear" | "neutral";
+};
+
+export function getScanPriorityFlags(
+  points: ChartPoint[],
+  opts?: { support?: number | null; resistance?: number | null; currentPrice?: number | null }
+): PriorityFlag[] {
+  const flags: PriorityFlag[] = [];
+  if (!points.length) return flags;
+
+  const currentPrice =
+    opts?.currentPrice != null ? opts.currentPrice : getEffectivePrice(points[points.length - 1]);
+  const support = opts?.support ?? getSupportResistance(points, 30).support;
+  const resistance = opts?.resistance ?? getSupportResistance(points, 30).resistance;
+
+  const sma50 = calculateSMAAt(points, 50, 0);
+  const sma200 = calculateSMAAt(points, 200, 0);
+  const prevSma50 = calculateSMAAt(points, 50, 1);
+  const prevSma200 = calculateSMAAt(points, 200, 1);
+  if (prevSma50 != null && prevSma200 != null && sma50 != null && sma200 != null) {
+    if (prevSma50 <= prevSma200 && sma50 > sma200)
+      flags.push({ id: "golden", label: "Golden cross", tone: "bull" });
+    if (prevSma50 >= prevSma200 && sma50 < sma200)
+      flags.push({ id: "death", label: "Death cross", tone: "bear" });
+  }
+
+  const sma20 = calculateSMAAt(points, 20, 0);
+  const prevSma20 = calculateSMAAt(points, 20, 1);
+  if (prevSma20 != null && prevSma50 != null && sma20 != null && sma50 != null) {
+    if (prevSma20 <= prevSma50 && sma20 > sma50)
+      flags.push({ id: "mom_up", label: "20>50 cross", tone: "bull" });
+    if (prevSma20 >= prevSma50 && sma20 < sma50)
+      flags.push({ id: "mom_dn", label: "20<50 cross", tone: "bear" });
+  }
+
+  if (points.length >= 21 && sma20 != null && prevSma20 != null) {
+    const prevPrice = getEffectivePrice(points[points.length - 2]);
+    if (prevPrice <= prevSma20 && currentPrice > sma20)
+      flags.push({ id: "px_above_20", label: "Price > 20 SMA", tone: "bull" });
+    if (prevPrice >= prevSma20 && currentPrice < sma20)
+      flags.push({ id: "px_below_20", label: "Price < 20 SMA", tone: "bear" });
+  }
+
+  const rsi = calculateRSIAt(points, 14);
+  if (rsi != null && rsi <= 30) flags.push({ id: "rsi_os", label: `RSI ${rsi.toFixed(0)} OS`, tone: "bull" });
+  if (rsi != null && rsi >= 70) flags.push({ id: "rsi_ob", label: `RSI ${rsi.toFixed(0)} OB`, tone: "bear" });
+
+  const range = resistance - support;
+  if (range > 0) {
+    const pos = (currentPrice - support) / range;
+    if (currentPrice < support) flags.push({ id: "below_sup", label: "Below support", tone: "bear" });
+    else if (currentPrice > resistance) flags.push({ id: "above_res", label: "Above resistance", tone: "bull" });
+    else if (pos <= 0.25) flags.push({ id: "near_sup", label: "Near support", tone: "bull" });
+    else if (pos >= 0.75) flags.push({ id: "near_res", label: "Near resistance", tone: "bear" });
+  }
+
+  return flags;
+}
+
 // ---------------------------------------------------------------------------
 // Confluence scoring engine — replaces the old OR-chained tradeBias logic.
 //

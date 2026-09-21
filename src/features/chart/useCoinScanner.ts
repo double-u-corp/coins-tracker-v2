@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import type { ChartPoint, CoinSummary } from "@/validators/recordSchema";
-import { computeConfluenceSignal, isLongExtended, type ConfluenceResult } from "./Technicals";
+import { computeConfluenceSignal, isLongExtended, getScanPriorityFlags, type ConfluenceResult, type PriorityFlag } from "./Technicals";
 
 export interface ScanResult {
   symbol: string;
@@ -10,6 +10,8 @@ export interface ScanResult {
   /** Always 0 — scan-log / streak API removed; field kept so UI stays compatible. */
   streak: number;
   scannedAt: string; // ISO timestamp, captured at the moment this coin's scan completed
+  /** SMA crosses / key-level tags for priority triage on scan cards. */
+  priorityFlags: PriorityFlag[];
 }
 
 // Fetch a bounded number of coins at once rather than firing one request per
@@ -85,6 +87,14 @@ export function useCoinScanner(allCoins: CoinSummary[]) {
             points.length > 0
               ? computeConfluenceSignal(points, { currentPrice: coin.currentPrice, intradayPoints })
               : null;
+          const priorityFlags =
+            points.length > 0
+              ? getScanPriorityFlags(points, {
+                  currentPrice: coin.currentPrice,
+                  support: confluence?.support,
+                  resistance: confluence?.resistance,
+                })
+              : [];
           results.push({
             symbol: coin.symbol,
             name: coin.name,
@@ -92,6 +102,7 @@ export function useCoinScanner(allCoins: CoinSummary[]) {
             error: null,
             streak: 0,
             scannedAt: new Date().toISOString(),
+            priorityFlags,
           });
         } catch (err) {
           results.push({
@@ -101,6 +112,7 @@ export function useCoinScanner(allCoins: CoinSummary[]) {
             error: (err as Error).message,
             streak: 0,
             scannedAt: new Date().toISOString(),
+            priorityFlags: [],
           });
         }
         setScanProgress((prev) => ({ ...prev, completed: prev.completed + 1 }));
