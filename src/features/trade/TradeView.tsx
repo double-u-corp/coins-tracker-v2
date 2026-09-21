@@ -1,21 +1,9 @@
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import Dropdown from "@/components/Dropdown";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp, formatCoinAmount } from "@/lib/format";
 import { useTradeLogic, TradeType } from "./useTradeLogic";
-import TradeTimelineChart from "./TradeTimelineChart";
-import {
-  ResponsiveContainer,
-  ComposedChart,
-  Line,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-  Legend,
-  ReferenceLine,
-} from "recharts";
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -85,26 +73,33 @@ export default function TradeView() {
   const isCashFlow = type === "deposit" || type === "withdraw";
   const [txFilter, setTxFilter] = useState<"all" | "buy" | "sell" | "deposit" | "withdraw">("all");
   const [txCoinFilter, setTxCoinFilter] = useState<string>("all");
-  const [analyticsView, setAnalyticsView] = useState<"table" | "chart">("table");
-  const [timelineSymbol, setTimelineSymbol] = useState<string>("");
+  const [analyticsFilter, setAnalyticsFilter] = useState<"all" | "underwater" | "in_profit" | "holdings">("all");
+  const [analyticsSort, setAnalyticsSort] = useState<"underwater" | "unrealized_pct" | "realized">("underwater");
 
-  // Default timeline coin: first analytics row or first portfolio coin
-  const timelineCoinOptions = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const c of coinAnalytics) {
-      if (c.totalBoughtPhp > 0 || c.holdings > 0) map.set(c.symbol, c.name);
-    }
-    for (const t of transactions) {
-      if (t.symbol && t.symbol !== "PHP") map.set(t.symbol, t.name || t.symbol);
-    }
-    return Array.from(map.entries())
-      .map(([value, name]) => ({ value, label: `${name} (${value})` }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [coinAnalytics, transactions]);
+  const filteredAnalytics = useMemo(() => {
+    let rows = [...coinAnalytics];
+    if (analyticsFilter === "underwater") rows = rows.filter((c) => c.isUnderwater);
+    else if (analyticsFilter === "in_profit")
+      rows = rows.filter((c) => c.isInProfitOpen || (c.holdings <= 0 && c.realizedPnl > 0));
+    else if (analyticsFilter === "holdings") rows = rows.filter((c) => c.holdings > 0);
 
-  // Pick default once options exist
-  const effectiveTimelineSymbol = timelineSymbol || timelineCoinOptions[0]?.value || "";
-
+    rows.sort((a, b) => {
+      if (analyticsSort === "underwater") {
+        const au = a.daysUnderwater ?? -1;
+        const bu = b.daysUnderwater ?? -1;
+        if (bu !== au) return bu - au;
+        return (b.daysSinceFirstBuy ?? 0) - (a.daysSinceFirstBuy ?? 0);
+      }
+      if (analyticsSort === "unrealized_pct") {
+        const ap = a.unrealizedPct ?? -9999;
+        const bp = b.unrealizedPct ?? -9999;
+        return ap - bp; // most negative first (pain first)
+      }
+      // realized
+      return b.realizedPnl - a.realizedPnl;
+    });
+    return rows;
+  }, [coinAnalytics, analyticsFilter, analyticsSort]);
 
   const filteredTransactions = useMemo(() => {
     return transactions.filter((t) => {
@@ -118,86 +113,6 @@ export default function TradeView() {
       return t.symbol === txCoinFilter;
     });
   }, [transactions, txFilter, txCoinFilter]);
-
-  /** Cumulative realized P&L over time (from sells) for the line chart. */
-  const cumulativePnlSeries = useMemo(() => {
-    const sells = transactions
-      .filter((t) => t.type.toLowerCase() === "sell" && t.symbol && t.symbol !== "PHP")
-      .sort((a, b) => new Date(a.transactedAt).getTime() - new Date(b.transactedAt).getTime());
-
-    // Rebuild running realized using same average-cost idea as analytics
-    const lots = new Map<string, { units: number; cost: number }>();
-    let cumulative = 0;
-    const points: { label: string; cumulativePnl: number; realizedThis: number; symbol: string }[] = [];
-
-    for (const t of sells) {
-      const coins = Number(t.coinAmount) || 0;
-      const php = Number(t.phpAmount) || 0;
-      if (coins <= 0) continue;
-      let lot = lots.get(t.symbol);
-      if (!lot) {
-        lot = { units: 0, cost: 0 };
-        lots.set(t.symbol, lot);
-      }
-      // Apply prior buys up to this sell by scanning all txs is heavy; use analytics realized total shape:
-      // Approximate: cost basis from proportional net — better walk all txs once
-    }
-
-    // Full chronological walk
-    const sorted = [...transactions]
-      .filter((t) => t.symbol && t.symbol !== "PHP")
-      .sort((a, b) => new Date(a.transactedAt).getTime() - new Date(b.transactedAt).getTime());
-
-    lots.clear();
-    cumulative = 0;
-    for (const t of sorted) {
-      const ty = t.type.toLowerCase();
-      if (ty !== "buy" && ty !== "sell") continue;
-      const coins = Number(t.coinAmount) || 0;
-      const php = Number(t.phpAmount) || 0;
-      let lot = lots.get(t.symbol);
-      if (!lot) {
-        lot = { units: 0, cost: 0 };
-        lots.set(t.symbol, lot);
-      }
-      if (ty === "buy" && coins > 0) {
-        lot.units += coins;
-        lot.cost += php;
-      } else if (ty === "sell" && coins > 0) {
-        const avg = lot.units > 0 ? lot.cost / lot.units : 0;
-        const sold = Math.min(coins, lot.units > 0 ? lot.units : coins);
-        const realized = php - avg * sold;
-        lot.units = Math.max(0, lot.units - sold);
-        lot.cost = Math.max(0, lot.cost - avg * sold);
-        if (lot.units < 1e-12) {
-          lot.units = 0;
-          lot.cost = 0;
-        }
-        cumulative += realized;
-        const d = new Date(t.transactedAt);
-        points.push({
-          label: d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" }),
-          cumulativePnl: Math.round(cumulative * 100) / 100,
-          realizedThis: Math.round(realized * 100) / 100,
-          symbol: t.symbol,
-        });
-      }
-    }
-    return points;
-  }, [transactions]);
-
-  /** Per-coin bars: realized + unrealized for chart view. */
-  const perCoinChartData = useMemo(() => {
-    return coinAnalytics
-      .filter((c) => c.totalBoughtPhp > 0 || c.holdings > 0)
-      .map((c) => ({
-        symbol: c.symbol.replace(/PHP$/i, ""),
-        realized: Math.round(c.realizedPnl * 100) / 100,
-        unrealized: c.unrealizedPnl != null ? Math.round(c.unrealizedPnl * 100) / 100 : 0,
-        daysHeld: c.daysSinceFirstBuy ?? 0,
-        daysUnderwater: c.isUnderwater ? c.daysUnderwater ?? 0 : 0,
-      }));
-  }, [coinAnalytics]);
 
   const txCoinOptions = useMemo(() => {
     const set = new Map<string, string>();
@@ -529,29 +444,7 @@ export default function TradeView() {
       </section>
 
       <section>
-        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold text-gray-900">Profit &amp; patience</h2>
-          <div className="flex rounded-lg border border-gray-200 bg-gray-50 p-1">
-            <button
-              type="button"
-              onClick={() => setAnalyticsView("table")}
-              className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
-                analyticsView === "table" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              Table
-            </button>
-            <button
-              type="button"
-              onClick={() => setAnalyticsView("chart")}
-              className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
-                analyticsView === "chart" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              Chart
-            </button>
-          </div>
-        </div>
+        <h2 className="mb-1 text-lg font-semibold text-gray-900">Profit &amp; patience</h2>
         <p className="mb-3 text-xs text-gray-500">
           Realized = locked in on sells. Unrealized = on-hand vs average cost. “Taking long” = days underwater while still holding.
         </p>
@@ -614,113 +507,53 @@ export default function TradeView() {
                     ? `${analyticsSummary.longestUnderwater.daysUnderwater}d · ${analyticsSummary.underwaterCount} coin(s) underwater`
                     : `${analyticsSummary.underwaterCount} coin(s) underwater`}
                 </p>
+                {analyticsSummary.longestUnderwater && (
+                  <p className="mt-2 text-[11px] font-medium text-amber-900/90 leading-snug">
+                    {analyticsSummary.longestUnderwater.symbol} underwater{" "}
+                    {analyticsSummary.longestUnderwater.daysUnderwater ?? "?"}d — wait for ladder, don’t average blindly.
+                  </p>
+                )}
               </div>
             </div>
 
-            {analyticsView === "chart" ? (
-              <div className="space-y-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <label className="text-xs font-semibold text-gray-600">Timeline coin</label>
-                  <select
-                    value={effectiveTimelineSymbol}
-                    onChange={(e) => setTimelineSymbol(e.target.value)}
-                    className="rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 p-1">
+                {(
+                  [
+                    ["all", "All"],
+                    ["holdings", "Has holdings"],
+                    ["underwater", "Underwater"],
+                    ["in_profit", "In profit"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setAnalyticsFilter(value)}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                      analyticsFilter === value
+                        ? "bg-white text-gray-900 shadow-sm"
+                        : "text-gray-500 hover:text-gray-700"
+                    }`}
                   >
-                    {timelineCoinOptions.length === 0 ? (
-                      <option value="">No traded coins</option>
-                    ) : (
-                      timelineCoinOptions.map((c) => (
-                        <option key={c.value} value={c.value}>
-                          {c.label}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
-
-                {effectiveTimelineSymbol ? (
-                  <TradeTimelineChart
-                    symbol={effectiveTimelineSymbol}
-                    name={timelineCoinOptions.find((c) => c.value === effectiveTimelineSymbol)?.label}
-                    transactions={transactions}
-                  />
-                ) : (
-                  <p className="rounded-lg border border-dashed border-gray-200 bg-gray-50 py-8 text-center text-sm text-gray-500">
-                    Record a buy/sell to see a trade timeline.
-                  </p>
-                )}
-
-                <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-                  <h3 className="mb-1 text-sm font-semibold text-gray-900">Cumulative realized P&amp;L</h3>
-                  <p className="mb-3 text-[11px] text-gray-400">Running total after each sell (average-cost basis)</p>
-                  {cumulativePnlSeries.length === 0 ? (
-                    <p className="py-8 text-center text-sm text-gray-500">No sells yet — chart appears after you take profit or cut a position.</p>
-                  ) : (
-                    <div className="h-64 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <ComposedChart data={cumulativePnlSeries}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                          <XAxis dataKey="label" tick={{ fontSize: 10 }} stroke="#9ca3af" minTickGap={24} />
-                          <YAxis
-                            tick={{ fontSize: 10 }}
-                            stroke="#9ca3af"
-                            width={52}
-                            tickFormatter={(v) => (Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v))}
-                          />
-                          <Tooltip
-                            formatter={(value: number, name: string) => [
-                              formatPhp(value),
-                              name === "cumulativePnl" ? "Cumulative realized" : "This sell",
-                            ]}
-                            labelFormatter={(_, payload) => {
-                              const row = payload?.[0]?.payload;
-                              return row ? `${row.label} · ${row.symbol}` : "";
-                            }}
-                          />
-                          <ReferenceLine y={0} stroke="#d1d5db" />
-                          <Line
-                            type="monotone"
-                            dataKey="cumulativePnl"
-                            name="cumulativePnl"
-                            stroke="#059669"
-                            strokeWidth={2}
-                            dot={{ r: 3 }}
-                          />
-                        </ComposedChart>
-                      </ResponsiveContainer>
-                    </div>
-                  )}
-                </div>
-
-                <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-                  <h3 className="mb-1 text-sm font-semibold text-gray-900">Per-coin P&amp;L</h3>
-                  <p className="mb-3 text-[11px] text-gray-400">Realized (sells) vs unrealized (on-hand)</p>
-                  {perCoinChartData.length === 0 ? (
-                    <p className="py-8 text-center text-sm text-gray-500">No coin history yet.</p>
-                  ) : (
-                    <div className="h-72 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <ComposedChart data={perCoinChartData} margin={{ bottom: 8 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                          <XAxis dataKey="symbol" tick={{ fontSize: 10 }} stroke="#9ca3af" interval={0} angle={-25} textAnchor="end" height={50} />
-                          <YAxis
-                            tick={{ fontSize: 10 }}
-                            stroke="#9ca3af"
-                            width={52}
-                            tickFormatter={(v) => (Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v))}
-                          />
-                          <Tooltip formatter={(value: number, name: string) => [formatPhp(value), name]} />
-                          <Legend wrapperStyle={{ fontSize: 12 }} />
-                          <ReferenceLine y={0} stroke="#d1d5db" />
-                          <Bar dataKey="realized" name="Realized" fill="#059669" radius={[4, 4, 0, 0]} />
-                          <Bar dataKey="unrealized" name="Unrealized" fill="#2563eb" radius={[4, 4, 0, 0]} />
-                        </ComposedChart>
-                      </ResponsiveContainer>
-                    </div>
-                  )}
-                </div>
+                    {label}
+                  </button>
+                ))}
               </div>
-            ) : (
+              <label className="flex items-center gap-1.5 text-xs text-gray-600">
+                <span className="font-medium">Sort</span>
+                <select
+                  value={analyticsSort}
+                  onChange={(e) => setAnalyticsSort(e.target.value as typeof analyticsSort)}
+                  className="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 shadow-sm"
+                >
+                  <option value="underwater">Days underwater</option>
+                  <option value="unrealized_pct">Unrealized %</option>
+                  <option value="realized">Realized P&amp;L</option>
+                </select>
+              </label>
+            </div>
+
             <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
@@ -735,18 +568,31 @@ export default function TradeView() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {coinAnalytics.length === 0 ? (
+                  {filteredAnalytics.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-3 py-3 text-center text-sm text-gray-500">
-                        No coin trade history yet.
+                      <td colSpan={8} className="px-3 py-3 text-center text-sm text-gray-500">
+                        {coinAnalytics.length === 0
+                          ? "No coin trade history yet."
+                          : "No coins match this filter."}
                       </td>
                     </tr>
                   ) : (
-                    coinAnalytics.map((c) => (
+                    filteredAnalytics.map((c) => (
                       <tr key={c.symbol} className="hover:bg-gray-50">
                         <td className="px-3 py-2.5 text-sm font-medium text-gray-900">
-                          {c.name}{" "}
-                          <span className="text-gray-400">({c.symbol})</span>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span>
+                              {c.name}{" "}
+                              <span className="text-gray-400">({c.symbol})</span>
+                            </span>
+                            <Link
+                              href={`/chart?symbol=${encodeURIComponent(c.symbol)}`}
+                              className="text-[10px] font-semibold text-purple-700 hover:underline whitespace-nowrap"
+                              title="Open on chart page"
+                            >
+                              Open chart
+                            </Link>
+                          </div>
                         </td>
                         <td className="px-3 py-2.5 text-right text-sm text-gray-700">
                           {c.daysSinceFirstBuy != null ? `${c.daysSinceFirstBuy}d` : "—"}
@@ -811,7 +657,6 @@ export default function TradeView() {
                 </tbody>
               </table>
             </div>
-            )}
           </>
         )}
       </section>
