@@ -34,14 +34,14 @@ export interface CoinOption {
   currentPrice?: number | null;
 }
 
-export type ChartRange = "1m" | "3m" | "6m" | "1y" | "3y";
+export type ChartRange = "1m" | "3m" | "6m" | "1y" | "2y";
 
 const RANGE_MONTHS_MAP: Record<ChartRange, number> = {
   "1m": 1,
   "3m": 3,
   "6m": 6,
   "1y": 12,
-  "3y": 36,
+  "2y": 24,
 };
 
 export function useChartLogic() {

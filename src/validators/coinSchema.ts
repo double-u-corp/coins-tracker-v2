@@ -63,8 +63,15 @@ export const monthQuerySchema = z
   .string()
   .regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Month must be in YYYY-MM format");
 
-/** Validates the `years` query param for the chart page — 1 to 5, matching the retention window. */
-export const chartYearsQuerySchema = z.coerce.number().int().min(1).max(5);
+/** Validates the `years` query param for the chart page. Accepts fractional
+ * values — the 1M/3M/6M range buttons send fractional years (0.08/0.25/0.50),
+ * so "years" here is a UI-level unit, not a literal whole-calendar-year
+ * count. The previous `.int().min(1)` rejected every sub-1 value outright,
+ * which is exactly why 1M/3M/6M 400'd while 1Y/3Y (whole numbers) passed.
+ * The downstream cutoff calculation in coins.ts is plain millisecond
+ * arithmetic (`years * 365 * 24h`), so it already handles fractional years
+ * correctly — this was purely a validation-layer bug, not a date-math one. */
+export const chartYearsQuerySchema = z.coerce.number().min(0.01).max(5);
 
 /** Validates the `hours` query param for the intraday chart (granularity=3h)
  * — capped at 30 days' worth of hours, which is already generous for

@@ -8,16 +8,31 @@ import prisma from "./prisma";
  * financial record-keeping you'll want long after any reasonable
  * price-history window, not disposable operational data.
  *
- * 3 years is generous for a personal price tracker. At 6 snapshots/day per
- * coin that's roughly 6,500 rows per coin over the full window — trivial
- * for SQLite either way (it handles millions of rows without strain), so
- * this exists as a long-term hygiene safety net rather than because the
- * app is anywhere near a real storage concern. The tradeoff to know about:
- * Calendar/Chart lose detail beyond this window (the Chart page caps its
- * range selector for exactly this reason) — Home's "Recorded
- * High/Low" is unaffected either way (see pruneOldRecords).
+ * Set to 2 years, down from the previous 3. Note this single window has to
+ * satisfy BOTH the daily chart (RSI/SMA/ATR/macro trend, 1Y/3Y range
+ * views) and the intraday swing/ladder feature — Record is currently the
+ * ONLY store for both; handleChart in coins.ts aggregates these same raw
+ * rows into daily/weekly/monthly/yearly bars at request time rather than
+ * reading from a separate persisted daily table. That means Record can't
+ * safely be pruned down to a short window (e.g. 30 days) the way a
+ * "raw intraday checks only" store could — doing so would also delete the
+ * only data the daily chart and its indicators have ever had. If tighter
+ * retention on the intraday-only granularity is wanted later, it requires
+ * first materializing a separate DailyBar table (one row/day/coin,
+ * populated by a cron step) that Record's 3h/intraday reads don't depend
+ * on — only then can Record itself prune more aggressively without
+ * affecting daily history.
+ *
+ * At 6 snapshots/day per coin that's roughly 4,380 rows per coin over this
+ * window — trivial for SQLite either way (it handles millions of rows
+ * without strain), so this exists as a long-term hygiene safety net
+ * rather than because the app is anywhere near a real storage concern.
+ * The tradeoff to know about: Calendar/Chart lose detail beyond this
+ * window (the Chart page caps its range selector for exactly this
+ * reason) — Home's "Recorded High/Low" is unaffected either way (see
+ * pruneOldRecords).
  */
-export const RECORD_RETENTION_MONTHS = 36;
+export const RECORD_RETENTION_MONTHS = 24;
 export const RECORD_RETENTION_DAYS = RECORD_RETENTION_MONTHS * 30;
 
 /**

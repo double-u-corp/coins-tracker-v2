@@ -181,7 +181,7 @@ async function handleChart(
     return res.status(400).json({ error: "A valid `symbol` query param is required" });
   }
   if (!yearsResult.success) {
-    return res.status(400).json({ error: "`years` must be a number between 1 and 5" });
+    return res.status(400).json({ error: "`years` must be a number between 0.01 and 5" });
   }
   if (!granularityResult.success) {
     return res.status(400).json({ error: "`granularity` must be weekly, monthly, or yearly" });
