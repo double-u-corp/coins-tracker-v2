@@ -97,14 +97,14 @@ function MonitoredCoinCard({
 
         </div>
 
-        <button
+        {/* <button
           type="button"
           onClick={() => removeCoin(coin.symbol)}
           disabled={pendingSymbol === coin.symbol}
           className="rounded-md border border-red-200 px-2.5 py-1 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
         >
           {pendingSymbol === coin.symbol ? "…" : "Remove"}
-        </button>
+        </button> */}
       </div>
 
       {/* Target Ranges: Edit / Cancel / Save */}
