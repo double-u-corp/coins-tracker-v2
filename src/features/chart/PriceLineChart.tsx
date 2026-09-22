@@ -240,18 +240,13 @@ export default function PriceLineChart({
 
   return (
     <div className="w-full flex flex-col gap-3">
-      <div
-        className="flex w-full overflow-x-auto pb-2 pt-0.5 gap-2 scrollbar-hide"
-        style={{ scrollbarWidth: "none", msOverflowStyle: "none", WebkitOverflowScrolling: "touch" }}
-      >
-        <style dangerouslySetInnerHTML={{ __html: `::-webkit-scrollbar { display: none; }` }} />
+      {/* Mobile: 3-column grid so every pill is on-screen. sm+: flex wrap. */}
+      <div className="grid grid-cols-3 gap-1.5 sm:flex sm:flex-wrap sm:gap-2 w-full">
         <IndicatorPill active={showSma20} onClick={() => setShowSma20(!showSma20)} color="amber" label="20 SMA" />
         <IndicatorPill active={showSma50} onClick={() => setShowSma50(!showSma50)} color="blue" label="50 SMA" />
         <IndicatorPill active={showSma200} onClick={() => setShowSma200(!showSma200)} color="purple" label="200 SMA" />
         <IndicatorPill active={showRsi} onClick={() => setShowRsi(!showRsi)} color="indigo" label="RSI" />
         <IndicatorPill active={showSwing} onClick={() => setShowSwing(!showSwing)} color="teal" label="Swing" />
-        {/* spacer so last pill is fully visible when scrolled */}
-        <span className="w-3 shrink-0" aria-hidden />
       </div>
 
       <div className="h-64 sm:h-96 w-full -ml-2 sm:ml-0">
@@ -539,7 +534,7 @@ function IndicatorPill({
     <button
       type="button"
       onClick={onClick}
-      className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${colorMap[color]}`}
+      className={`w-full sm:w-auto whitespace-nowrap px-2 py-2 sm:px-3 sm:py-1.5 rounded-lg sm:rounded-full text-[11px] sm:text-xs font-semibold border transition-all text-center leading-tight ${colorMap[color]}`}
     >
       {label}
     </button>

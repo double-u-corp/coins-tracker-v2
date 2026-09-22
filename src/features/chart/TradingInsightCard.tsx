@@ -52,6 +52,45 @@ const BIAS_STYLES: Record<BiasLabel, { status: string; statusText: string; actio
 };
 
 
+
+/** Local pairs are stored as GRAMPHP / VIRTUALPHP — agents need the base crypto ticker. */
+function baseAssetSymbol(symbol: string): string {
+  const s = (symbol || "").trim().toUpperCase();
+  if (s.endsWith("PHP") && s.length > 3) return s.slice(0, -3);
+  return s;
+}
+
+/** Human + search-safe label so GRAM ≠ unit of mass, VIRTUAL ≠ English word, etc. */
+function formatAssetLabel(symbol: string): { base: string; pair: string; label: string } {
+  const pair = (symbol || "").trim().toUpperCase();
+  const base = baseAssetSymbol(pair);
+  const notes: Record<string, string> = {
+    TX: "txEcosystem / Coreum–Sologenic merged token",
+    POL: "Polygon (formerly MATIC)",
+    VIRTUAL: "Virtuals Protocol AI agent token on Base — not the English word “virtual”",
+    SPX: "SPX6900 meme coin — not the S&P 500 index",
+    HYPE: "Hyperliquid token",
+    RON: "Ronin / Axie Infinity token",
+    GRAM: "Telegram/TON-related crypto token — not the unit of mass",
+    UNI: "Uniswap token",
+    LINK: "Chainlink",
+    ENA: "Ethena",
+    XAUT: "Tether Gold",
+    ONDO: "Ondo Finance RWA",
+    SKY: "Sky protocol (MakerDAO-related)",
+    TRUMP: "TRUMP meme coin on Solana — not the person as a news topic alone",
+    SOL: "Solana",
+    SUI: "Sui blockchain",
+    AAVE: "Aave DeFi",
+    BCH: "Bitcoin Cash",
+    XLM: "Stellar",
+    HBAR: "Hedera",
+  };
+  const note = notes[base];
+  const label = note ? `${base} (${note})` : `${base} (crypto token)`;
+  return { base, pair, label };
+}
+
 /** Prompt for agent review — entry if flat, hold/exit if already allocated. */
 export function formatEntryReviewPrompt(
   symbol: string,
@@ -65,6 +104,7 @@ export function formatEntryReviewPrompt(
   } | null
 ): string {
   const c = confluence;
+  const { base, pair, label } = formatAssetLabel(symbol);
   const holdings = activePortfolio?.holdings ?? 0;
   const spent = activePortfolio?.spent ?? 0;
   const isAllocated = holdings > 0;
@@ -83,10 +123,12 @@ export function formatEntryReviewPrompt(
   const lines: string[] = [];
 
   if (isAllocated) {
-    lines.push(`You are reviewing an **open spot LONG** in **${symbol}** (PHP pair).`);
+    lines.push(`You are reviewing an **open spot LONG** in **${label}**.`);
+    lines.push(`Local PHP spot pair symbol in the app: **${pair}** (underlying asset ticker: **${base}**). When searching news, use **${base}** / the crypto project name — not “${pair}” and not non-crypto meanings of “${base}”.`);
     lines.push(`The trader **already holds** this coin. **No shorting. No leverage.** Question: **hold, trim/sell, or wait** — not "should I open a new bag from zero."`);
   } else {
-    lines.push(`You are reviewing a **spot LONG-only** entry for **${symbol}** (PHP pair).`);
+    lines.push(`You are reviewing a **spot LONG-only** entry for **${label}**.`);
+    lines.push(`Local PHP spot pair symbol in the app: **${pair}** (underlying asset ticker: **${base}**). When searching news, use **${base}** / the crypto project name — not “${pair}” and not non-crypto meanings of “${base}”.`);
     lines.push(`The trader does **not** hold this coin yet. **No shorting. No leverage. No margin.** Question: is it reasonable to **stage buy limit orders** on the ladder (or wait)?`);
   }
 
