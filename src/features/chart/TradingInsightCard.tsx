@@ -6,7 +6,12 @@ import { computeConfluenceSignal, detectCrossoverEvent, BIAS_BADGE_CLASSES, isLo
 interface TradingInsightCardProps {
   points: ChartPoint[];
   symbol: string | null;
-  activePortfolio?: { holdings: number; spent: number } | null;
+  activePortfolio?: {
+    holdings: number;
+    spent: number;
+    firstBuyAt?: string | null;
+    daysHeld?: number | null;
+  } | null;
   support?: number | null;
   resistance?: number | null;
   currentPrice?: number | null;
@@ -47,61 +52,156 @@ const BIAS_STYLES: Record<BiasLabel, { status: string; statusText: string; actio
 };
 
 
-/** Prompt for an agent to double-check entry — technicals + live news/trends (not model memory). */
+/** Prompt for agent review — entry if flat, hold/exit if already allocated. */
 export function formatEntryReviewPrompt(
   symbol: string,
   confluence: ReturnType<typeof computeConfluenceSignal>,
-  crossoverAlert: string | null
+  crossoverAlert: string | null,
+  activePortfolio?: {
+    holdings: number;
+    spent: number;
+    firstBuyAt?: string | null;
+    daysHeld?: number | null;
+  } | null
 ): string {
   const c = confluence;
+  const holdings = activePortfolio?.holdings ?? 0;
+  const spent = activePortfolio?.spent ?? 0;
+  const isAllocated = holdings > 0;
+  const avgCost = isAllocated && holdings > 0 ? spent / holdings : null;
+  const unrealized =
+    isAllocated && avgCost != null && c.currentPrice != null
+      ? (c.currentPrice - avgCost) * holdings
+      : null;
+  const unrealizedPct =
+    isAllocated && avgCost != null && avgCost > 0 && c.currentPrice != null
+      ? ((c.currentPrice - avgCost) / avgCost) * 100
+      : null;
+  const daysHeld = activePortfolio?.daysHeld ?? null;
+  const firstBuyAt = activePortfolio?.firstBuyAt ?? null;
+
   const lines: string[] = [];
-  lines.push(`You are a cautious spot-trading reviewer (PHP pairs, buy-low only — no shorting).`);
-  lines.push(`Double-check whether **${symbol}** is reasonable to stage ladder buys right now.`);
+
+  if (isAllocated) {
+    lines.push(`You are reviewing an **open spot LONG** in **${symbol}** (PHP pair).`);
+    lines.push(`The trader **already holds** this coin. **No shorting. No leverage.** Question: **hold, trim/sell, or wait** — not "should I open a new bag from zero."`);
+  } else {
+    lines.push(`You are reviewing a **spot LONG-only** entry for **${symbol}** (PHP pair).`);
+    lines.push(`The trader does **not** hold this coin yet. **No shorting. No leverage. No margin.** Question: is it reasonable to **stage buy limit orders** on the ladder (or wait)?`);
+  }
+
   lines.push(``);
-  lines.push(`## Rules for your answer`);
-  lines.push(`- Start from the technical snapshot below (primary filter for entry timing).`);
-  lines.push(`- You MAY search for current/upcoming news and market trends for this coin or related market.`);
-  lines.push(`- Do NOT rely on your training data or "memory" of headlines — those may be outdated or wrong.`);
-  lines.push(`- Prefer fresh search results; if you cannot verify a claim, say so explicitly.`);
-  lines.push(`- Do NOT invent news. Unverified or speculative headlines should not drive a READY verdict.`);
-  lines.push(`- If technicals are thin or price is extended above the ladder, lean WAIT even if news is bullish.`);
-  lines.push(`- Prefer pullbacks into the entry ladder over chasing.`);
+  lines.push(`## How this technical data is built (important)`);
+  lines.push(`- Price is polled about **8 times per day** (~every 3 hours, Manila schedule).`);
+  lines.push(`- **Daily bar** = that day's high and low (and effective close) from those checks. Used for RSI, SMA 20/50/200, ATR, 30-day support/resistance, and the main confluence score.`);
+  lines.push(`- **Swing / entry ladder** uses the finer **3-hour (8-check) series** over roughly the last 14 days — fractal swing highs/lows, structure, and ladder levels.`);
+  lines.push(`- Bias: LONG = constructive for buyers; SHORT = risk-off / prefer cash (never a short recommendation).`);
+  lines.push(`- Do not assume exchange OHLC 1h/4h candles — this is our poll → daily aggregate + 3h swing series.`);
   lines.push(``);
-  lines.push(`## Snapshot`);
-  lines.push(`- Bias: **${c.bias}** (score ${c.score >= 0 ? "+" : ""}${c.score}/±${c.maxPossibleScore}, ${(c.confidence * 100).toFixed(0)}% data confidence)`);
-  lines.push(`- Macro: ${c.macroTrend}${c.isCounterTrend ? " — COUNTER-TREND vs short-term bias" : ""}`);
-  lines.push(`- Price: ${c.currentPrice} | Support: ${c.support} | Resistance: ${c.resistance}`);
-  if (c.invalidationLevel != null) lines.push(`- Invalidation / stop reference: ~${c.invalidationLevel}`);
+
+  if (isAllocated) {
+    lines.push(`## Position (already allocated)`);
+    lines.push(`- Holdings: ${holdings}`);
+    lines.push(`- Net spent (cost basis proxy): ${spent}`);
+    if (avgCost != null) {
+      lines.push(`- **Break-even / avg cost: ~${avgCost}**`);
+      lines.push(`  - Mark above break-even → selling locks a gain; below → selling realizes a loss.`);
+      lines.push(`  - Prefer trims into strength above break-even; avoid panic sells on noise if thesis still valid.`);
+    }
+    lines.push(`- Mark price (snapshot): ${c.currentPrice}`);
+    if (unrealized != null && unrealizedPct != null) {
+      lines.push(
+        `- Unrealized (approx): ${unrealized >= 0 ? "+" : ""}${unrealized.toFixed(2)} PHP (${unrealizedPct >= 0 ? "+" : ""}${unrealizedPct.toFixed(1)}%)`
+      );
+    }
+    if (daysHeld != null) {
+      lines.push(
+        `- **Days held (since first buy): ${daysHeld}d**${firstBuyAt ? ` (first buy ~${String(firstBuyAt).slice(0, 10)})` : ""}`
+      );
+      lines.push(`  - Long hold underwater with no catalyst → patience or thesis review, not revenge adds.`);
+      lines.push(`  - Short hold + extended into resistance → trims more reasonable than waiting forever.`);
+    }
+    lines.push(`- Use this to judge **trim / full exit / hold** — average-down only if technicals + verified news support it.`);
+    lines.push(``);
+  }
+
+  lines.push(`## Rules`);
+  lines.push(`- Primary filter = technical snapshot below.`);
+  lines.push(`- You MAY search live news/trends; do NOT use training-memory headlines (often stale).`);
+  lines.push(`- Do not invent news. Unverified → say "none verified".`);
+  if (isAllocated) {
+    lines.push(`- **Good verified upcoming catalysts** (listings, unlocks delayed positively, adoption) → lean HOLD or wait a few more days before selling strength.`);
+    lines.push(`- **Bad verified news ahead** (unlock dump, delist risk, exploit, regulatory hit) → lean TRIM or SELL even if price hasn't fully reacted.`);
+    lines.push(`- If technicals are extended into resistance and news is empty/mixed → consider partial take-profit, not FOMO hold.`);
+    lines.push(`- If still underwater and no clear catalyst, prefer patient hold or ladder adds only on weakness — never revenge-buy.`);
+  } else {
+    lines.push(`- SHORT / risk-off bias → hold cash / do not buy (never short).`);
+    lines.push(`- Price extended above the ladder → WAIT FOR PULLBACK over chasing.`);
+    lines.push(`- Thin history or low confidence → lean WAIT or SKIP.`);
+  }
+  lines.push(``);
+  lines.push(`## Technical snapshot`);
+  lines.push(`- Bias: **${c.bias}** (score ${c.score >= 0 ? "+" : ""}${c.score}/±${c.maxPossibleScore}, ${(c.confidence * 100).toFixed(0)}% data)`);
+  lines.push(`- Macro: ${c.macroTrend}${c.isCounterTrend ? " — short-term bias conflicts with macro" : ""}`);
+  lines.push(`- Price now: ${c.currentPrice}`);
+  lines.push(`- Support: ${c.support} | Resistance: ${c.resistance}`);
+  lines.push(
+    `- Swing series: ${c.usedIntradaySwings ? "3h / 8-check intraday" : "daily bars (intraday unavailable)"}`
+  );
+  if (c.invalidationLevel != null) {
+    lines.push(`- Invalidation reference: ~${c.invalidationLevel}`);
+  }
   if (c.liquiditySweep) {
     lines.push(
-      `- Liquidity sweep: ${c.liquiditySweep.type} · level ${c.liquiditySweep.sweptLevel} (extreme ${c.liquiditySweep.extremePrice}, ${c.liquiditySweep.daysAgo}d ago)`
+      `- Liquidity sweep: ${c.liquiditySweep.type} at ${c.liquiditySweep.sweptLevel} (extreme ${c.liquiditySweep.extremePrice}, ${c.liquiditySweep.daysAgo}d ago)`
     );
   }
-  if (c.divergence) lines.push(`- RSI divergence hint: ${c.divergence} (not standalone)`);
-  if (crossoverAlert) lines.push(`- Event: ${crossoverAlert}`);
-  lines.push(`- Signal confluence:`);
+  if (c.divergence) lines.push(`- RSI divergence hint: ${c.divergence} (supporting only)`);
+  if (crossoverAlert) lines.push(`- Event flag: ${crossoverAlert}`);
+  lines.push(`- Confluence signals:`);
   for (const s of c.signals) {
     if (!s.available) continue;
-    lines.push(`  - ${s.name}: ${s.detail}${s.weight !== 0 ? ` (${s.weight > 0 ? "+" : ""}${s.weight})` : ""}`);
+    lines.push(
+      `  - ${s.name}: ${s.detail}${s.weight !== 0 ? ` (${s.weight > 0 ? "+" : ""}${s.weight})` : ""}`
+    );
   }
-  if (c.entrySuggestion) {
-    lines.push(`- Entry ladder:`);
+  if (c.entrySuggestion?.ladder?.length) {
+    lines.push(
+      isAllocated
+        ? `- Reference buy ladder (only relevant if averaging on weakness — optional):`
+        : `- Proposed buy ladder (limit buys on weakness — not market-buy-now):`
+    );
     for (const lvl of c.entrySuggestion.ladder) {
-      lines.push(`  - ~${lvl.price} (${lvl.basis}) — ${lvl.allocationPct}%`);
+      lines.push(`  - ~${lvl.price} (${lvl.basis}) — ~${lvl.allocationPct}%`);
     }
-    lines.push(`  Note: ${c.entrySuggestion.note}`);
   }
-  if (c.exitSuggestion) {
-    lines.push(`- Target ~${c.exitSuggestion.price}: ${c.exitSuggestion.note}`);
+  if (c.exitSuggestion?.price != null) {
+    lines.push(
+      isAllocated
+        ? `- Take-profit / trim reference: ~${c.exitSuggestion.price}`
+        : `- Take-profit reference (if you were holding): ~${c.exitSuggestion.price}`
+    );
   }
   if (c.invalidationNote) lines.push(`- Invalidation detail: ${c.invalidationNote}`);
   lines.push(``);
-  lines.push(`## Respond with`);
-  lines.push(`1. Verdict: READY TO STAGE / WAIT FOR PULLBACK / SKIP`);
-  lines.push(`2. Why (up to 3 bullets on technicals + up to 2 on verified news/trends, if any)`);
-  lines.push(`3. If staging: which ladder tranche(s) and what invalidates the idea`);
-  lines.push(`4. Risk note for a spot buyer who does not short`);
-  lines.push(`5. News caveat: list only items you actually found via search (or write "none verified")`);
+
+  if (isAllocated) {
+    lines.push(`## Answer format (position open)`);
+    lines.push(`1. Verdict: **HOLD** | **WAIT A FEW MORE DAYS** | **TRIM (partial sell)** | **SELL (exit)**`);
+    lines.push(`2. Why (max 3 technical bullets; max 2 verified news bullets)`);
+    lines.push(`3. If TRIM/SELL: urgency (now vs into resistance) and what would justify holding instead`);
+    lines.push(`4. If HOLD/WAIT: price or event that should flip you to sell`);
+    lines.push(`5. Relate to break-even and days held when relevant`);
+    lines.push(`6. News: verified only, or "none verified"`);
+  } else {
+    lines.push(`## Answer format (no position)`);
+    lines.push(`1. Verdict: **READY TO STAGE** | **WAIT FOR PULLBACK** | **SKIP**`);
+    lines.push(`2. Why (max 3 technical bullets; max 2 verified news bullets if any)`);
+    lines.push(`3. If READY or WAIT: which ladder level(s) and invalidation price`);
+    lines.push(`4. Spot risk note (LONG only — no short / no leverage)`);
+    lines.push(`5. News: verified items only, or "none verified"`);
+  }
+
   return lines.join("\n");
 }
 
@@ -138,7 +238,7 @@ export default function TradingInsightCard({
   const isInsufficient = confluence.bias === "INSUFFICIENT DATA";
 
   const handleCopyAgentPrompt = () => {
-    const prompt = formatEntryReviewPrompt(symbol, confluence, crossoverAlert);
+    const prompt = formatEntryReviewPrompt(symbol, confluence, crossoverAlert, activePortfolio);
     navigator.clipboard.writeText(prompt);
     setAgentCopied(true);
     setTimeout(() => setAgentCopied(false), 2000);
@@ -157,7 +257,11 @@ export default function TradingInsightCard({
             title="Copy a review prompt for an agent (technicals only — no news search)"
             className="rounded-md border border-gray-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
           >
-            {agentCopied ? "✅ Copied agent prompt" : "📋 Copy for agent review"}
+            {agentCopied
+              ? "✅ Copied agent prompt"
+              : activePortfolio && activePortfolio.holdings > 0
+              ? "📋 Copy hold/exit review"
+              : "📋 Copy entry review"}
           </button>
           <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold ${BIAS_BADGE_CLASSES[confluence.bias]}`}>
             BIAS: {confluence.bias}

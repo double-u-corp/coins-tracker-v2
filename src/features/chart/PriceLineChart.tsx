@@ -138,11 +138,13 @@ export default function PriceLineChart({
   const [showSwing, setShowSwing] = useState<boolean>(false);
   const isMobile = useIsMobile(640);
   const [mobilePoint, setMobilePoint] = useState<ActivePoint | null>(null);
+  const [swingMobilePoint, setSwingMobilePoint] = useState<{ label: string; price: number } | null>(null);
 
   // Clear mobile readout when data set changes (e.g. new coin / range)
   useEffect(() => {
     setMobilePoint(null);
-  }, [points]);
+    setSwingMobilePoint(null);
+  }, [points, intradayPoints]);
 
   const { chartData, fallbackLevels, liveEquilibrium } = useMemo(() => {
     if (points.length === 0) {
@@ -239,8 +241,8 @@ export default function PriceLineChart({
   return (
     <div className="w-full flex flex-col gap-3">
       <div
-        className="flex w-full overflow-x-auto pb-1 -mx-1 px-1 gap-2 scrollbar-hide"
-        style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+        className="flex w-full overflow-x-auto pb-2 pt-0.5 gap-2 scrollbar-hide"
+        style={{ scrollbarWidth: "none", msOverflowStyle: "none", WebkitOverflowScrolling: "touch" }}
       >
         <style dangerouslySetInnerHTML={{ __html: `::-webkit-scrollbar { display: none; }` }} />
         <IndicatorPill active={showSma20} onClick={() => setShowSma20(!showSma20)} color="amber" label="20 SMA" />
@@ -248,6 +250,8 @@ export default function PriceLineChart({
         <IndicatorPill active={showSma200} onClick={() => setShowSma200(!showSma200)} color="purple" label="200 SMA" />
         <IndicatorPill active={showRsi} onClick={() => setShowRsi(!showRsi)} color="indigo" label="RSI" />
         <IndicatorPill active={showSwing} onClick={() => setShowSwing(!showSwing)} color="teal" label="Swing" />
+        {/* spacer so last pill is fully visible when scrolled */}
+        <span className="w-3 shrink-0" aria-hidden />
       </div>
 
       <div className="h-64 sm:h-96 w-full -ml-2 sm:ml-0">
@@ -416,7 +420,7 @@ export default function PriceLineChart({
       )}
 
       {showSwing && (
-        <div className="w-full -ml-2 sm:ml-0 mt-1">
+        <div className="w-full sm:ml-0 mt-1">
           <div className="mb-1 flex items-center justify-between px-1">
             <span className="text-[11px] font-semibold text-teal-800">Swing · 8-check price (7 days)</span>
             <span className="text-[10px] text-gray-400">
@@ -424,46 +428,87 @@ export default function PriceLineChart({
             </span>
           </div>
           {swingChartData.length === 0 ? (
-            <div className="flex h-20 sm:h-28 items-center justify-center rounded-md border border-dashed border-teal-200 bg-teal-50/40 text-[11px] text-teal-800/80">
+            <div className="flex h-24 sm:h-28 items-center justify-center rounded-md border border-dashed border-teal-200 bg-teal-50/40 text-[11px] text-teal-800/80">
               No 3h / price-check series for the last 7 days
             </div>
           ) : (
-            <div className="h-20 sm:h-28 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={swingChartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                  <XAxis dataKey="label" hide />
-                  <YAxis
-                    orientation="right"
-                    stroke="#9ca3af"
-                    fontSize={9}
-                    width={55}
-                    tickLine={false}
-                    axisLine={false}
-                    domain={["auto", "auto"]}
-                    tickFormatter={(val) =>
-                      typeof window !== "undefined" && window.innerWidth < 640 && val >= 1000
-                        ? `${(val / 1000).toFixed(0)}k`
-                        : formatPhp(val)
-                    }
-                  />
-                  {!isMobile && (
+            <>
+              <div className="h-28 sm:h-32 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart
+                    data={swingChartData}
+                    margin={{ top: 4, right: 4, left: 0, bottom: 4 }}
+                    onMouseMove={(state: any) => {
+                      if (!state?.activePayload?.length) return;
+                      const row = state.activePayload[0]?.payload;
+                      if (row?.label != null && row?.price != null) {
+                        setSwingMobilePoint({ label: String(row.label), price: Number(row.price) });
+                      }
+                    }}
+                    onMouseLeave={() => setSwingMobilePoint(null)}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                    <XAxis
+                      dataKey="label"
+                      stroke="#9ca3af"
+                      fontSize={9}
+                      tickLine={false}
+                      axisLine={false}
+                      minTickGap={isMobile ? 8 : 16}
+                      interval="preserveStartEnd"
+                      height={28}
+                    />
+                    <YAxis
+                      orientation="right"
+                      stroke="#9ca3af"
+                      fontSize={9}
+                      width={50}
+                      tickLine={false}
+                      axisLine={false}
+                      domain={["auto", "auto"]}
+                      tickFormatter={(val) =>
+                        typeof window !== "undefined" && window.innerWidth < 640 && val >= 1000
+                          ? `${(val / 1000).toFixed(0)}k`
+                          : formatPhp(val)
+                      }
+                    />
                     <Tooltip
+                      content={
+                        isMobile
+                          ? () => null
+                          : undefined
+                      }
                       formatter={(value: any) => [value != null ? formatPhp(Number(value)) : "N/A", "Price"]}
                       labelStyle={{ fontSize: 11, color: "#6b7280" }}
+                      cursor={{ stroke: "#94a3b8", strokeWidth: 1, strokeDasharray: "4 4" }}
                     />
+                    <Line
+                      type="monotone"
+                      dataKey="price"
+                      stroke="#0d9488"
+                      strokeWidth={1.5}
+                      dot={isMobile ? { r: 2, strokeWidth: 0, fill: "#0d9488" } : false}
+                      activeDot={{ r: 4 }}
+                      name="Price"
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+              {isMobile && (
+                <div className="mt-1 rounded-md border border-teal-100 bg-teal-50/60 px-3 py-2 text-[11px]">
+                  {swingMobilePoint ? (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-teal-900">{swingMobilePoint.label}</span>
+                      <span className="font-bold text-teal-900 tabular-nums">
+                        {formatPhp(swingMobilePoint.price)}
+                      </span>
+                    </div>
+                  ) : (
+                    <p className="text-center text-teal-800/70">Tap or drag the swing chart to see time &amp; price</p>
                   )}
-                  <Line
-                    type="monotone"
-                    dataKey="price"
-                    stroke="#0d9488"
-                    strokeWidth={1.5}
-                    dot={false}
-                    name="Price"
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -494,7 +539,7 @@ function IndicatorPill({
     <button
       type="button"
       onClick={onClick}
-      className={`whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${colorMap[color]}`}
+      className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${colorMap[color]}`}
     >
       {label}
     </button>

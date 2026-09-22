@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import type { JournalEntryView } from "@/validators/journalSchema";
+import type { CoinSummary } from "@/validators/recordSchema";
 import { nowInManila, getDateKeyInZone, TRADER_TIMEZONE } from "../../lib/timezone";
 
 export interface CatalystPrompt {
@@ -7,28 +8,10 @@ export interface CatalystPrompt {
   category: "Live" | "Weekly" | "Monthly" | "Macro";
   title: string;
   prompt: string;
-  // Short, keyword-style query sent to the search API. Kept separate from
-  // `prompt` (which carries the full instructions for the LLM) because
-  // search engines return better results from a few keywords than from a
-  // paragraph of formatting rules.
   searchQuery: string;
-  // "coin" = result depends on the currently selected coin.
-  // "global" = same result regardless of which coin is selected (market-wide
-  // or exchange-wide). Surfaced in the UI so switching coins doesn't
-  // silently look like it did nothing for these.
   scope: "coin" | "global";
-  // Explicit search recency/depth profile — see catalyst-ai.ts. Set per
-  // prompt (not inferred from category) so a future category rename can't
-  // silently break freshness settings again.
   searchProfile: "breaking" | "weekly" | "trend" | "authoritative";
-  // "markdown" = human-readable analyst summary (default).
-  // "json" = structured event list, rendered as a sorted list, not prose.
   responseFormat?: "markdown" | "json";
-  // "standard" (default) = always included. "deepDive" = only included when
-  // the user explicitly enables Deep Dive for the currently selected coin —
-  // for prompts that are more speculative/higher hallucination-risk
-  // (e.g. social sentiment) or more analytical than catalyst-relevant,
-  // where firing on every single coin switch isn't worth the cost/risk.
   tier?: "standard" | "deepDive";
 }
 
@@ -38,133 +21,135 @@ export interface CachedAiLog {
   category: string;
 }
 
-export const AVAILABLE_TOKENS = [
-  "SOL",
-  "XLM",
-  "BCH",
-  "AAVE",
-  "SUI",
-  "HBAR",
-  "LINK",
-  "HYPE",
-  "BNB",
-  "TX",
-  "ASTER",
-  "VIRTUAL",
-  "UNI",
-  "RON",
-  "TRX",
-  "ADA",
-  "XRP",
-  "SHIB",
-  "TRUMP",
-  "ENA",
-  "XPL",
-  "XAUT",
-  "LTC",
-  "GRAM",
-  "Ondo",
-  "XDC",
-  "SPX",
-  "POL",
-  "BGB",
-  "WEMIX",
-  "SKY",
-];
 
-// Helper to inject tailored, category-specific execution rules
 const getCategoryRules = (category: CatalystPrompt["category"]) => {
   switch (category) {
     case "Live":
-      return " RULES: 1. Cover breaking news, whale activity, and official announcements from the past 24-72 hours, PLUS current 24h derivatives data (funding rates, open interest, liquidations) and on-chain net flows. 2. Provide a clear overall sentiment (Bullish/Bearish/Neutral). 3. Explicitly list BOTH sides where the search results support them: (A) Key Bullish Drivers and (B) Key Bearish/Downside Risks (e.g., pending unlocks, contract/security concerns, team or insider selling, negative regulatory news) — do not only report the narrative matching the overall price direction. 4. Include direct source links where available.";
-
+      return (
+        " RULES: 1. Cover the past 24-72 hours AND any confirmed events scheduled in the next 24-72 hours that could move price. " +
+        "2. Include current 24h derivatives (funding, open interest, liquidations) and notable on-chain net flows where found. " +
+        "3. Overall sentiment: Bullish / Bearish / Neutral. " +
+        "4. List BOTH (A) Key Bullish Drivers and (B) Key Bearish/Downside Risks. " +
+        "5. Include source links when available. 6. Do not invent scheduled dates — only list events explicitly found."
+      );
     case "Weekly":
-      return " RULES: 1. Focus on events and updates within a 7-day lookback or lookahead window. 2. Check BOTH major exchanges (Binance, Coinbase, OKX, Bybit) AND mid-tier/regional exchanges (KuCoin, Gate.io, MEXC, Bitget, HTX, LBank, Upbit, Bithumb, Coins.ph, PDAX) — many of these assets list on mid-tier or regional platforms before or instead of a Tier-1 listing, so do not limit the search to only the largest names. 3. Give EQUAL weight to negative exchange events — delistings, margin/leverage removal, and regional trading restrictions or bans are often more risk-relevant than new listings, so do not under-report them relative to positive listing news. 4. Also flag any major DEX listing spike (Uniswap, PancakeSwap) if it signals new liquidity. 5. Note which specific exchange(s) each event applies to.";
-
+      return (
+        " RULES: 1. Cover a 7-day lookback AND a 7-day lookahead. " +
+        "2. Check major and mid-tier/regional exchanges (incl. Coins.ph, PDAX). " +
+        "3. Equal weight to delistings/restrictions vs new listings. " +
+        "4. Separate RECENT (past 7d) vs UPCOMING (next 7d) when both exist."
+      );
     case "Monthly":
-      return " RULES: 1. Focus on a 30-60 day horizon for scheduled token unlocks (% of circulating supply), major roadmap milestones, mainnet upgrades, or TGEs. 2. Highlight potential supply pressure.";
-
+      return (
+        " RULES: 1. 30-60 day horizon: unlocks (% supply if known), mainnet upgrades, TGEs, governance. " +
+        "2. Highlight supply pressure. 3. CONFIRM vs RUMOR. 4. If none found, say so."
+      );
     case "Macro":
-      return " RULES: 1. Stay strictly within the specific macro topic asked in this prompt — other macro topics are covered by separate, dedicated prompts, so do not add commentary outside your assigned scope.";
+      return (
+        " RULES: 1. Stay within this prompt topic only. " +
+        "2. Prefer forward-looking risk for crypto (1-4 weeks). " +
+        "3. Do not invent calendar dates."
+      );
     default:
       return "";
   }
 };
 
+/**
+ * Coins.ph / local pairs are stored as e.g. VIRTUALPHP, SUIPHP.
+ * Tavily and news use the global ticker (VIRTUAL, SUI) — never "*PHP".
+ */
+export function baseAssetSymbol(symbol: string): string {
+  const s = (symbol || "").trim().toUpperCase();
+  if (s.endsWith("PHP") && s.length > 3) return s.slice(0, -3);
+  return s;
+}
+
 const formatTokenForPrompt = (token: string) => {
-  switch (token.toUpperCase()) {
+  const base = baseAssetSymbol(token);
+  switch (base) {
     case "TX":
       return "TX (txEcosystem / tx protocol, merged token of Coreum and Sologenic)";
     case "POL":
       return "POL (Polygon, formerly MATIC)";
+    case "VIRTUAL":
+      return "VIRTUAL (Virtuals Protocol, AI agent token on Base — not the English word virtual)";
+    case "SPX":
+      return "SPX (SPX6900 meme coin — not the S&P 500 index)";
+    case "HYPE":
+      return "HYPE (Hyperliquid token)";
+    case "RON":
+      return "RON (Ronin / Axie Infinity token)";
+    case "GRAM":
+      return "GRAM (Telegram/TON related token, not the unit of mass)";
+    case "UNI":
+      return "UNI (Uniswap token)";
+    case "LINK":
+      return "LINK (Chainlink)";
+    case "ENA":
+      return "ENA (Ethena)";
+    case "XAUT":
+      return "XAUT (Tether Gold)";
+    case "ONDO":
+      return "ONDO (Ondo Finance RWA)";
+    case "SKY":
+      return "SKY (Sky protocol / MakerDAO related)";
     default:
-      return token;
+      return `${base} (crypto token)`;
   }
 };
 
-// Search-specific disambiguation: short keyword phrases to bias Tavily away
-// from a ticker's more common non-crypto meaning. Kept separate from
-// formatTokenForPrompt because search engines want a few sharp keywords,
-// not a full parenthetical explanation — and every coin-specific searchQuery
-// needs this, not just the prompt text (a disambiguated `prompt` does
-// nothing if the actual search that feeds it still searched on the raw,
-// ambiguous ticker).
 const SEARCH_DISAMBIGUATORS: Record<string, string> = {
-  TX: "txEcosystem Coreum Sologenic",
+  TX: "txEcosystem Coreum Sologenic crypto",
   SPX: "SPX6900 meme coin crypto",
   TRUMP: "TRUMP token Solana meme coin crypto",
-  UNI: "Uniswap DEX token",
+  UNI: "Uniswap UNI token crypto",
   GRAM: "Telegram GRAM TON crypto token",
-  SOL: "Solana blockchain crypto",
+  SOL: "Solana SOL blockchain crypto",
   HYPE: "Hyperliquid HYPE token crypto",
-  VIRTUAL: "Virtuals Protocol AI agent token crypto",
-  RON: "Ronin Axie Infinity crypto token",
-  POL: "Polygon MATIC crypto token",
-  SKY: "Sky protocol MakerDAO crypto token",
+  VIRTUAL: "Virtuals Protocol VIRTUAL AI agent token Base crypto",
+  RON: "Ronin Axie Infinity RON crypto token",
+  POL: "Polygon POL MATIC crypto token",
+  SKY: "Sky protocol MakerDAO SKY crypto token",
   LINK: "Chainlink LINK crypto token",
-  ONDO: "Ondo Finance RWA crypto token",
+  ONDO: "Ondo Finance ONDO RWA crypto token",
   XAUT: "Tether Gold XAUT crypto token",
   ENA: "Ethena ENA synthetic dollar crypto token",
+  SUI: "Sui SUI blockchain crypto",
+  AAVE: "Aave AAVE DeFi crypto",
+  BCH: "Bitcoin Cash BCH crypto",
+  XLM: "Stellar XLM crypto",
+  HBAR: "Hedera HBAR crypto",
+  ASTER: "ASTER crypto token",
+  XPL: "XPL crypto token",
+  BGB: "Bitget BGB token crypto",
+  WEMIX: "WEMIX crypto token",
 };
 
-/** Builds a search-engine-friendly query for a coin-specific prompt. Uses an
- * explicit disambiguator for tickers known to collide with a common word or
- * unrelated entity; otherwise falls back to appending "crypto token" as a
- * baseline safety net so even an unmapped ambiguous ticker doesn't search
- * as a bare word. */
-function buildCoinSearchQuery(token: string, suffix: string): string {
-  const disambiguator = SEARCH_DISAMBIGUATORS[token.toUpperCase()];
-  const subject = disambiguator ? `${token} ${disambiguator}` : `${token} crypto token`;
+function buildCoinSearchQuery(pairOrTicker: string, suffix: string): string {
+  const base = baseAssetSymbol(pairOrTicker);
+  const disambiguator = SEARCH_DISAMBIGUATORS[base];
+  // Never send VIRTUALPHP / SUIPHP to Tavily — only the base asset + disambiguators.
+  const subject = disambiguator ? `${base} ${disambiguator}` : `${base} crypto token`;
   return `${subject} ${suffix}`;
 }
 
-/** Wraps an internal prompt (written assuming OUR backend has already
- * pre-fetched search context) into a self-contained prompt suitable for
- * pasting into another AI platform's chat directly — Gemini, Copilot, a
- * Groq chat UI, etc. Those platforms don't have our Tavily context, so they
- * need an explicit instruction to search the web themselves, plus a date
- * anchor since a pasted prompt has no other way to know "today." */
 export function buildPortablePrompt(basePrompt: string): string {
   const today = getDateKeyInZone(nowInManila(), TRADER_TIMEZONE);
-  return `Please search the web for the most current, real information before answering — do not rely on your training data alone, and do not guess or fabricate specific numbers, dates, or sources if you can't find them. Today's date is ${today}.\n\n${basePrompt}`;
+  return (
+    `Please search the web for the most current, real information before answering — ` +
+    `do not rely on your training data alone, and do not guess or fabricate specific numbers, dates, or sources if you can't find them. ` +
+    `Today's date is ${today} (Asia/Manila trader calendar).\n\n${basePrompt}`
+  );
 }
 
-const STATIC_MACRO_PROMPTS: CatalystPrompt[] = [
-  {
-    id: "weekly-coins-ph",
-    category: "Weekly",
-    title: "Coins.ph Platform Updates",
-    prompt: `What are the latest official announcements from Coins.ph specifically — new token listings, delistings, fee changes, or maintenance/platform updates? RULES: 1. Focus only on official Coins.ph announcements within a 7-day lookback or lookahead window. 2. Do not include general market-wide exchange news unrelated to Coins.ph itself.`,
-    searchQuery: "Coins.ph official announcement listing update",
-    scope: "global",
-    searchProfile: "weekly",
-  },
+const STATIC_GLOBAL_PROMPTS: CatalystPrompt[] = [
   {
     id: "macro-calendar-events",
     category: "Macro",
     title: "Upcoming Macro Event Dates (FOMC, CPI, PCE, NFP)",
-    prompt: `List the top 6-8 scheduled US macroeconomic events for this month and next month: NFP, CPI, Core PCE, FOMC meetings, and major options expiries. For each, give the official US Eastern Time (ET) release date, and the release time in ET if you're confident of it. Only include events you can find explicitly in the search results — do not guess dates from general knowledge.`,
-    searchQuery: "US economic calendar CPI PCE NFP FOMC dates this month",
+    prompt: `List the top 6-8 scheduled US macro events for this month and next month that crypto traders watch: NFP, CPI, Core PCE, FOMC, major options expiries if found. For each: date, ET time if known, why it can move crypto. Only dates found in search results.${getCategoryRules("Macro")}`,
+    searchQuery: "US economic calendar CPI PCE NFP FOMC dates this month next month",
     scope: "global",
     searchProfile: "authoritative",
     responseFormat: "json",
@@ -172,9 +157,9 @@ const STATIC_MACRO_PROMPTS: CatalystPrompt[] = [
   {
     id: "macro-briefing",
     category: "Macro",
-    title: "Macro Briefing (DXY, Yields, Geopolitics)",
-    prompt: `Give a macro briefing for crypto markets covering: (1) how the US Dollar Index (DXY) and 10-year Treasury yield are trending this week and what that implies for crypto risk appetite, (2) any major geopolitical or global financial market risk currently affecting risk-on assets. Do not list specific FOMC/CPI/NFP calendar dates — that is covered separately. Do not cover SEC/regulatory/legal developments — that is also covered separately.${getCategoryRules("Macro")}`,
-    searchQuery: "DXY treasury yield geopolitical risk crypto this week",
+    title: "Macro Briefing (DXY, Yields, Risk Appetite)",
+    prompt: `Macro briefing for crypto risk appetite: (1) DXY and 10y yield this week and implication for BTC/alts, (2) geopolitical or financial stress that could force risk-off in the next 1-2 weeks. No FOMC/CPI calendar dates. No SEC/legal.${getCategoryRules("Macro")}`,
+    searchQuery: "DXY treasury yield risk off crypto this week",
     scope: "global",
     searchProfile: "trend",
   },
@@ -182,25 +167,56 @@ const STATIC_MACRO_PROMPTS: CatalystPrompt[] = [
     id: "macro-regulation-sec",
     category: "Macro",
     title: "Regulatory & Policy Watch (SEC, CFTC, Legislation)",
-    prompt: `What are the latest regulatory, legal, or policy developments in crypto over the last 7 days? Cover SEC/CFTC filings and enforcement actions, exchange litigation, stablecoin or CBDC legislation, or international crypto bans/frameworks that could impact market liquidity. Do not cover general market sentiment, DXY, yields, or geopolitical risk unrelated to regulation — that is covered separately.${getCategoryRules("Macro")}`,
-    searchQuery: "crypto regulation SEC CFTC lawsuit bill stablecoin rule",
+    prompt: `Regulatory/legal/policy crypto developments in the last 7 days that could affect liquidity in coming weeks. Flag known decision dates. No DXY/yields.${getCategoryRules("Macro")}`,
+    searchQuery: "crypto regulation SEC CFTC lawsuit bill stablecoin rule this week",
     scope: "global",
     searchProfile: "trend",
+  },
+  {
+    id: "global-crypto-stress",
+    category: "Live",
+    title: "Crypto Market Stress (Liquidations, Risk-Off, BTC Dominance)",
+    prompt: `Is broader crypto under stress (past 72h + next few days)? Liquidation cascades, BTC dominance shifts, confirmed stablecoin issues, exchange outages, risk-off from alts. Overall: Risk-on / Mixed / Risk-off. Implication for altcoin LONG entries this week. No invented $ figures.`,
+    searchQuery: "crypto liquidations BTC dominance risk off exchange outage stablecoin",
+    scope: "global",
+    searchProfile: "breaking",
   },
   {
     id: "global-hacks-exploit-risks",
     category: "Live",
     title: "DeFi Hacks & Exploit Risk (Market-Wide)",
-    prompt: `Identify any recent or ongoing security exploits, reentrancy attacks, bridge hacks, smart contract vulnerabilities, or emergency protocol pauses across DeFi and major blockchains in the past 72 hours. Only report incidents confirmed by an official statement, security firm report, or credible news outlet — do not speculate about unconfirmed rumors or forum chatter. RULES: 1. Name the specific protocol/chain and approximate dollar amount affected where known.`,
+    prompt: `Recent exploits, bridge hacks, emergency pauses in past 72h — official or security-firm confirmed only. Protocol, $ impact if known, contagion notes if stated.`,
     searchQuery: "crypto exploit hack flash loan bridge drain compromise",
     scope: "global",
     searchProfile: "breaking",
   },
+  {
+    id: "global-altcoin-season-flow",
+    category: "Weekly",
+    title: "Altcoin Flow & Sector Rotation (Weekly)",
+    prompt: `Past 7d and next 7d: flows favoring BTC, ETH, or alt sectors (L2, AI, RWA, meme, DeFi)? Facts vs opinion. One-line implication for selective mid-cap LONG entries. No invented flow numbers.`,
+    searchQuery: "crypto altcoin season BTC ETH sector rotation ETF flows this week",
+    scope: "global",
+    searchProfile: "weekly",
+  },
+  {
+    id: "weekly-coins-ph",
+    category: "Weekly",
+    title: "Coins.ph Platform Updates (PH Spot)",
+    prompt: `Official Coins.ph announcements (listings, delistings, fees, maintenance) in 7-day lookback or lookahead. Flag PHP spot pair impact.`,
+    searchQuery: "Coins.ph official announcement listing delisting update",
+    scope: "global",
+    searchProfile: "weekly",
+  },
 ];
 
 export function useCatalystsLogic() {
-  const [selectedCoin, setSelectedCoin] = useState<string>("TX");
+  const [selectedCoin, setSelectedCoin] = useState<string>("");
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
+  /** coin = this asset; global = market-wide only (no coin picker). */
+  const [selectedScope, setSelectedScope] = useState<"coin" | "global">("coin");
+  const [allCoins, setAllCoins] = useState<CoinSummary[]>([]);
+  const [coinsLoading, setCoinsLoading] = useState(true);
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [aiCache, setAiCache] = useState<Record<string, CachedAiLog>>({});
@@ -213,44 +229,58 @@ export function useCatalystsLogic() {
   const [journalError, setJournalError] = useState<string | null>(null);
   const [authenticated, setAuthenticated] = useState(true);
 
-  // Dynamic coin-specific prompts with category-tailored instructions
   const coinSpecificPrompts = useMemo<CatalystPrompt[]>(() => {
+    if (!selectedCoin) return [];
+    const base = baseAssetSymbol(selectedCoin);
     const formattedToken = formatTokenForPrompt(selectedCoin);
     const key = selectedCoin.toLowerCase();
+    const pairNote =
+      base !== selectedCoin.toUpperCase()
+        ? ` Local spot pair is ${selectedCoin.toUpperCase()} (PHP); research the underlying asset ${base}, not the string "${selectedCoin}".`
+        : "";
 
     return [
       {
         id: `coin-${key}-live`,
         category: "Live",
-        title: `${selectedCoin} — Live Pulse (News, Derivatives, On-Chain)`,
-        prompt: `Give a full live snapshot of ${formattedToken}: why it's moving, top breaking news/announcements/whale moves in the past 24-72h, current perpetual funding rates and open interest, and any notable exchange net inflow/outflow or on-chain accumulation.${getCategoryRules("Live")}`,
-        searchQuery: buildCoinSearchQuery(selectedCoin, "news funding rate whale flows today"),
+        title: `${base} — Live Pulse (News, Derivatives, On-Chain)`,
+        prompt: `Live snapshot of ${formattedToken} for a spot LONG-only trader: why it's moving, news/whales past 24-72h, confirmed events next 24-72h, funding/OI, net flows.${pairNote}${getCategoryRules("Live")}`,
+        searchQuery: buildCoinSearchQuery(selectedCoin, "news funding rate whale flows upcoming event today"),
+        scope: "coin",
+        searchProfile: "breaking",
+      },
+      {
+        id: `coin-${key}-upcoming-catalysts`,
+        category: "Live",
+        title: `${base} — Upcoming Catalysts (Next 7 Days)`,
+        prompt: `Confirmed or officially scheduled catalysts for ${formattedToken} in the next 7 days: listings, unlocks, mainnet events, governance votes, partnership go-lives, exchange maintenance. Format: date · event · source. Mark CONFIRM vs RUMOR. If none: say "No confirmed catalysts in the next 7 days". One line each: better for pullback buy vs chase.`,
+        searchQuery: buildCoinSearchQuery(selectedCoin, "upcoming listing unlock mainnet event schedule next week"),
         scope: "coin",
         searchProfile: "breaking",
       },
       {
         id: `coin-${key}-weekly-listings`,
         category: "Weekly",
-        title: `${selectedCoin} — Exchange Listings & Pairs (All Tiers)`,
-        prompt: `What are the latest official announcements regarding new exchange listings, delistings, margin/leverage removals, or regional trading restrictions or bans for ${formattedToken}? Check both major exchanges (Binance, Coinbase, OKX, Bybit) and mid-tier/regional exchanges (KuCoin, Gate.io, MEXC, Bitget, HTX, Upbit, Bithumb, Coins.ph, PDAX) — do not assume it only lists on the largest platforms, and do not under-report delisting/restriction risk relative to new listings.${getCategoryRules("Weekly")}`,
-        searchQuery: buildCoinSearchQuery(selectedCoin, "new listing delisting margin removal restriction exchange KuCoin Gate MEXC Bitget Bybit"),
+        title: `${base} — Exchange Listings & Pairs (All Tiers)`,
+        prompt: `Official listing/delisting/margin/restriction news for ${formattedToken}. RECENT (past 7d) and UPCOMING (next 7d). Major + mid-tier/regional exchanges incl. Coins.ph, PDAX.${getCategoryRules("Weekly")}`,
+        searchQuery: buildCoinSearchQuery(selectedCoin, "new listing delisting margin removal restriction exchange"),
         scope: "coin",
         searchProfile: "weekly",
       },
       {
         id: `coin-${key}-monthly-unlocks`,
         category: "Monthly",
-        title: `${selectedCoin} — Token Unlocks & Roadmap`,
-        prompt: `What are the major scheduled token unlocks, mainnet upgrades, or governance milestones in the next 30-60 days for ${formattedToken}?${getCategoryRules("Monthly")}`,
-        searchQuery: buildCoinSearchQuery(selectedCoin, "token unlock schedule mainnet upgrade"),
+        title: `${base} — Token Unlocks & Roadmap`,
+        prompt: `Scheduled unlocks, mainnet upgrades, governance milestones for ${formattedToken} in next 30-60 days.${getCategoryRules("Monthly")}`,
+        searchQuery: buildCoinSearchQuery(selectedCoin, "token unlock schedule mainnet upgrade calendar"),
         scope: "coin",
         searchProfile: "authoritative",
       },
       {
         id: `coin-${key}-developer-github`,
         category: "Weekly",
-        title: `${selectedCoin} — Developer & Protocol Activity`,
-        prompt: `What recent technical upgrades, core repository/development activity, mainnet or testnet announcements, hard forks, or protocol improvement proposals have been announced or deployed for ${formattedToken} in the past 7-10 days? RULES: 1. Only report items backed by an official blog post, GitHub release note, or credible technical news source — do not infer development activity that isn't explicitly reported.`,
+        title: `${base} — Developer & Protocol Activity`,
+        prompt: `Technical upgrades, releases, forks, or proposals for ${formattedToken} past 7-10 days, plus anything scheduled soon. Official sources only.`,
         searchQuery: buildCoinSearchQuery(selectedCoin, "github mainnet testnet upgrade hard fork protocol update"),
         scope: "coin",
         searchProfile: "weekly",
@@ -258,17 +288,17 @@ export function useCatalystsLogic() {
       {
         id: `coin-${key}-ecosystem-grants`,
         category: "Monthly",
-        title: `${selectedCoin} — Ecosystem, Grants & Partnerships`,
-        prompt: `What new strategic partnerships, institutional capital raises, ecosystem fund/grant allocations, or dApp/protocol integrations have been announced for ${formattedToken} in the last 30-60 days? RULES: 1. Only report partnerships/funding backed by an official announcement — do not speculate about rumored deals. 2. If nothing was found, say so plainly rather than describing generic ecosystem activity.`,
-        searchQuery: buildCoinSearchQuery(selectedCoin, "ecosystem grant fund venture capital strategic partnership integration"),
+        title: `${base} — Ecosystem, Grants & Partnerships`,
+        prompt: `Partnerships, raises, grants, integrations for ${formattedToken} last 30-60 days; any go-live dates still ahead. Official only.`,
+        searchQuery: buildCoinSearchQuery(selectedCoin, "ecosystem grant fund venture capital strategic partnership"),
         scope: "coin",
         searchProfile: "authoritative",
       },
       {
         id: `coin-${key}-institutional-adoption`,
         category: "Monthly",
-        title: `${selectedCoin} — Institutional Adoption`,
-        prompt: `What institutional adoption signals exist for ${formattedToken} — spot ETF filings or approvals, corporate treasury purchases, institutional custody products, or major fund/asset-manager allocations — announced in the last 30-60 days? RULES: 1. Only report items backed by an official filing, press release, or credible financial news source. 2. If no genuine institutional activity is found, say so plainly — do not describe ordinary retail trading volume or exchange listings as institutional adoption.`,
+        title: `${base} — Institutional Adoption`,
+        prompt: `ETF filings, treasury buys, custody, fund allocations for ${formattedToken} last 30-60 days + upcoming decision dates. Official/financial news only.`,
         searchQuery: buildCoinSearchQuery(selectedCoin, "ETF filing institutional treasury custody adoption"),
         scope: "coin",
         searchProfile: "authoritative",
@@ -276,19 +306,18 @@ export function useCatalystsLogic() {
       {
         id: `coin-${key}-governance-proposals`,
         category: "Weekly",
-        title: `${selectedCoin} — Governance & Protocol Votes`,
-        prompt: `What active or recently passed governance proposals, DAO votes, or protocol parameter changes have been submitted for ${formattedToken} in the past 7-14 days? RULES: 1. Only report proposals found on an official governance forum, Snapshot page, or protocol blog — do not speculate about proposals not explicitly found. 2. If ${formattedToken} has no active on-chain/DAO governance process, say so plainly rather than describing unrelated updates.`,
-        searchQuery: buildCoinSearchQuery(selectedCoin, "governance proposal DAO vote Snapshot protocol change"),
+        title: `${base} — Governance & Protocol Votes`,
+        prompt: `Governance/DAO votes for ${formattedToken} past 7-14 days and open votes with end dates. Official forum/Snapshot only.`,
+        searchQuery: buildCoinSearchQuery(selectedCoin, "governance proposal DAO vote Snapshot"),
         scope: "coin",
         searchProfile: "weekly",
       },
-      // --- Deep Dive tier (opt-in only) ---
       {
         id: `coin-${key}-social-sentiment`,
         category: "Live",
-        title: `${selectedCoin} — Social & Community Sentiment`,
-        prompt: `What is the current social media and community sentiment around ${formattedToken} — based on discussion volume, notable commentary, or community reaction to recent events — over the past 24-72 hours? RULES: 1. This topic is HIGH RISK for fabrication — only report sentiment that is explicitly described in a news article, blog post, or aggregator report found in the search results. NEVER infer sentiment from social posts you cannot directly verify, and NEVER invent specific post counts, follower numbers, or engagement metrics. 2. If the search results don't describe social sentiment for this asset, say so plainly rather than guessing at a general mood.`,
-        searchQuery: buildCoinSearchQuery(selectedCoin, "community sentiment social media reaction discussion"),
+        title: `${base} — Social & Community Sentiment`,
+        prompt: `Social/community sentiment for ${formattedToken} past 24-72h from articles/aggregators only. Never invent metrics. If unknown, say so.`,
+        searchQuery: buildCoinSearchQuery(selectedCoin, "community sentiment social media reaction"),
         scope: "coin",
         searchProfile: "breaking",
         tier: "deepDive",
@@ -296,8 +325,8 @@ export function useCatalystsLogic() {
       {
         id: `coin-${key}-competitive-positioning`,
         category: "Monthly",
-        title: `${selectedCoin} — Competitive Positioning`,
-        prompt: `How does ${formattedToken} compare to its closest competitors or peers in its sector — in terms of recent adoption, total value locked (TVL), market share, or notable partnerships — based on recent analysis or commentary? RULES: 1. Only make comparisons explicitly supported by the search results — do not invent competitor names, metrics, or rankings not present in the source material. 2. Name the specific competitor(s) actually referenced in the sources. 3. If no comparative analysis is found, say so plainly.`,
+        title: `${base} — Competitive Positioning`,
+        prompt: `Peer comparison for ${formattedToken} from sources only. Name cited competitors. If none, say so.`,
         searchQuery: buildCoinSearchQuery(selectedCoin, "competitor comparison market share TVL analysis"),
         scope: "coin",
         searchProfile: "trend",
@@ -306,8 +335,6 @@ export function useCatalystsLogic() {
     ];
   }, [selectedCoin]);
 
-  // Deep Dive is opt-in per coin (not a single global switch) so the choice
-  // persists sensibly if you flip between coins you're actively watching.
   const [deepDiveCoins, setDeepDiveCoins] = useState<Record<string, boolean>>({});
   const isDeepDiveOn = !!deepDiveCoins[selectedCoin];
   const toggleDeepDive = (coin: string) => {
@@ -315,18 +342,21 @@ export function useCatalystsLogic() {
   };
 
   const allPrompts = useMemo(() => {
-    const visibleCoinPrompts = coinSpecificPrompts.filter(
-      (p) => p.tier !== "deepDive" || isDeepDiveOn
-    );
-    return [...visibleCoinPrompts, ...STATIC_MACRO_PROMPTS];
+    const visible = coinSpecificPrompts.filter((p) => p.tier !== "deepDive" || isDeepDiveOn);
+    return [...visible, ...STATIC_GLOBAL_PROMPTS];
   }, [coinSpecificPrompts, isDeepDiveOn]);
 
   const filteredPrompts = useMemo(() => {
-    if (selectedCategory === "All") return allPrompts;
-    return allPrompts.filter((p) => p.category === selectedCategory);
-  }, [allPrompts, selectedCategory]);
+    let list = allPrompts;
+    if (selectedCategory !== "All") list = list.filter((p) => p.category === selectedCategory);
+    if (selectedScope === "coin") list = list.filter((p) => p.scope === "coin");
+    else if (selectedScope === "global") list = list.filter((p) => p.scope === "global");
+    return list;
+  }, [allPrompts, selectedCategory, selectedScope]);
 
-  // Robust log fetcher ensuring cache state persists across page refreshes
+  const coinPrompts = useMemo(() => filteredPrompts.filter((p) => p.scope === "coin"), [filteredPrompts]);
+  const globalPrompts = useMemo(() => filteredPrompts.filter((p) => p.scope === "global"), [filteredPrompts]);
+
   const fetchAiLogs = useCallback(async () => {
     try {
       const res = await fetch("/api/catalyst-ai");
@@ -346,9 +376,7 @@ export function useCatalystsLogic() {
               }
             });
             setAiCache(logMap);
-          } else {
-            setAiCache(data.logs);
-          }
+          } else setAiCache(data.logs);
         }
       }
     } catch (e) {
@@ -375,25 +403,44 @@ export function useCatalystsLogic() {
     }
   }, []);
 
+  const fetchCoins = useCallback(async () => {
+    setCoinsLoading(true);
+    try {
+      const res = await fetch("/api/coins");
+      if (!res.ok) throw new Error(`Failed to load coins (${res.status})`);
+      const data = (await res.json()) as { coins: CoinSummary[] };
+      const coins = data.coins ?? [];
+      setAllCoins(coins);
+      setSelectedCoin((prev) => {
+        if (prev && coins.some((c) => c.symbol === prev)) return prev;
+        return coins[0]?.symbol ?? "";
+      });
+    } catch (e) {
+      console.error("Failed to load coins", e);
+    } finally {
+      setCoinsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchAiLogs();
     fetchJournalEntries();
-  }, [fetchAiLogs, fetchJournalEntries]);
+    fetchCoins();
+  }, [fetchAiLogs, fetchJournalEntries, fetchCoins]);
 
-  const generalEntries = useMemo(() => {
-    return entries.filter((entry) => !entry.symbol || entry.symbol.trim() === "");
-  }, [entries]);
+  const generalEntries = useMemo(
+    () => entries.filter((entry) => !entry.symbol || entry.symbol.trim() === ""),
+    [entries]
+  );
 
   const checkIsPeriodCurrent = (timestamp: number, category: string) => {
     const runDate = new Date(timestamp);
     const now = nowInManila();
-
     if (category === "Live") {
       return getDateKeyInZone(runDate, TRADER_TIMEZONE) === getDateKeyInZone(now, TRADER_TIMEZONE);
     }
     if (category === "Weekly" || category === "Macro") {
-      const diffDays = (now.getTime() - runDate.getTime()) / (1000 * 3600 * 24);
-      return diffDays < 7;
+      return (now.getTime() - runDate.getTime()) / (1000 * 3600 * 24) < 7;
     }
     if (category === "Monthly") {
       return runDate.getFullYear() === now.getFullYear() && runDate.getMonth() === now.getMonth();
@@ -404,7 +451,6 @@ export function useCatalystsLogic() {
   const getPromptStatus = (id: string, category: string) => {
     const log = aiCache[id];
     if (!log) return { status: "unrun", label: "Not Fetched" };
-
     const isCurrent = checkIsPeriodCurrent(log.timestamp, category);
     const dateStr = new Date(log.timestamp).toLocaleDateString("en-US", {
       month: "short",
@@ -412,20 +458,27 @@ export function useCatalystsLogic() {
       hour: "2-digit",
       minute: "2-digit",
     });
-
-    if (isCurrent) {
-      return { status: "current", label: `Fetched • ${dateStr}` };
-    } else {
-      return { status: "expired", label: `Expired (${dateStr})` };
-    }
+    return isCurrent
+      ? { status: "current", label: `Fetched • ${dateStr}` }
+      : { status: "expired", label: `Expired (${dateStr})` };
   };
 
-  const runAiSearch = async (item: CatalystPrompt, force = false) => {
+  /** User button always forceRefresh so Tavily+Groq run (API skips search when force is false and a log exists). */
+  const runAiSearch = async (item: CatalystPrompt, _force = true) => {
     const { id: promptId, prompt: promptText, category, searchQuery, searchProfile, responseFormat } = item;
-
+    if (!promptText?.trim()) {
+      setAiErrors((prev) => ({ ...prev, [promptId]: "Missing prompt text." }));
+      return;
+    }
+    if (!searchQuery?.trim()) {
+      setAiErrors((prev) => ({
+        ...prev,
+        [promptId]: "Missing searchQuery — Tavily needs a short keyword query.",
+      }));
+      return;
+    }
     setAiLoading((prev) => ({ ...prev, [promptId]: true }));
     setAiErrors((prev) => ({ ...prev, [promptId]: "" }));
-
     try {
       const res = await fetch("/api/catalyst-ai", {
         method: "POST",
@@ -434,23 +487,27 @@ export function useCatalystsLogic() {
           promptId,
           prompt: promptText,
           searchQuery,
-          searchProfile,
+          searchProfile: searchProfile || "breaking",
           category,
-          forceRefresh: force,
+          forceRefresh: true,
           responseFormat: responseFormat || "markdown",
         }),
       });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to fetch live insights.");
-
+      const data = await res.json().catch(() => ({} as { response?: string; error?: string }));
+      if (!res.ok) {
+        throw new Error(
+          data.error ||
+            `Scan failed (${res.status}). Check TAVILY_API_KEY / GROQ_API_KEY and server logs.`
+        );
+      }
+      if (!data.response || !String(data.response).trim()) {
+        throw new Error(
+          "API returned an empty response. Often: Tavily empty results, Groq token limit, or missing API keys."
+        );
+      }
       setAiCache((prev) => ({
         ...prev,
-        [promptId]: {
-          timestamp: Date.now(),
-          response: data.response,
-          category,
-        },
+        [promptId]: { timestamp: Date.now(), response: data.response, category },
       }));
     } catch (err: any) {
       setAiErrors((prev) => ({ ...prev, [promptId]: err.message || "An error occurred" }));
@@ -459,7 +516,12 @@ export function useCatalystsLogic() {
     }
   };
 
-  const addJournalEntry = async (input: { symbol: string | null; entryDate: string; title: string; notes: string }) => {
+  const addJournalEntry = async (input: {
+    symbol: string | null;
+    entryDate: string;
+    title: string;
+    notes: string;
+  }) => {
     const res = await fetch("/api/journal", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -481,9 +543,7 @@ export function useCatalystsLogic() {
         notes: text,
       });
       setSavedStatus((prev) => ({ ...prev, [promptId]: true }));
-      setTimeout(() => {
-        setSavedStatus((prev) => ({ ...prev, [promptId]: false }));
-      }, 3000);
+      setTimeout(() => setSavedStatus((prev) => ({ ...prev, [promptId]: false })), 3000);
     } catch (err) {
       alert("Failed to save to journal: " + (err as Error).message);
     }
@@ -495,12 +555,10 @@ export function useCatalystsLogic() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, ...input }),
     });
-
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
       throw new Error(errData.error || errData.message || "Failed to update entry");
     }
-
     await fetchJournalEntries();
   };
 
@@ -510,12 +568,10 @@ export function useCatalystsLogic() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id }),
     });
-
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
       throw new Error(errData.error || errData.message || "Failed to delete journal entry");
     }
-
     await fetchJournalEntries();
   };
 
@@ -525,12 +581,28 @@ export function useCatalystsLogic() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const coinOptions = useMemo(
+    () =>
+      allCoins.map((c) => ({
+        value: c.symbol,
+        label: c.name ? `${c.name} (${c.symbol})` : c.symbol,
+      })),
+    [allCoins]
+  );
+
   return {
     selectedCoin,
     setSelectedCoin,
     selectedCategory,
     setSelectedCategory,
+    selectedScope,
+    setSelectedScope,
+    allCoins,
+    coinOptions,
+    coinsLoading,
     filteredPrompts,
+    coinPrompts,
+    globalPrompts,
     allPrompts,
     copiedId,
     handleCopy,
