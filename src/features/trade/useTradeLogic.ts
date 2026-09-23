@@ -9,18 +9,40 @@ interface CoinOption {
 
 export type TradeType = "buy" | "sell" | "deposit" | "withdraw";
 
+/**
+ * Closed cycle history (never overwritten).
+ * - "full_exit": sold to zero
+ * - "recovered_reentry": sells already covered buys (house-money bag), then a new buy started the next cycle
+ */
+export interface ClosedTradeCycle {
+  cycleIndex: number;
+  startAt: string;
+  endAt: string;
+  daysHeld: number;
+  realizedPnl: number;
+  totalBoughtPhp: number;
+  totalSoldPhp: number;
+  avgBuyPrice: number | null;
+  avgSellPrice: number | null;
+  coinsBought: number;
+  coinsSold: number;
+  closeReason: "full_exit" | "recovered_reentry";
+  /** Coins still held when cycle closed via recovered + new buy (house money snapshot). */
+  freeCoinsCarried: number;
+}
+
 /** Per-coin analytics for “am I profitable?” and “what’s taking long?” */
 export interface CoinAnalytics {
   symbol: string;
   name: string;
   holdings: number;
-  /** Average cost of remaining units (PHP per coin). */
+  /** Average cost of remaining units (PHP per coin) — current open lot only. */
   avgCost: number | null;
-  /** Lifetime PHP spent on buys. */
+  /** Lifetime PHP spent on buys (all cycles). */
   totalBoughtPhp: number;
-  /** Lifetime PHP received from sells. */
+  /** Lifetime PHP received from sells (all cycles). */
   totalSoldPhp: number;
-  /** Locked-in P&L from sells (average-cost method). */
+  /** Locked-in P&L from sells (average-cost method) — sum of all cycles. */
   realizedPnl: number;
   /** Open P&L: holdings * (currentPrice - avgCost). */
   unrealizedPnl: number | null;
@@ -30,24 +52,37 @@ export interface CoinAnalytics {
   currentValue: number | null;
   /** Unrealized % vs avg cost. */
   unrealizedPct: number | null;
+  /** First buy ever (lifetime). */
   firstBuyAt: string | null;
   lastBuyAt: string | null;
   lastSellAt: string | null;
-  /** Calendar days since first buy (open or historical). */
+  /**
+   * Days held for the *current open* position only (since this cycle's first buy).
+   * After a full exit + re-buy, this resets — closed cycles keep their own daysHeld.
+   */
   daysSinceFirstBuy: number | null;
-  /** Days price has been below avg cost while holding (approx from “now”). */
+  /** Days current open lot has been below avg cost (approx). */
   daysUnderwater: number | null;
-  /** true if holdings > 0 and price < avgCost. */
   isUnderwater: boolean;
-  /** true if holdings > 0 and price >= avgCost. */
   isInProfitOpen: boolean;
-  /** Number of sell lots that realized > 0. */
   winningSells: number;
-  /** Number of sell lots that realized <= 0. */
   losingSells: number;
-  /** Average hold days across sells (buy-side age approx: days from first buy to each sell). */
   avgDaysToSell: number | null;
   status: "in_profit" | "underwater" | "flat" | "flat_closed" | "no_position";
+  /** Completed rounds — only when holdings hit 0. Trims do not create cycles. */
+  closedCycles: ClosedTradeCycle[];
+  /** Open cycle start (null if flat). */
+  openCycleStartAt: string | null;
+  /**
+   * Open cycle only: sell proceeds so far >= buy cost this cycle.
+   * Remaining coins are "house money" mentally — still one cycle until full exit.
+   */
+  openCycleCostRecovered: boolean;
+  /** Realized P&L booked from trims inside the current open cycle. */
+  openCycleRealizedPnl: number;
+  /** PHP bought / sold so far in the open cycle. */
+  openCycleBoughtPhp: number;
+  openCycleSoldPhp: number;
 }
 
 /**
@@ -61,17 +96,26 @@ export function buildCoinAnalytics(
   type LotState = {
     name: string;
     units: number;
-    costPhp: number; // total cost of remaining units
+    costPhp: number;
     realizedPnl: number;
     totalBoughtPhp: number;
     totalSoldPhp: number;
-    firstBuyAt: string | null;
+    firstBuyAt: string | null; // lifetime first buy
     lastBuyAt: string | null;
     lastSellAt: string | null;
     winningSells: number;
     losingSells: number;
     sellHoldDaysSum: number;
     sellCount: number;
+    // --- current open cycle (resets when units → 0) ---
+    cycleIndex: number;
+    cycleStartAt: string | null;
+    cycleBoughtPhp: number;
+    cycleSoldPhp: number;
+    cycleCoinsBought: number;
+    cycleCoinsSold: number;
+    cycleRealizedPnl: number;
+    closedCycles: ClosedTradeCycle[];
   };
 
   const bySymbol = new Map<string, LotState>();
@@ -93,6 +137,14 @@ export function buildCoinAnalytics(
         losingSells: 0,
         sellHoldDaysSum: 0,
         sellCount: 0,
+        cycleIndex: 0,
+        cycleStartAt: null,
+        cycleBoughtPhp: 0,
+        cycleSoldPhp: 0,
+        cycleCoinsBought: 0,
+        cycleCoinsSold: 0,
+        cycleRealizedPnl: 0,
+        closedCycles: [],
       };
       bySymbol.set(symbol, s);
     }
@@ -114,9 +166,57 @@ export function buildCoinAnalytics(
     const txTime = new Date(t.transactedAt).getTime();
 
     if (tType === "buy" && coins > 0) {
+      const recoveredWhileHolding =
+        state.units > 0 &&
+        state.cycleBoughtPhp > 0 &&
+        state.cycleSoldPhp >= state.cycleBoughtPhp;
+
+      // (1) Flat → new cycle
+      // (2) Still holding but cost already recovered → freeze prior cycle (free bag snapshot), then new cycle for fresh capital
+      if (state.units <= 0 || recoveredWhileHolding) {
+        if (recoveredWhileHolding && state.cycleStartAt) {
+          const daysHeld = Math.max(
+            0,
+            Math.round((txTime - new Date(state.cycleStartAt).getTime()) / (1000 * 60 * 60 * 24))
+          );
+          state.closedCycles.push({
+            cycleIndex: state.cycleIndex,
+            startAt: state.cycleStartAt,
+            endAt: t.transactedAt,
+            daysHeld,
+            realizedPnl: state.cycleSoldPhp - state.cycleBoughtPhp,
+            totalBoughtPhp: state.cycleBoughtPhp,
+            totalSoldPhp: state.cycleSoldPhp,
+            avgBuyPrice:
+              state.cycleCoinsBought > 0 ? state.cycleBoughtPhp / state.cycleCoinsBought : null,
+            avgSellPrice:
+              state.cycleCoinsSold > 0 ? state.cycleSoldPhp / state.cycleCoinsSold : null,
+            coinsBought: state.cycleCoinsBought,
+            coinsSold: state.cycleCoinsSold,
+            closeReason: "recovered_reentry",
+            freeCoinsCarried: state.units, // bag before this buy
+          });
+          // House-money bag: cost already returned via sells — remaining units carry 0 cost into next cycle
+          state.costPhp = 0;
+        }
+
+        state.cycleIndex += 1;
+        state.cycleStartAt = t.transactedAt;
+        state.cycleBoughtPhp = 0;
+        state.cycleSoldPhp = 0;
+        state.cycleCoinsBought = 0;
+        state.cycleCoinsSold = 0;
+        state.cycleRealizedPnl = 0;
+        if (state.units <= 0) {
+          state.costPhp = 0;
+        }
+      }
+
       state.units += coins;
       state.costPhp += php;
       state.totalBoughtPhp += php;
+      state.cycleBoughtPhp += php;
+      state.cycleCoinsBought += coins;
       if (!state.firstBuyAt) state.firstBuyAt = t.transactedAt;
       state.lastBuyAt = t.transactedAt;
     } else if (tType === "sell" && coins > 0) {
@@ -124,10 +224,12 @@ export function buildCoinAnalytics(
       const sellUnits = Math.min(coins, state.units > 0 ? state.units : coins);
       const costRemoved = avgCost * sellUnits;
       const proceeds = php;
-      // If selling more than tracked units (data glitch), attribute remaining proceeds at 0 cost
       const realized = proceeds - costRemoved;
       state.realizedPnl += realized;
+      state.cycleRealizedPnl += realized;
       state.totalSoldPhp += php;
+      state.cycleSoldPhp += php;
+      state.cycleCoinsSold += sellUnits;
       state.units = Math.max(0, state.units - sellUnits);
       state.costPhp = Math.max(0, state.costPhp - costRemoved);
       if (state.units < 1e-12) {
@@ -138,13 +240,47 @@ export function buildCoinAnalytics(
       if (realized > 0) state.winningSells += 1;
       else state.losingSells += 1;
 
-      if (state.firstBuyAt) {
+      // Hold days relative to *this cycle's* start (not lifetime first buy)
+      const cycleStart = state.cycleStartAt || state.firstBuyAt;
+      if (cycleStart) {
         const days = Math.max(
           0,
-          Math.round((txTime - new Date(state.firstBuyAt).getTime()) / (1000 * 60 * 60 * 24))
+          Math.round((txTime - new Date(cycleStart).getTime()) / (1000 * 60 * 60 * 24))
         );
         state.sellHoldDaysSum += days;
         state.sellCount += 1;
+      }
+
+      // Full exit → freeze this cycle into history (re-entry later starts a new cycle)
+      if (state.units <= 0 && state.cycleStartAt) {
+        const daysHeld = Math.max(
+          0,
+          Math.round((txTime - new Date(state.cycleStartAt).getTime()) / (1000 * 60 * 60 * 24))
+        );
+        state.closedCycles.push({
+          cycleIndex: state.cycleIndex,
+          startAt: state.cycleStartAt,
+          endAt: t.transactedAt,
+          daysHeld,
+          realizedPnl: state.cycleSoldPhp - state.cycleBoughtPhp,
+          totalBoughtPhp: state.cycleBoughtPhp,
+          totalSoldPhp: state.cycleSoldPhp,
+          avgBuyPrice:
+            state.cycleCoinsBought > 0 ? state.cycleBoughtPhp / state.cycleCoinsBought : null,
+          avgSellPrice:
+            state.cycleCoinsSold > 0 ? state.cycleSoldPhp / state.cycleCoinsSold : null,
+          coinsBought: state.cycleCoinsBought,
+          coinsSold: state.cycleCoinsSold,
+          closeReason: "full_exit",
+          freeCoinsCarried: 0,
+        });
+
+        state.cycleStartAt = null;
+        state.cycleBoughtPhp = 0;
+        state.cycleSoldPhp = 0;
+        state.cycleCoinsBought = 0;
+        state.cycleCoinsSold = 0;
+        state.cycleRealizedPnl = 0;
       }
     }
   }
@@ -200,8 +336,11 @@ export function buildCoinAnalytics(
       unrealizedPnl != null ? realizedPnl + unrealizedPnl : state ? realizedPnl : null;
 
     const firstBuyAt = state?.firstBuyAt ?? null;
-    const daysSinceFirstBuy = firstBuyAt
-      ? Math.max(0, Math.round((now - new Date(firstBuyAt).getTime()) / (1000 * 60 * 60 * 24)))
+    // Current open cycle only — does not include closed history
+    const openCycleStartAt = state?.cycleStartAt && (state.units > 0 || holdings > 0) ? state.cycleStartAt : null;
+    const positionStart = openCycleStartAt || (holdings > 0 ? firstBuyAt : null);
+    const daysSinceFirstBuy = positionStart
+      ? Math.max(0, Math.round((now - new Date(positionStart).getTime()) / (1000 * 60 * 60 * 24)))
       : null;
 
     const isUnderwater =
@@ -209,8 +348,7 @@ export function buildCoinAnalytics(
     const isInProfitOpen =
       holdings > 0 && unrealizedPnl != null ? unrealizedPnl > 0 : false;
 
-    // Approx: if currently underwater, count full days since first buy as underwater
-    // (we don't store historical price series here — good enough for “taking long”)
+    // Underwater clock for *current* open lot only
     const daysUnderwater =
       isUnderwater && daysSinceFirstBuy != null ? daysSinceFirstBuy : isUnderwater ? null : 0;
 
@@ -251,6 +389,15 @@ export function buildCoinAnalytics(
       losingSells: state?.losingSells ?? 0,
       avgDaysToSell,
       status,
+      closedCycles: state?.closedCycles ? [...state.closedCycles] : [],
+      openCycleStartAt: openCycleStartAt,
+      openCycleCostRecovered:
+        holdings > 0 &&
+        (state?.cycleBoughtPhp ?? 0) > 0 &&
+        (state?.cycleSoldPhp ?? 0) >= (state?.cycleBoughtPhp ?? 0),
+      openCycleRealizedPnl: state?.cycleRealizedPnl ?? 0,
+      openCycleBoughtPhp: state?.cycleBoughtPhp ?? 0,
+      openCycleSoldPhp: state?.cycleSoldPhp ?? 0,
     });
   }
 

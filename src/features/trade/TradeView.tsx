@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
 import Dropdown from "@/components/Dropdown";
 import AlertBanner from "@/components/AlertBanner";
@@ -75,6 +75,7 @@ export default function TradeView() {
   const [txCoinFilter, setTxCoinFilter] = useState<string>("all");
   const [analyticsFilter, setAnalyticsFilter] = useState<"all" | "underwater" | "in_profit" | "holdings">("all");
   const [analyticsSort, setAnalyticsSort] = useState<"underwater" | "unrealized_pct" | "realized">("underwater");
+  const [expandedCycles, setExpandedCycles] = useState<Record<string, boolean>>({});
 
   const filteredAnalytics = useMemo(() => {
     let rows = [...coinAnalytics];
@@ -446,7 +447,7 @@ export default function TradeView() {
       <section>
         <h2 className="mb-1 text-lg font-semibold text-gray-900">Profit &amp; patience</h2>
         <p className="mb-3 text-xs text-gray-500">
-          Realized = locked in on sells. Unrealized = on-hand vs average cost. “Taking long” = days underwater while still holding.
+          Multi-buy + partial trims = one open cycle. Cycle closes only when you sell to zero. If sell proceeds already cover this cycle’s buys, status shows Recovered (remaining = house money) — still the same cycle. Closed cycles are never overwritten on re-entry.
         </p>
         {loading ? (
           <OverviewSkeleton />
@@ -577,82 +578,178 @@ export default function TradeView() {
                       </td>
                     </tr>
                   ) : (
-                    filteredAnalytics.map((c) => (
-                      <tr key={c.symbol} className="hover:bg-gray-50">
-                        <td className="px-3 py-2.5 text-sm font-medium text-gray-900">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span>
-                              {c.name}{" "}
-                              <span className="text-gray-400">({c.symbol})</span>
-                            </span>
-                            <Link
-                              href={`/chart?symbol=${encodeURIComponent(c.symbol)}`}
-                              className="text-[10px] font-semibold text-purple-700 hover:underline whitespace-nowrap"
-                              title="Open on chart page"
+                    filteredAnalytics.map((c) => {
+                      const cycles = c.closedCycles ?? [];
+                      const open = !!expandedCycles[c.symbol];
+                      return (
+                        <Fragment key={c.symbol}>
+                          <tr className="hover:bg-gray-50">
+                            <td className="px-3 py-2.5 text-sm font-medium text-gray-900">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span>
+                                  {c.name}{" "}
+                                  <span className="text-gray-400">({c.symbol})</span>
+                                </span>
+                                <Link
+                                  href={`/chart?symbol=${encodeURIComponent(c.symbol)}`}
+                                  className="text-[10px] font-semibold text-purple-700 hover:underline whitespace-nowrap"
+                                  title="Open on chart page"
+                                >
+                                  Open chart
+                                </Link>
+                                {cycles.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setExpandedCycles((prev) => ({
+                                        ...prev,
+                                        [c.symbol]: !prev[c.symbol],
+                                      }))
+                                    }
+                                    className="text-[10px] font-semibold text-gray-600 hover:underline whitespace-nowrap"
+                                  >
+                                    {open ? "Hide" : "Show"} {cycles.length} closed cycle
+                                    {cycles.length === 1 ? "" : "s"}
+                                  </button>
+                                )}
+                              </div>
+                              <p className="mt-0.5 text-[10px] text-gray-400 font-normal">
+                                {c.holdings > 0
+                                  ? c.openCycleCostRecovered
+                                    ? "Cost recovered via trims — remaining is house money (same cycle until full exit)"
+                                    : "One open cycle (multi-buy + trims). Ends only when fully sold."
+                                  : cycles.length
+                                  ? "Flat — closed cycles kept below"
+                                  : ""}
+                              </p>
+                            </td>
+                            <td className="px-3 py-2.5 text-right text-sm text-gray-700">
+                              {c.holdings > 0 && c.daysSinceFirstBuy != null
+                                ? `${c.daysSinceFirstBuy}d`
+                                : "—"}
+                            </td>
+                            <td className="px-3 py-2.5 text-right text-sm font-medium text-amber-700">
+                              {c.isUnderwater && c.daysUnderwater != null
+                                ? `${c.daysUnderwater}d`
+                                : c.holdings > 0
+                                ? "0d"
+                                : "—"}
+                            </td>
+                            <td className="px-3 py-2.5 text-right text-sm text-gray-600">
+                              {c.holdings > 0 && c.avgCost != null ? formatPhp(c.avgCost) : "—"}
+                            </td>
+                            <td
+                              className={`px-3 py-2.5 text-right text-sm font-medium ${
+                                c.unrealizedPnl == null
+                                  ? "text-gray-400"
+                                  : c.unrealizedPnl >= 0
+                                  ? "text-green-600"
+                                  : "text-red-600"
+                              }`}
                             >
-                              Open chart
-                            </Link>
-                          </div>
-                        </td>
-                        <td className="px-3 py-2.5 text-right text-sm text-gray-700">
-                          {c.daysSinceFirstBuy != null ? `${c.daysSinceFirstBuy}d` : "—"}
-                        </td>
-                        <td className="px-3 py-2.5 text-right text-sm font-medium text-amber-700">
-                          {c.isUnderwater && c.daysUnderwater != null ? `${c.daysUnderwater}d` : c.holdings > 0 ? "0d" : "—"}
-                        </td>
-                        <td className="px-3 py-2.5 text-right text-sm text-gray-600">
-                          {c.avgCost != null ? formatPhp(c.avgCost) : "—"}
-                        </td>
-                        <td
-                          className={`px-3 py-2.5 text-right text-sm font-medium ${
-                            c.unrealizedPnl == null
-                              ? "text-gray-400"
-                              : c.unrealizedPnl >= 0
-                              ? "text-green-600"
-                              : "text-red-600"
-                          }`}
-                        >
-                          {c.unrealizedPnl != null
-                            ? `${c.unrealizedPnl >= 0 ? "+" : ""}${formatPhp(c.unrealizedPnl)}${
-                                c.unrealizedPct != null ? ` (${c.unrealizedPct >= 0 ? "+" : ""}${c.unrealizedPct.toFixed(1)}%)` : ""
-                              }`
-                            : "—"}
-                        </td>
-                        <td
-                          className={`px-3 py-2.5 text-right text-sm font-medium ${
-                            c.realizedPnl >= 0 ? "text-green-600" : "text-red-600"
-                          }`}
-                        >
-                          {c.realizedPnl >= 0 ? "+" : ""}
-                          {formatPhp(c.realizedPnl)}
-                        </td>
-                        <td className="px-3 py-2.5 text-right">
-                          <span
-                            className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${
-                              c.status === "in_profit"
-                                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                                : c.status === "underwater"
-                                ? "border-amber-200 bg-amber-50 text-amber-800"
-                                : "border-gray-200 bg-gray-50 text-gray-600"
-                            }`}
-                          >
-                            {c.status === "in_profit"
-                              ? c.holdings > 0
-                                ? "In profit"
-                                : "Closed +"
-                              : c.status === "underwater"
-                              ? c.holdings > 0
-                                ? "Underwater"
-                                : "Closed −"
-                              : c.status === "flat_closed"
-                              ? "Closed"
-                              : c.holdings > 0
-                              ? "Flat"
-                              : "—"}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
+                              {c.unrealizedPnl != null
+                                ? `${c.unrealizedPnl >= 0 ? "+" : ""}${formatPhp(c.unrealizedPnl)}${
+                                    c.unrealizedPct != null
+                                      ? ` (${c.unrealizedPct >= 0 ? "+" : ""}${c.unrealizedPct.toFixed(1)}%)`
+                                      : ""
+                                  }`
+                                : "—"}
+                            </td>
+                            <td
+                              className={`px-3 py-2.5 text-right text-sm font-medium ${
+                                c.realizedPnl >= 0 ? "text-green-600" : "text-red-600"
+                              }`}
+                            >
+                              {c.realizedPnl >= 0 ? "+" : ""}
+                              {formatPhp(c.realizedPnl)}
+                              <div className="text-[10px] font-normal text-gray-400">lifetime</div>
+                            </td>
+                            <td className="px-3 py-2.5 text-right">
+                              <span
+                                className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${
+                                  c.status === "in_profit"
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                    : c.status === "underwater"
+                                    ? "border-amber-200 bg-amber-50 text-amber-800"
+                                    : "border-gray-200 bg-gray-50 text-gray-600"
+                                }`}
+                              >
+                                {c.holdings > 0 && c.openCycleCostRecovered
+                                  ? "Recovered"
+                                  : c.status === "in_profit"
+                                  ? c.holdings > 0
+                                    ? "In profit"
+                                    : "Closed +"
+                                  : c.status === "underwater"
+                                  ? c.holdings > 0
+                                    ? "Underwater"
+                                    : "Closed −"
+                                  : c.status === "flat_closed"
+                                  ? "Closed"
+                                  : c.holdings > 0
+                                  ? "Flat"
+                                  : "—"}
+                              </span>
+                            </td>
+                          </tr>
+                          {open &&
+                            cycles.map((cy) => (
+                              <tr key={`${c.symbol}-c${cy.cycleIndex}`} className="bg-slate-50/80">
+                                <td className="px-3 py-2 pl-6 text-xs text-gray-600" colSpan={2}>
+                                  <span className="font-semibold text-gray-800">
+                                    Cycle {cy.cycleIndex}
+                                  </span>
+                                  {" · "}
+                                  {new Date(cy.startAt).toLocaleDateString(undefined, {
+                                    month: "short",
+                                    day: "numeric",
+                                    year: "2-digit",
+                                  })}
+                                  {" → "}
+                                  {new Date(cy.endAt).toLocaleDateString(undefined, {
+                                    month: "short",
+                                    day: "numeric",
+                                    year: "2-digit",
+                                  })}
+                                  <span className="text-gray-400">
+                                    {" "}
+                                    (
+                                    {cy.closeReason === "recovered_reentry"
+                                      ? "recovered → new buy"
+                                      : "full exit"}
+                                    )
+                                  </span>
+                                  {cy.freeCoinsCarried > 0 && (
+                                    <div className="mt-0.5 text-[10px] text-emerald-700 font-medium">
+                                      Free coins before next cycle: {formatCoinAmount(cy.freeCoinsCarried)}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 text-right text-xs text-gray-700">
+                                  {cy.daysHeld}d held
+                                </td>
+                                <td className="px-3 py-2 text-right text-xs text-gray-600">
+                                  Buy avg {cy.avgBuyPrice != null ? formatPhp(cy.avgBuyPrice) : "—"}
+                                </td>
+                                <td className="px-3 py-2 text-right text-xs text-gray-600">
+                                  Sell avg {cy.avgSellPrice != null ? formatPhp(cy.avgSellPrice) : "—"}
+                                </td>
+                                <td
+                                  className={`px-3 py-2 text-right text-xs font-semibold ${
+                                    cy.realizedPnl >= 0 ? "text-green-600" : "text-red-600"
+                                  }`}
+                                >
+                                  {cy.realizedPnl >= 0 ? "+" : ""}
+                                  {formatPhp(cy.realizedPnl)}
+                                </td>
+                                <td className="px-3 py-2 text-right text-[10px] text-gray-500">
+                                  {cy.closeReason === "recovered_reentry" ? "House money" : "Closed"}
+                                </td>
+                              </tr>
+                            ))}
+                        </Fragment>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
