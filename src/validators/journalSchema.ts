@@ -12,7 +12,7 @@ export const createJournalEntrySchema = z.object({
     .string()
     .refine((val) => !Number.isNaN(Date.parse(val)), "Enter a valid date"),
   title: z.string().trim().min(1, "Title is required").max(120, "Title is too long"),
-  notes: z.string().trim().min(1, "Notes are required").max(2000, "Notes are too long"),
+  notes: z.string().trim().min(1, "Notes are required").max(5000, "Notes are too long"),
 });
 
 export type CreateJournalEntryInput = z.infer<typeof createJournalEntrySchema>;

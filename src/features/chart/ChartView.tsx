@@ -46,6 +46,7 @@ export default function ChartView() {
     journalLabelsInView,
     addJournalEntry,
     deleteJournalEntry,
+    updateJournalEntry,
     authenticated,
     transactions,
     portfolio,
@@ -498,6 +499,7 @@ export default function ChartView() {
               authenticated={authenticated}
               onAdd={addJournalEntry}
               onDelete={deleteJournalEntry}
+              onUpdate={updateJournalEntry}
             />
           </div>
         </div>
@@ -626,6 +628,7 @@ export default function ChartView() {
             authenticated={authenticated}
             onAdd={addJournalEntry}
             onDelete={deleteJournalEntry}
+            onUpdate={updateJournalEntry}
           />
         </div>
       )}

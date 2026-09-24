@@ -248,9 +248,30 @@ export function useChartLogic() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
     });
-    if (!res.ok) throw new Error("Failed to save journal entry");
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(
+        (errData as { error?: string; message?: string }).error ||
+          (errData as { message?: string }).message ||
+          "Failed to save journal entry"
+      );
+    }
     loadJournal();
   }
+
+  async function updateJournalEntry(id: number, input: { title?: string; notes?: string }) {
+     const res = await fetch("/api/journal", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, ...input }),
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || errData.message || "Failed to update entry");
+    }
+    loadJournal();
+  }
+
 
   async function deleteJournalEntry(id: number) {
     const res = await fetch("/api/journal", {
@@ -279,6 +300,7 @@ export function useChartLogic() {
     journalLabelsInView,
     addJournalEntry,
     deleteJournalEntry,
+    updateJournalEntry,
     authenticated,
     transactions,
     portfolio,
