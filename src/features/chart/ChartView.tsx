@@ -40,6 +40,7 @@ export default function ChartView() {
     chartLoading,
     chartError,
     intradayPoints,
+    confluencePoints,
     entries,
     journalLoading,
     journalError,
@@ -557,11 +558,11 @@ export default function ChartView() {
           </div>
 
           <TradingInsightCard
-            points={points}
+            points={confluencePoints.length > 0 ? confluencePoints : points}
             symbol={symbol}
             activePortfolio={activePortfolio}
-            support={technicals.support}
-            resistance={technicals.resistance}
+            support={undefined}
+            resistance={undefined}
             currentPrice={currentPrice}
             intradayPoints={intradayPoints}
           />

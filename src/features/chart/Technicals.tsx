@@ -550,6 +550,8 @@ export function isNearSupportWorthCheck(c: ConfluenceResult): boolean {
   const support = c.support;
   if (price == null || !Number.isFinite(price) || support == null || support <= 0) return false;
   if (c.bias === "INSUFFICIENT DATA") return false;
+  // Never plug shorts as "worth to check" — product rule: hold cash, not a buy watch
+  if (c.bias.includes("SHORT")) return false;
 
   const nearSupportBuffer = c.atr != null && c.atr > 0 ? 1.0 * c.atr : support * 0.05;
   if (price <= support + nearSupportBuffer) return true;

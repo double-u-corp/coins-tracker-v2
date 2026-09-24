@@ -65,6 +65,10 @@ export function useChartLogic() {
   // Technicals.tsx already falls back to daily bars when this is absent.
   const [intradayPoints, setIntradayPoints] = useState<ChartPoint[] | null>(null);
 
+  // Fixed ≥1y daily series for confluence only — must match Watchlist Scan (SCAN_YEARS=1.00)
+  // so bias does not change when the user switches chart range (1m/3m/…).
+  const [confluencePoints, setConfluencePoints] = useState<ChartPoint[]>([]);
+
   const [entries, setEntries] = useState<JournalEntryView[]>([]);
   const [journalLoading, setJournalLoading] = useState(false);
   const [journalError, setJournalError] = useState<string | null>(null);
@@ -216,9 +220,28 @@ export function useChartLogic() {
     loadChart();
   }, [loadChart]);
 
+
+  // Same window as useCoinScanner SCAN_YEARS — SMA200 / macro need real bar count in the array
+  const loadConfluenceDaily = useCallback(() => {
+    if (!symbol) {
+      setConfluencePoints([]);
+      return;
+    }
+    fetch(`/api/coins?type=chart&symbol=${symbol}&years=1.00&granularity=daily`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { points: ChartPoint[] } | null) => {
+        setConfluencePoints(data?.points?.length ? data.points : []);
+      })
+      .catch(() => setConfluencePoints([]));
+  }, [symbol]);
+
   useEffect(() => {
     loadIntradayChart();
   }, [loadIntradayChart]);
+
+  useEffect(() => {
+    loadConfluenceDaily();
+  }, [loadConfluenceDaily]);
 
   useEffect(() => {
     loadJournal();
