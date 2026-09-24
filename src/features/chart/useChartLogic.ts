@@ -317,6 +317,7 @@ export function useChartLogic() {
     chartLoading,
     chartError,
     intradayPoints,
+    confluencePoints,
     entries,
     journalLoading,
     journalError,
