@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import Dropdown from "@/components/Dropdown";
 import AlertBanner from "@/components/AlertBanner";
@@ -75,7 +75,6 @@ export default function TradeView() {
   const [txCoinFilter, setTxCoinFilter] = useState<string>("all");
   const [analyticsFilter, setAnalyticsFilter] = useState<"all" | "underwater" | "in_profit" | "holdings">("all");
   const [analyticsSort, setAnalyticsSort] = useState<"underwater" | "unrealized_pct" | "realized">("underwater");
-  const [expandedCycles, setExpandedCycles] = useState<Record<string, boolean>>({});
 
   const filteredAnalytics = useMemo(() => {
     let rows = [...coinAnalytics];
@@ -320,161 +319,172 @@ export default function TradeView() {
         )}
       </section>
 
-      <section>
-        <h2 className="mb-3 text-lg font-semibold text-gray-900">Portfolio & Cash Overview</h2>
+      {/* —— Snapshot: cash + live holdings —— */}
+      <section className="space-y-3">
+        <div className="flex items-baseline justify-between gap-2">
+          <div>
+            <h2 className="text-base font-bold tracking-tight text-slate-900">Portfolio &amp; cash</h2>
+            <p className="text-[11px] text-slate-500">Live mark · open holdings only</p>
+          </div>
+        </div>
         {loading ? (
           <OverviewSkeleton />
         ) : (
           <>
-            <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
-              <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-                <div className="text-xs font-semibold uppercase text-gray-500">Total Net Equity</div>
-                <div className="mt-1 text-xl font-bold text-gray-900">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+              <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white px-3 py-2.5 shadow-sm">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Net equity</div>
+                <div className="mt-0.5 text-base font-bold tabular-nums text-slate-900 leading-tight">
                   {formatPhp(availableCash + (portfolioTotals.totalCurrentValue ?? 0))}
                 </div>
-                <p className="mt-1 text-xs text-gray-400">Cash + Crypto Holdings</p>
+                <p className="mt-0.5 text-[10px] text-slate-400">Cash + crypto</p>
               </div>
-
-              <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-                <div className="text-xs font-semibold uppercase text-gray-500">Available Cash</div>
-                <div className={`mt-1 text-xl font-bold ${availableCash < 0 ? "text-red-600" : "text-blue-600"}`}>
+              <div className="rounded-xl border border-sky-100 bg-gradient-to-br from-sky-50 to-white px-3 py-2.5 shadow-sm">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Cash</div>
+                <div className={`mt-0.5 text-base font-bold tabular-nums leading-tight ${availableCash < 0 ? "text-rose-600" : "text-sky-600"}`}>
                   {formatPhp(availableCash)}
                 </div>
-                <p className="mt-1 text-xs text-gray-400">
-                  Net Deposited: {formatPhp(totalDeposited - totalWithdrawn)}
-                </p>
+                <p className="mt-0.5 text-[10px] text-slate-400 truncate">Net in {formatPhp(totalDeposited - totalWithdrawn)}</p>
               </div>
-
-              <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-                <div className="text-xs font-semibold uppercase text-gray-500">Cash Flow</div>
-                <div className="mt-1 flex items-baseline justify-between">
-                  <div>
-                    <span className="text-xs text-gray-400">In: </span>
-                    <span className="text-sm font-bold text-emerald-600">{formatPhp(totalDeposited)}</span>
-                  </div>
-                  <div>
-                    <span className="text-xs text-gray-400">Out: </span>
-                    <span className="text-sm font-bold text-amber-600">{formatPhp(totalWithdrawn)}</span>
-                  </div>
+              <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-3 py-2.5 shadow-sm">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Cash flow</div>
+                <div className="mt-1 flex items-center gap-2 text-xs font-bold">
+                  <span className="text-emerald-600">↑ {formatPhp(totalDeposited)}</span>
+                  <span className="text-slate-300">·</span>
+                  <span className="text-amber-600">↓ {formatPhp(totalWithdrawn)}</span>
                 </div>
-                <p className="mt-1 text-xs text-gray-400">Total Deposited vs Withdrawn</p>
               </div>
-
-              <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-                <div className="text-xs font-semibold uppercase text-gray-500">Crypto Value</div>
-                <div className="mt-1 text-xl font-bold text-gray-900">
+              <div className="rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50 to-white px-3 py-2.5 shadow-sm">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Crypto</div>
+                <div className="mt-0.5 text-base font-bold tabular-nums text-violet-700 leading-tight">
                   {portfolioTotals.totalCurrentValue !== null ? formatPhp(portfolioTotals.totalCurrentValue) : "—"}
                 </div>
-                <p className="mt-1 text-xs text-gray-400">
-                  Net Invested: {formatPhp(portfolioTotals.totalSpent)}
-                </p>
+                <p className="mt-0.5 text-[10px] text-slate-400">In {formatPhp(portfolioTotals.totalSpent)}</p>
               </div>
-
-              <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-                <div className="text-xs font-semibold uppercase text-gray-500">Crypto Gain / Loss</div>
+              <div
+                className={`rounded-xl border bg-gradient-to-br to-white px-3 py-2.5 shadow-sm col-span-2 sm:col-span-1 ${
+                  portfolioTotals.totalGainLoss != null && portfolioTotals.totalGainLoss >= 0
+                    ? "border-emerald-100 from-emerald-50"
+                    : portfolioTotals.totalGainLoss != null
+                    ? "border-rose-100 from-rose-50"
+                    : "border-slate-200 from-slate-50"
+                }`}
+              >
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Open G/L</div>
                 <div
-                  className={`mt-1 text-xl font-bold ${
+                  className={`mt-0.5 text-base font-bold tabular-nums leading-tight ${
                     portfolioTotals.totalGainLoss === null
-                      ? "text-gray-400"
+                      ? "text-slate-400"
                       : portfolioTotals.totalGainLoss >= 0
-                      ? "text-green-600"
-                      : "text-red-600"
+                      ? "text-emerald-600"
+                      : "text-rose-600"
                   }`}
                 >
                   {portfolioTotals.totalGainLoss !== null
                     ? `${portfolioTotals.totalGainLoss >= 0 ? "+" : ""}${formatPhp(portfolioTotals.totalGainLoss)}`
                     : "—"}
                 </div>
-                <p className="mt-1 text-xs text-gray-400">Net Return (Value - Net Spent)</p>
+                <p className="mt-0.5 text-[10px] text-slate-400">Vs net spent</p>
               </div>
             </div>
 
-            <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-500">Coin</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500">Holdings</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500">Total Sold</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500">Net Spent</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500">Current Value</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gray-500">Gain / Loss</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {portfolio.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="px-4 py-3 text-center text-sm text-gray-500">
-                        No coin holdings active.
-                      </td>
-                    </tr>
-                  ) : (
-                    portfolio.map((entry) => {
-                      const displaySpent = Math.max(0, entry.spent);
-                      return (
-                        <tr key={entry.symbol}>
-                          <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                            {entry.name} <span className="text-gray-400">({entry.symbol})</span>
-                          </td>
-                          <td className="px-4 py-3 text-right text-sm text-gray-700">{formatCoinAmount(entry.holdings)}</td>
-                          <td className="px-4 py-3 text-right text-sm text-emerald-600 font-medium">{formatPhp(entry.sold)}</td>
-                          <td className="px-4 py-3 text-right text-sm font-medium text-gray-700">
-                            {formatPhp(displaySpent)}
-                          </td>
-                          <td className="px-4 py-3 text-right text-sm text-gray-700">
-                            {entry.currentValue !== null ? formatPhp(entry.currentValue) : "—"}
-                          </td>
-                          <td
-                            className={`px-4 py-3 text-right text-sm font-medium ${
-                              entry.gainLoss === null ? "text-gray-400" : entry.gainLoss >= 0 ? "text-green-600" : "text-red-600"
-                            }`}
+            {portfolio.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-slate-200 py-5 text-center text-xs text-slate-400">
+                No open holdings
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {portfolio.map((entry) => {
+                  const displaySpent = Math.max(0, entry.spent);
+                  const gl = entry.gainLoss;
+                  return (
+                    <div
+                      key={entry.symbol}
+                      className="group relative overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:border-slate-300 hover:shadow-md"
+                    >
+                      <div
+                        className={`absolute inset-y-0 left-0 w-1 ${
+                          gl == null ? "bg-slate-200" : gl >= 0 ? "bg-emerald-400" : "bg-rose-400"
+                        }`}
+                      />
+                      <div className="pl-3.5 pr-3 py-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-bold text-slate-900">{entry.name}</div>
+                            <div className="text-[10px] font-medium text-slate-400">{entry.symbol}</div>
+                          </div>
+                          <Link
+                            href={`/chart?symbol=${encodeURIComponent(entry.symbol)}`}
+                            className="shrink-0 rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-bold text-violet-700 hover:bg-violet-100"
                           >
-                            {entry.gainLoss !== null
-                              ? `${entry.gainLoss >= 0 ? "+" : ""}${formatPhp(entry.gainLoss)}`
-                              : "—"}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+                            Chart
+                          </Link>
+                        </div>
+                        <div className="mt-2.5 flex items-end justify-between gap-2">
+                          <div>
+                            <div className="text-[10px] text-slate-400">Holdings</div>
+                            <div className="text-xs font-semibold tabular-nums text-slate-800">
+                              {formatCoinAmount(entry.holdings)}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-[10px] text-slate-400">Mark</div>
+                            <div className="text-xs font-semibold tabular-nums text-slate-800">
+                              {entry.currentValue !== null ? formatPhp(entry.currentValue) : "—"}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-[10px] text-slate-400">G/L</div>
+                            <div
+                              className={`text-sm font-bold tabular-nums ${
+                                gl == null ? "text-slate-300" : gl >= 0 ? "text-emerald-600" : "text-rose-600"
+                              }`}
+                            >
+                              {gl != null ? `${gl >= 0 ? "+" : ""}${formatPhp(gl)}` : "—"}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </>
         )}
       </section>
 
-      <section>
-        <h2 className="mb-1 text-lg font-semibold text-gray-900">Profit &amp; patience</h2>
-        <p className="mb-3 text-xs text-gray-500">
-          Multi-buy + partial trims = one open cycle. Cycle closes only when you sell to zero. If sell proceeds already cover this cycle’s buys, status shows Recovered (remaining = house money) — still the same cycle. Closed cycles are never overwritten on re-entry.
-        </p>
+      {/* —— Open patience —— */}
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-base font-bold tracking-tight text-slate-900">Profit &amp; patience</h2>
+          <p className="text-[11px] text-slate-500">Open cycle · hold clock · house money = Free</p>
+        </div>
         {loading ? (
           <OverviewSkeleton />
         ) : (
           <>
-            <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-                <div className="text-xs font-semibold uppercase text-gray-500">Realized P&amp;L</div>
+            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+              <div className="rounded-xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white px-3 py-2.5 shadow-sm">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-700/70">Realized</div>
                 <div
-                  className={`mt-1 text-xl font-bold ${
-                    analyticsSummary.totalRealizedPnl >= 0 ? "text-green-600" : "text-red-600"
+                  className={`mt-0.5 text-base font-bold tabular-nums ${
+                    analyticsSummary.totalRealizedPnl >= 0 ? "text-emerald-700" : "text-rose-600"
                   }`}
                 >
                   {analyticsSummary.totalRealizedPnl >= 0 ? "+" : ""}
                   {formatPhp(analyticsSummary.totalRealizedPnl)}
                 </div>
-                <p className="mt-1 text-xs text-gray-400">From sells (average cost)</p>
               </div>
-              <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-                <div className="text-xs font-semibold uppercase text-gray-500">Unrealized P&amp;L</div>
+              <div className="rounded-xl border border-sky-100 bg-gradient-to-br from-sky-50 to-white px-3 py-2.5 shadow-sm">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-sky-700/70">Unrealized</div>
                 <div
-                  className={`mt-1 text-xl font-bold ${
+                  className={`mt-0.5 text-base font-bold tabular-nums ${
                     analyticsSummary.totalUnrealizedPnl == null
-                      ? "text-gray-400"
+                      ? "text-slate-300"
                       : analyticsSummary.totalUnrealizedPnl >= 0
-                      ? "text-green-600"
-                      : "text-red-600"
+                      ? "text-emerald-700"
+                      : "text-rose-600"
                   }`}
                 >
                   {analyticsSummary.totalUnrealizedPnl != null
@@ -483,278 +493,274 @@ export default function TradeView() {
                       )}`
                     : "—"}
                 </div>
-                <p className="mt-1 text-xs text-gray-400">Open holdings only</p>
               </div>
-              <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-                <div className="text-xs font-semibold uppercase text-gray-500">Sell win rate</div>
-                <div className="mt-1 text-xl font-bold text-gray-900">
+              <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white px-3 py-2.5 shadow-sm">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Win rate</div>
+                <div className="mt-0.5 text-base font-bold tabular-nums text-slate-900">
                   {analyticsSummary.sellWinRate != null
                     ? `${(analyticsSummary.sellWinRate * 100).toFixed(0)}%`
                     : "—"}
                 </div>
-                <p className="mt-1 text-xs text-gray-400">
-                  {analyticsSummary.winningSells}W / {analyticsSummary.losingSells}L sells
+                <p className="text-[10px] text-slate-400">
+                  {analyticsSummary.winningSells}W · {analyticsSummary.losingSells}L
                 </p>
               </div>
-              <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-                <div className="text-xs font-semibold uppercase text-gray-500">Longest underwater</div>
-                <div className="mt-1 text-lg font-bold text-amber-700">
+              <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white px-3 py-2.5 shadow-sm">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-amber-700/70">Longest under</div>
+                <div className="mt-0.5 text-sm font-bold text-amber-900 truncate">
                   {analyticsSummary.longestUnderwater
                     ? `${analyticsSummary.longestUnderwater.symbol}`
                     : "None"}
+                  {analyticsSummary.longestUnderwater?.daysUnderwater != null && (
+                    <span className="text-amber-700 font-semibold">
+                      {" "}
+                      · {analyticsSummary.longestUnderwater.daysUnderwater}d
+                    </span>
+                  )}
                 </div>
-                <p className="mt-1 text-xs text-gray-400">
-                  {analyticsSummary.longestUnderwater?.daysUnderwater != null
-                    ? `${analyticsSummary.longestUnderwater.daysUnderwater}d · ${analyticsSummary.underwaterCount} coin(s) underwater`
-                    : `${analyticsSummary.underwaterCount} coin(s) underwater`}
-                </p>
-                {analyticsSummary.longestUnderwater && (
-                  <p className="mt-2 text-[11px] font-medium text-amber-900/90 leading-snug">
-                    {analyticsSummary.longestUnderwater.symbol} underwater{" "}
-                    {analyticsSummary.longestUnderwater.daysUnderwater ?? "?"}d — wait for ladder, don’t average blindly.
-                  </p>
-                )}
               </div>
             </div>
 
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 p-1">
-                {(
-                  [
-                    ["all", "All"],
-                    ["holdings", "Has holdings"],
-                    ["underwater", "Underwater"],
-                    ["in_profit", "In profit"],
-                  ] as const
-                ).map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setAnalyticsFilter(value)}
-                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                      analyticsFilter === value
-                        ? "bg-white text-gray-900 shadow-sm"
-                        : "text-gray-500 hover:text-gray-700"
-                    }`}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(
+                [
+                  ["all", "All"],
+                  ["holdings", "Holding"],
+                  ["underwater", "Under"],
+                  ["in_profit", "Profit"],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setAnalyticsFilter(value)}
+                  className={`rounded-full px-3 py-1 text-[11px] font-bold transition ${
+                    analyticsFilter === value
+                      ? "bg-slate-900 text-white shadow-sm"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+              <select
+                value={analyticsSort}
+                onChange={(e) => setAnalyticsSort(e.target.value as typeof analyticsSort)}
+                className="ml-auto rounded-full border-0 bg-slate-100 px-3 py-1 text-[11px] font-bold text-slate-700"
+              >
+                <option value="underwater">Days under</option>
+                <option value="unrealized_pct">Unrealized %</option>
+                <option value="realized">Realized</option>
+              </select>
+            </div>
+
+            {filteredAnalytics.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-slate-200 py-5 text-center text-xs text-slate-400">
+                {coinAnalytics.length === 0 ? "No trades yet" : "No match"}
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {filteredAnalytics.map((c) => {
+         const badge =
+  c.holdings > 0 && c.openCycleCostRecovered
+    ? { t: "Recovered", c: "bg-emerald-500 text-white" }
+    : c.status === "in_profit"
+    ? { t: c.holdings > 0 ? "Profit" : "Closed +", c: "bg-emerald-100 text-emerald-800" }
+    : c.status === "underwater"
+    ? { t: c.holdings > 0 ? "Under" : "Closed -", c: "bg-amber-400 text-amber-950" }
+    : { t: c.holdings > 0 ? "Flat" : "Closed", c: "bg-slate-100 text-slate-600" };
+                  return (
+                    <div
+                      key={c.symbol}
+                      className="relative overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md"
+                    >
+                      <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/80 px-3 py-2">
+                        <div className="min-w-0">
+                          <span className="text-sm font-bold text-slate-900 truncate block">{c.name}</span>
+                          <span className="text-[10px] font-medium text-slate-400">{c.symbol}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${badge.c}`}>
+                            {badge.t}
+                          </span>
+                          <Link
+                            href={`/chart?symbol=${encodeURIComponent(c.symbol)}`}
+                            className="text-[10px] font-bold text-violet-600 hover:underline"
+                          >
+                            Chart
+                          </Link>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-4 gap-px bg-slate-100 text-center">
+                        <div className="bg-white px-1.5 py-2">
+                          <div className="text-[9px] font-bold uppercase tracking-wide text-slate-400">Held</div>
+                          <div className="mt-0.5 text-xs font-bold tabular-nums text-slate-900">
+                            {c.holdings > 0 && c.openCycleCostRecovered
+                              ? "Free"
+                              : c.holdings > 0 && c.daysSinceFirstBuy != null
+                              ? `${c.daysSinceFirstBuy}d`
+                              : "—"}
+                          </div>
+                        </div>
+                        <div className="bg-white px-1.5 py-2">
+                          <div className="text-[9px] font-bold uppercase tracking-wide text-slate-400">Under</div>
+                          <div className="mt-0.5 text-xs font-bold tabular-nums text-amber-700">
+                            {c.openCycleCostRecovered
+                              ? "—"
+                              : c.isUnderwater && c.daysUnderwater != null
+                              ? `${c.daysUnderwater}d`
+                              : c.holdings > 0
+                              ? "0d"
+                              : "—"}
+                          </div>
+                        </div>
+                        <div className="bg-white px-1.5 py-2">
+                          <div className="text-[9px] font-bold uppercase tracking-wide text-slate-400">Avg</div>
+                          <div className="mt-0.5 text-[11px] font-bold tabular-nums text-slate-800 truncate">
+                            {c.holdings > 0 && c.avgCost != null ? formatPhp(c.avgCost) : "—"}
+                          </div>
+                        </div>
+                        <div className="bg-white px-1.5 py-2">
+                          <div className="text-[9px] font-bold uppercase tracking-wide text-slate-400">Open</div>
+                          <div
+                            className={`mt-0.5 text-[11px] font-bold tabular-nums truncate ${
+                              c.unrealizedPnl == null
+                                ? "text-slate-300"
+                                : c.unrealizedPnl >= 0
+                                ? "text-emerald-600"
+                                : "text-rose-600"
+                            }`}
+                          >
+                            {c.unrealizedPnl != null
+                              ? `${c.unrealizedPnl >= 0 ? "+" : ""}${formatPhp(c.unrealizedPnl)}`
+                              : "—"}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between px-3 py-1.5 text-[10px]">
+                        <span className="text-slate-400">
+                          Locked{" "}
+                          <span
+                            className={`font-bold ${
+                              c.realizedPnl >= 0 ? "text-emerald-600" : "text-rose-600"
+                            }`}
+                          >
+                            {c.realizedPnl >= 0 ? "+" : ""}
+                            {formatPhp(c.realizedPnl)}
+                          </span>
+                        </span>
+                        {(c.closedCycles?.length ?? 0) > 0 && (
+                          <span className="font-medium text-slate-400">{c.closedCycles.length}× closed</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+      </section>
+
+      {/* —— Closed history —— */}
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-base font-bold tracking-tight text-slate-900">Closed cycle history</h2>
+          <p className="text-[11px] text-slate-500">Past rounds · no live price</p>
+        </div>
+        {loading ? (
+          <TableSkeleton />
+        ) : (
+          (() => {
+            const historyRows = coinAnalytics.flatMap((c) =>
+              (c.closedCycles ?? []).map((cy) => ({
+                symbol: c.symbol,
+                name: c.name,
+                ...cy,
+              }))
+            );
+            if (historyRows.length === 0) {
+              return (
+                <p className="rounded-xl border border-dashed border-slate-200 py-5 text-center text-xs text-slate-400">
+                  No closed cycles yet
+                </p>
+              );
+            }
+            historyRows.sort((a, b) => new Date(b.endAt).getTime() - new Date(a.endAt).getTime());
+            return (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {historyRows.map((cy) => (
+                  <div
+                    key={`${cy.symbol}-c${cy.cycleIndex}-${cy.endAt}`}
+                    className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden"
                   >
-                    {label}
-                  </button>
+                    <div className="flex items-center justify-between gap-2 bg-slate-900 px-3 py-2 text-white">
+                      <div className="min-w-0">
+                        <div className="truncate text-xs font-bold">
+                          {cy.name}{" "}
+                          <span className="font-medium text-slate-400">#{cy.cycleIndex}</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400">
+                          {new Date(cy.startAt).toLocaleDateString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                          })}
+                          {" → "}
+                          {new Date(cy.endAt).toLocaleDateString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                            year: "2-digit",
+                          })}
+                        </div>
+                      </div>
+                      <span
+                        className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase ${
+                          cy.closeReason === "recovered_reentry"
+                            ? "bg-emerald-400/20 text-emerald-300"
+                            : "bg-white/10 text-slate-300"
+                        }`}
+                      >
+                        {cy.closeReason === "recovered_reentry" ? "Recovered" : "Exit"}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-px bg-slate-100 text-center">
+                      <div className="bg-white px-2 py-2">
+                        <div className="text-[9px] font-bold uppercase text-slate-400">Held</div>
+                        <div className="text-xs font-bold text-slate-900">{cy.daysHeld}d</div>
+                      </div>
+                      <div className="bg-white px-2 py-2">
+                        <div className="text-[9px] font-bold uppercase text-slate-400">Buy</div>
+                        <div className="text-[11px] font-bold tabular-nums text-slate-800 truncate">
+                          {cy.avgBuyPrice != null ? formatPhp(cy.avgBuyPrice) : "—"}
+                        </div>
+                      </div>
+                      <div className="bg-white px-2 py-2">
+                        <div className="text-[9px] font-bold uppercase text-slate-400">Sell</div>
+                        <div className="text-[11px] font-bold tabular-nums text-slate-800 truncate">
+                          {cy.avgSellPrice != null ? formatPhp(cy.avgSellPrice) : "—"}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between px-3 py-2">
+                      <span
+                        className={`text-sm font-bold tabular-nums ${
+                          cy.realizedPnl >= 0 ? "text-emerald-600" : "text-rose-600"
+                        }`}
+                      >
+                        {cy.realizedPnl >= 0 ? "+" : ""}
+                        {formatPhp(cy.realizedPnl)}
+                      </span>
+                      {cy.freeCoinsCarried > 0 && (
+                        <span className="text-[10px] font-semibold text-emerald-700">
+                          Free {formatCoinAmount(cy.freeCoinsCarried)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 ))}
               </div>
-              <label className="flex items-center gap-1.5 text-xs text-gray-600">
-                <span className="font-medium">Sort</span>
-                <select
-                  value={analyticsSort}
-                  onChange={(e) => setAnalyticsSort(e.target.value as typeof analyticsSort)}
-                  className="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 shadow-sm"
-                >
-                  <option value="underwater">Days underwater</option>
-                  <option value="unrealized_pct">Unrealized %</option>
-                  <option value="realized">Realized P&amp;L</option>
-                </select>
-              </label>
-            </div>
-
-            <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase text-gray-500">Coin</th>
-                    <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Days held</th>
-                    <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Underwater</th>
-                    <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Avg cost</th>
-                    <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Unrealized</th>
-                    <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Realized</th>
-                    <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-gray-500">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {filteredAnalytics.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="px-3 py-3 text-center text-sm text-gray-500">
-                        {coinAnalytics.length === 0
-                          ? "No coin trade history yet."
-                          : "No coins match this filter."}
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredAnalytics.map((c) => {
-                      const cycles = c.closedCycles ?? [];
-                      const open = !!expandedCycles[c.symbol];
-                      return (
-                        <Fragment key={c.symbol}>
-                          <tr className="hover:bg-gray-50">
-                            <td className="px-3 py-2.5 text-sm font-medium text-gray-900">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span>
-                                  {c.name}{" "}
-                                  <span className="text-gray-400">({c.symbol})</span>
-                                </span>
-                                <Link
-                                  href={`/chart?symbol=${encodeURIComponent(c.symbol)}`}
-                                  className="text-[10px] font-semibold text-purple-700 hover:underline whitespace-nowrap"
-                                  title="Open on chart page"
-                                >
-                                  Open chart
-                                </Link>
-                                {cycles.length > 0 && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setExpandedCycles((prev) => ({
-                                        ...prev,
-                                        [c.symbol]: !prev[c.symbol],
-                                      }))
-                                    }
-                                    className="text-[10px] font-semibold text-gray-600 hover:underline whitespace-nowrap"
-                                  >
-                                    {open ? "Hide" : "Show"} {cycles.length} closed cycle
-                                    {cycles.length === 1 ? "" : "s"}
-                                  </button>
-                                )}
-                              </div>
-                              <p className="mt-0.5 text-[10px] text-gray-400 font-normal">
-                                {c.holdings > 0
-                                  ? c.openCycleCostRecovered
-                                    ? "Cost recovered via trims — remaining is house money (same cycle until full exit)"
-                                    : "One open cycle (multi-buy + trims). Ends only when fully sold."
-                                  : cycles.length
-                                  ? "Flat — closed cycles kept below"
-                                  : ""}
-                              </p>
-                            </td>
-                            <td className="px-3 py-2.5 text-right text-sm text-gray-700">
-                              {c.holdings > 0 && c.daysSinceFirstBuy != null
-                                ? `${c.daysSinceFirstBuy}d`
-                                : "—"}
-                            </td>
-                            <td className="px-3 py-2.5 text-right text-sm font-medium text-amber-700">
-                              {c.isUnderwater && c.daysUnderwater != null
-                                ? `${c.daysUnderwater}d`
-                                : c.holdings > 0
-                                ? "0d"
-                                : "—"}
-                            </td>
-                            <td className="px-3 py-2.5 text-right text-sm text-gray-600">
-                              {c.holdings > 0 && c.avgCost != null ? formatPhp(c.avgCost) : "—"}
-                            </td>
-                            <td
-                              className={`px-3 py-2.5 text-right text-sm font-medium ${
-                                c.unrealizedPnl == null
-                                  ? "text-gray-400"
-                                  : c.unrealizedPnl >= 0
-                                  ? "text-green-600"
-                                  : "text-red-600"
-                              }`}
-                            >
-                              {c.unrealizedPnl != null
-                                ? `${c.unrealizedPnl >= 0 ? "+" : ""}${formatPhp(c.unrealizedPnl)}${
-                                    c.unrealizedPct != null
-                                      ? ` (${c.unrealizedPct >= 0 ? "+" : ""}${c.unrealizedPct.toFixed(1)}%)`
-                                      : ""
-                                  }`
-                                : "—"}
-                            </td>
-                            <td
-                              className={`px-3 py-2.5 text-right text-sm font-medium ${
-                                c.realizedPnl >= 0 ? "text-green-600" : "text-red-600"
-                              }`}
-                            >
-                              {c.realizedPnl >= 0 ? "+" : ""}
-                              {formatPhp(c.realizedPnl)}
-                              <div className="text-[10px] font-normal text-gray-400">lifetime</div>
-                            </td>
-                            <td className="px-3 py-2.5 text-right">
-                              <span
-                                className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${
-                                  c.status === "in_profit"
-                                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                                    : c.status === "underwater"
-                                    ? "border-amber-200 bg-amber-50 text-amber-800"
-                                    : "border-gray-200 bg-gray-50 text-gray-600"
-                                }`}
-                              >
-                                {c.holdings > 0 && c.openCycleCostRecovered
-                                  ? "Recovered"
-                                  : c.status === "in_profit"
-                                  ? c.holdings > 0
-                                    ? "In profit"
-                                    : "Closed +"
-                                  : c.status === "underwater"
-                                  ? c.holdings > 0
-                                    ? "Underwater"
-                                    : "Closed −"
-                                  : c.status === "flat_closed"
-                                  ? "Closed"
-                                  : c.holdings > 0
-                                  ? "Flat"
-                                  : "—"}
-                              </span>
-                            </td>
-                          </tr>
-                          {open &&
-                            cycles.map((cy) => (
-                              <tr key={`${c.symbol}-c${cy.cycleIndex}`} className="bg-slate-50/80">
-                                <td className="px-3 py-2 pl-6 text-xs text-gray-600" colSpan={2}>
-                                  <span className="font-semibold text-gray-800">
-                                    Cycle {cy.cycleIndex}
-                                  </span>
-                                  {" · "}
-                                  {new Date(cy.startAt).toLocaleDateString(undefined, {
-                                    month: "short",
-                                    day: "numeric",
-                                    year: "2-digit",
-                                  })}
-                                  {" → "}
-                                  {new Date(cy.endAt).toLocaleDateString(undefined, {
-                                    month: "short",
-                                    day: "numeric",
-                                    year: "2-digit",
-                                  })}
-                                  <span className="text-gray-400">
-                                    {" "}
-                                    (
-                                    {cy.closeReason === "recovered_reentry"
-                                      ? "recovered → new buy"
-                                      : "full exit"}
-                                    )
-                                  </span>
-                                  {cy.freeCoinsCarried > 0 && (
-                                    <div className="mt-0.5 text-[10px] text-emerald-700 font-medium">
-                                      Free coins before next cycle: {formatCoinAmount(cy.freeCoinsCarried)}
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="px-3 py-2 text-right text-xs text-gray-700">
-                                  {cy.daysHeld}d held
-                                </td>
-                                <td className="px-3 py-2 text-right text-xs text-gray-600">
-                                  Buy avg {cy.avgBuyPrice != null ? formatPhp(cy.avgBuyPrice) : "—"}
-                                </td>
-                                <td className="px-3 py-2 text-right text-xs text-gray-600">
-                                  Sell avg {cy.avgSellPrice != null ? formatPhp(cy.avgSellPrice) : "—"}
-                                </td>
-                                <td
-                                  className={`px-3 py-2 text-right text-xs font-semibold ${
-                                    cy.realizedPnl >= 0 ? "text-green-600" : "text-red-600"
-                                  }`}
-                                >
-                                  {cy.realizedPnl >= 0 ? "+" : ""}
-                                  {formatPhp(cy.realizedPnl)}
-                                </td>
-                                <td className="px-3 py-2 text-right text-[10px] text-gray-500">
-                                  {cy.closeReason === "recovered_reentry" ? "House money" : "Closed"}
-                                </td>
-                              </tr>
-                            ))}
-                        </Fragment>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </>
+            );
+          })()
         )}
       </section>
 
