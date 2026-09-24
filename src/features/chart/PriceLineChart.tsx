@@ -187,15 +187,19 @@ export default function PriceLineChart({
   const swingChartData = useMemo(() => {
     if (!intradayPoints?.length) return [] as { label: string; price: number }[];
     const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    return intradayPoints
-      .filter((p) => {
-        const t = new Date((p as any).period || p.label).getTime();
-        return !Number.isNaN(t) && t >= cutoff;
-      })
-      .map((p) => ({
+    const mapped = intradayPoints.map((p) => {
+      const raw = (p as { period?: string }).period || p.label;
+      const t = new Date(raw).getTime();
+      return {
         label: p.label,
         price: getEffectivePrice(p),
-      }));
+        t: Number.isNaN(t) ? null : t,
+      };
+    });
+    const inWindow = mapped.filter((r) => r.t != null && r.t >= cutoff);
+    // If period/label parse fails or clock skew empties the window, show last ~7 days of points (~56 × 3h)
+    const rows = inWindow.length > 0 ? inWindow : mapped.slice(-56);
+    return rows.map(({ label, price }) => ({ label, price }));
   }, [intradayPoints]);
 
 

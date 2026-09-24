@@ -8,7 +8,7 @@ import TradingInsightCard from "./TradingInsightCard";
 import DCACalculator from "./DCACalculator";
 import { useChartLogic, type ChartRange } from "./useChartLogic";
 import { formatPhp } from "@/lib/format";
-import { getSupportResistance, BIAS_BADGE_CLASSES, BIAS_PRIORITY, isLongExtended, isWatchlistBuyLowHit } from "./Technicals";
+import { getSupportResistance, BIAS_BADGE_CLASSES, BIAS_PRIORITY, isLongExtended, isWatchlistBuyLowHit, isNearSupportWorthCheck } from "./Technicals";
 import { useCoinScanner, formatScanResultsForJournal, formatSingleScanResult } from "./useCoinScanner";
 
 const PriceLineChart = dynamic(() => import("./PriceLineChart"), {
@@ -62,10 +62,16 @@ export default function ChartView() {
 
   const sortedScanResults = useMemo(() => {
     return [...scanResults].sort((a, b) => {
-      // Buy-low hits first
-      const aHit = a.confluence && isWatchlistBuyLowHit(a.confluence) ? 0 : 1;
-      const bHit = b.confluence && isWatchlistBuyLowHit(b.confluence) ? 0 : 1;
-      if (aHit !== bHit) return aHit - bHit;
+      // 0 = primary buy-low hit, 1 = near-support worth-check, 2 = other
+      const tier = (r: (typeof scanResults)[number]) => {
+        if (!r.confluence) return 2;
+        if (isWatchlistBuyLowHit(r.confluence)) return 0;
+        if (isNearSupportWorthCheck(r.confluence)) return 1;
+        return 2;
+      };
+      const at = tier(a);
+      const bt = tier(b);
+      if (at !== bt) return at - bt;
       const aBias = a.confluence?.bias ?? "INSUFFICIENT DATA";
       const bBias = b.confluence?.bias ?? "INSUFFICIENT DATA";
       const priorityDiff = BIAS_PRIORITY[aBias] - BIAS_PRIORITY[bBias];
@@ -75,7 +81,7 @@ export default function ChartView() {
       if (aExt !== bExt) return aExt - bExt;
       const aScore = a.confluence?.score ?? 0;
       const bScore = b.confluence?.score ?? 0;
-      return bScore - aScore; // higher buy-low score first
+      return bScore - aScore;
     });
   }, [scanResults]);
 
@@ -83,11 +89,20 @@ export default function ChartView() {
     ? sortedScanResults
     : sortedScanResults.filter((r) => {
         if (r.error) return true;
-        return !!r.confluence && isWatchlistBuyLowHit(r.confluence);
+        if (!r.confluence) return false;
+        // Primary hits + secondary near-support plugs (not priority)
+        return isWatchlistBuyLowHit(r.confluence) || isNearSupportWorthCheck(r.confluence);
       });
 
   const directionalSignalCount = scanResults.filter(
     (r) => !!r.confluence && isWatchlistBuyLowHit(r.confluence)
+  ).length;
+
+  const worthCheckCount = scanResults.filter(
+    (r) =>
+      !!r.confluence &&
+      !isWatchlistBuyLowHit(r.confluence) &&
+      isNearSupportWorthCheck(r.confluence)
   ).length;
 
   const handleCopyScanResults = () => {
@@ -224,7 +239,7 @@ export default function ChartView() {
             <div className="flex items-center justify-between flex-wrap gap-2">
               <span className="text-[11px] text-gray-400">
                 {visibleScanResults.length} of {sortedScanResults.length} coins shown
-                {!showAllScanResults && " (near support / cooling into key level)"}
+                {!showAllScanResults && " (hits + near-support worth-check)"}
               </span>
               <div className="flex items-center gap-3">
                 <button
@@ -252,7 +267,7 @@ export default function ChartView() {
 
             {visibleScanResults.length === 0 ? (
               <p className="text-xs text-gray-500 py-2">
-                No buy-low watchlist hits right now — no coin is at/near support or cooling into a key level.
+                No buy-low watchlist hits right now — no LONG/NEUTRAL coin is near support or in the lower third of range.
                 Try "Show all coins" to see the full breakdown.
               </p>
             ) : (
@@ -282,6 +297,16 @@ export default function ChartView() {
                             🔥{r.streak}
                           </span>
                         )}
+                        {r.confluence &&
+                          !isWatchlistBuyLowHit(r.confluence) &&
+                          isNearSupportWorthCheck(r.confluence) && (
+                            <span
+                              className="rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold text-sky-800"
+                              title="Near support — secondary watch, not a priority hit"
+                            >
+                              📌 Check
+                            </span>
+                          )}
                         {r.confluence && (
                           <span
                             className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${
@@ -317,7 +342,29 @@ export default function ChartView() {
                           {r.confluence.score}/±{r.confluence.maxPossibleScore} ·{" "}
                           {(r.confluence.confidence * 100).toFixed(0)}% data
                           <br />
-                          {isLongExtended(r.confluence) ? (
+                          {isWatchlistBuyLowHit(r.confluence) ? (
+                            isLongExtended(r.confluence) ? (
+                              <span className="text-amber-700 font-semibold">
+                                ⏳ Extended — wait for pullback into ladder
+                              </span>
+                            ) : r.confluence.bias.includes("LONG") ? (
+                              <span className="text-emerald-700 font-medium">
+                                Near ladder / ready to stage
+                              </span>
+                            ) : (
+                              <span className="text-emerald-700/90 font-medium">
+                                Buy-low zone — watch for confirmation
+                              </span>
+                            )
+                          ) : isNearSupportWorthCheck(r.confluence) ? (
+                            <span className="text-sky-700 font-medium">
+                              📌 Worth to check — near support / key level
+                            </span>
+                          ) : r.confluence.bias.includes("SHORT") ? (
+                            <span className="text-rose-600 font-medium">
+                              Hold cash — do not buy
+                            </span>
+                          ) : isLongExtended(r.confluence) ? (
                             <span className="text-amber-700 font-semibold">
                               ⏳ Extended — wait for pullback into ladder
                             </span>
@@ -325,14 +372,8 @@ export default function ChartView() {
                             <span className="text-emerald-700 font-medium">
                               Near ladder / ready to stage
                             </span>
-                          ) : r.confluence.bias.includes("SHORT") ? (
-                            <span className="text-rose-600 font-medium">
-                              Hold cash — do not buy
-                            </span>
                           ) : null}
-                          {(isLongExtended(r.confluence) ||
-                            r.confluence.bias.includes("LONG") ||
-                            r.confluence.bias.includes("SHORT")) && <br />}
+                          <br />
                           <span className="text-gray-400">
                             {new Date(r.scannedAt).toLocaleTimeString("en-US", {
                               timeZone: "Asia/Manila",
@@ -508,6 +549,7 @@ export default function ChartView() {
                 }
                 support={technicals.support}
                 resistance={technicals.resistance}
+                intradayPoints={intradayPoints}
               />
             )}
           </div>

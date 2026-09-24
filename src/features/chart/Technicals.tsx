@@ -507,27 +507,61 @@ export function isLongExtended(c: ConfluenceResult): boolean {
  * LONG bias, not extended, and either within 1×ATR (or ~5%) of support
  * or still in the lower third of the 30d range.
  */
+/**
+ * Watchlist Scan keep-rule (spot buy-low / watch-the-floor):
+ * - Exclude SHORT / STRONG SHORT / INSUFFICIENT DATA (not buy candidates).
+ * - Include LONG and NEUTRAL when price is near support or in the lower third —
+ *   so coins sliding into the floor (e.g. ASTER NEUTRAL @ 22% of range) still appear
+ *   for analysis before a possible bounce.
+ * - LONG + extended still excluded via isLongExtended.
+ */
 export function isWatchlistBuyLowHit(c: ConfluenceResult): boolean {
-  if (!c.bias.includes("LONG")) return false;
+  if (c.bias === "INSUFFICIENT DATA") return false;
+  if (c.bias.includes("SHORT")) return false; // hold cash — not a buy-low watch hit
 
   const price = c.currentPrice;
   const support = c.support;
   if (price == null || !Number.isFinite(price) || support == null || support <= 0) return false;
 
-  if (isLongExtended(c)) return false;
+  // Only applies to LONG bias; NEUTRAL near floor is never "extended" for this helper
+  if (c.bias.includes("LONG") && isLongExtended(c)) return false;
 
-  // ATR near-band (1.0× ATR-14) when available; else ~5% of support
   const nearSupportBuffer = c.atr != null && c.atr > 0 ? 1.0 * c.atr : support * 0.05;
   const atOrNearKey = price <= support + nearSupportBuffer;
 
   const range = c.resistance - support;
   const positionInRange = range > 0 ? (price - support) / range : 0.5;
+  // Include mild breakdown just under support (still "at the floor")
   const lowerThird = positionInRange <= 0.33;
+  const justUnderSupport = price >= support * 0.97 && price < support;
 
-  return atOrNearKey || lowerThird;
+  return atOrNearKey || lowerThird || justUnderSupport;
 }
 
 
+
+
+/**
+ * Display-only: price under/near key support (no bias / score change).
+ * Used to plug secondary “worth to check” cards on Watchlist Scan.
+ */
+export function isNearSupportWorthCheck(c: ConfluenceResult): boolean {
+  const price = c.currentPrice;
+  const support = c.support;
+  if (price == null || !Number.isFinite(price) || support == null || support <= 0) return false;
+  if (c.bias === "INSUFFICIENT DATA") return false;
+
+  const nearSupportBuffer = c.atr != null && c.atr > 0 ? 1.0 * c.atr : support * 0.05;
+  if (price <= support + nearSupportBuffer) return true;
+
+  const range = c.resistance - support;
+  if (range > 0 && (price - support) / range <= 0.33) return true;
+
+  // Mild breakdown still “at the floor”
+  if (price >= support * 0.97 && price < support) return true;
+
+  return false;
+}
 
 export function computeConfluenceSignal(
   points: ChartPoint[],
