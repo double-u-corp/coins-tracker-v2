@@ -191,7 +191,20 @@ export function detectSwingPoints(points: ChartPoint[], strength = 3): SwingPoin
       swings.push({ index: i, price: points[i].high, type: "high" });
     }
   }
-  return swings;
+  const deduped: SwingPoint[] = [];
+  for (const s of swings) {
+    const prev = deduped[deduped.length - 1];
+    if (
+      prev &&
+      prev.type === s.type &&
+      prev.price > 0 &&
+      Math.abs(s.price - prev.price) / prev.price < 0.001
+    ) {
+      continue;
+    }
+    deduped.push(s);
+  }
+  return deduped;
 }
 
 /** Reads the last two confirmed swing lows and the last two confirmed
@@ -253,13 +266,22 @@ export function buildEntryLadder(points: ChartPoint[], support: number, currentP
     if (dedup.every((d) => Math.abs(d - lvl) / d > 0.01)) dedup.push(lvl);
     if (dedup.length >= 3) break;
   }
-  if (dedup.every((d) => Math.abs(d - support) / support > 0.01)) {
+  // Never stage ladder buys above market (breakdown case: support can sit above price)
+  if (
+    support <= currentPrice * 1.005 &&
+    dedup.every((d) => Math.abs(d - support) / support > 0.01)
+  ) {
     dedup.push(support);
   }
-  const levels = dedup.sort((a, b) => b - a).slice(0, 3);
+  const levels = dedup
+    .filter((p) => p <= currentPrice * 1.005)
+    .sort((a, b) => b - a)
+    .slice(0, 3);
 
   if (levels.length === 0) {
-    return [{ price: support, allocationPct: 100, basis: "support" }];
+    // Deep breakdown: anchor a single tranche slightly under market, not above
+    const emergency = Math.min(support, currentPrice * 0.99);
+    return [{ price: emergency, allocationPct: 100, basis: "support" }];
   }
 
   const weights = levels.length === 3 ? [30, 30, 40] : levels.length === 2 ? [40, 60] : [100];
@@ -378,69 +400,6 @@ export function detectCrossoverEvent(points: ChartPoint[]): string | null {
   return null;
 }
 
-/** Compact priority tags for Watchlist Scan cards — SMA crosses + key-level position. */
-export type PriorityFlag = {
-  id: string;
-  label: string;
-  tone: "bull" | "bear" | "neutral";
-};
-
-export function getScanPriorityFlags(
-  points: ChartPoint[],
-  opts?: { support?: number | null; resistance?: number | null; currentPrice?: number | null }
-): PriorityFlag[] {
-  const flags: PriorityFlag[] = [];
-  if (!points.length) return flags;
-
-  const currentPrice =
-    opts?.currentPrice != null ? opts.currentPrice : getEffectivePrice(points[points.length - 1]);
-  const support = opts?.support ?? getSupportResistance(points, 30).support;
-  const resistance = opts?.resistance ?? getSupportResistance(points, 30).resistance;
-
-  const sma50 = calculateSMAAt(points, 50, 0);
-  const sma200 = calculateSMAAt(points, 200, 0);
-  const prevSma50 = calculateSMAAt(points, 50, 1);
-  const prevSma200 = calculateSMAAt(points, 200, 1);
-  if (prevSma50 != null && prevSma200 != null && sma50 != null && sma200 != null) {
-    if (prevSma50 <= prevSma200 && sma50 > sma200)
-      flags.push({ id: "golden", label: "Golden cross", tone: "bull" });
-    if (prevSma50 >= prevSma200 && sma50 < sma200)
-      flags.push({ id: "death", label: "Death cross", tone: "bear" });
-  }
-
-  const sma20 = calculateSMAAt(points, 20, 0);
-  const prevSma20 = calculateSMAAt(points, 20, 1);
-  if (prevSma20 != null && prevSma50 != null && sma20 != null && sma50 != null) {
-    if (prevSma20 <= prevSma50 && sma20 > sma50)
-      flags.push({ id: "mom_up", label: "20>50 cross", tone: "bull" });
-    if (prevSma20 >= prevSma50 && sma20 < sma50)
-      flags.push({ id: "mom_dn", label: "20<50 cross", tone: "bear" });
-  }
-
-  if (points.length >= 21 && sma20 != null && prevSma20 != null) {
-    const prevPrice = getEffectivePrice(points[points.length - 2]);
-    if (prevPrice <= prevSma20 && currentPrice > sma20)
-      flags.push({ id: "px_above_20", label: "Price > 20 SMA", tone: "bull" });
-    if (prevPrice >= prevSma20 && currentPrice < sma20)
-      flags.push({ id: "px_below_20", label: "Price < 20 SMA", tone: "bear" });
-  }
-
-  const rsi = calculateRSIAt(points, 14);
-  if (rsi != null && rsi <= 30) flags.push({ id: "rsi_os", label: `RSI ${rsi.toFixed(0)} OS`, tone: "bull" });
-  if (rsi != null && rsi >= 70) flags.push({ id: "rsi_ob", label: `RSI ${rsi.toFixed(0)} OB`, tone: "bear" });
-
-  const range = resistance - support;
-  if (range > 0) {
-    const pos = (currentPrice - support) / range;
-    if (currentPrice < support) flags.push({ id: "below_sup", label: "Below support", tone: "bear" });
-    else if (currentPrice > resistance) flags.push({ id: "above_res", label: "Above resistance", tone: "bull" });
-    else if (pos <= 0.25) flags.push({ id: "near_sup", label: "Near support", tone: "bull" });
-    else if (pos >= 0.75) flags.push({ id: "near_res", label: "Near resistance", tone: "bear" });
-  }
-
-  return flags;
-}
-
 // ---------------------------------------------------------------------------
 // Confluence scoring engine — replaces the old OR-chained tradeBias logic.
 //
@@ -477,11 +436,11 @@ export const BIAS_BADGE_CLASSES: Record<BiasLabel, string> = {
  * before neutral, neutral before "we don't even have enough data yet." */
 export const BIAS_PRIORITY: Record<BiasLabel, number> = {
   "STRONG LONG": 0,
-  "STRONG SHORT": 0,
   LONG: 1,
-  SHORT: 1,
   NEUTRAL: 2,
-  "INSUFFICIENT DATA": 3,
+  SHORT: 3,
+  "STRONG SHORT": 4,
+  "INSUFFICIENT DATA": 5,
 };
 
 export interface SignalContribution {
@@ -521,21 +480,54 @@ export interface ConfluenceResult {
  */
 export function isLongExtended(c: ConfluenceResult): boolean {
   if (!c.bias.includes("LONG")) return false;
+  const price = c.currentPrice;
+  if (price == null || !Number.isFinite(price)) return false;
 
   const range = c.resistance - c.support;
-  const positionInRange = range > 0 ? (c.currentPrice - c.support) / range : 0.5;
-  // Upper 40% of the 30-day range → treat as extended for spot entries
+  const positionInRange = range > 0 ? (price - c.support) / range : 0.5;
+
+  // Upper 40% of 30d range is chasing strength
   if (positionInRange >= 0.6) return true;
 
+  // ATR cushion when available (scales with PHP pair volatility); else ~8% of support
+  const atrBuffer = c.atr != null && c.atr > 0 ? 1.5 * c.atr : c.support * 0.08;
+  if (c.support > 0 && price > c.support + atrBuffer) return true;
+
+  // Top ladder only if it sits meaningfully above base support (avoids 3% vs 5% collision)
   const ladder = c.entrySuggestion?.ladder;
   if (ladder && ladder.length > 0) {
-    const topLadder = Math.max(...ladder.map((l) => l.price));
-    // More than ~3% above the highest planned buy level → wait for dip
-    if (topLadder > 0 && c.currentPrice > topLadder * 1.03) return true;
+    const top = Math.max(...ladder.map((l) => l.price));
+    if (top > c.support * 1.01 && price > top * 1.03) return true;
   }
-
   return false;
 }
+
+/**
+ * Watchlist Scan keep-rule (spot LONG, buy-low only):
+ * LONG bias, not extended, and either within 1×ATR (or ~5%) of support
+ * or still in the lower third of the 30d range.
+ */
+export function isWatchlistBuyLowHit(c: ConfluenceResult): boolean {
+  if (!c.bias.includes("LONG")) return false;
+
+  const price = c.currentPrice;
+  const support = c.support;
+  if (price == null || !Number.isFinite(price) || support == null || support <= 0) return false;
+
+  if (isLongExtended(c)) return false;
+
+  // ATR near-band (1.0× ATR-14) when available; else ~5% of support
+  const nearSupportBuffer = c.atr != null && c.atr > 0 ? 1.0 * c.atr : support * 0.05;
+  const atOrNearKey = price <= support + nearSupportBuffer;
+
+  const range = c.resistance - support;
+  const positionInRange = range > 0 ? (price - support) / range : 0.5;
+  const lowerThird = positionInRange <= 0.33;
+
+  return atOrNearKey || lowerThird;
+}
+
+
 
 export function computeConfluenceSignal(
   points: ChartPoint[],
@@ -700,6 +692,8 @@ export function computeConfluenceSignal(
   const swingPoints = detectSwingPoints(swingSeries, 3);
   const swingStructure = getSwingStructure(swingPoints);
   maxPossible += 1;
+  // Classic structure: HH+HL = +1, LH+LL = −1. Buy-low selection is location-based
+  // (isWatchlistBuyLowHit / isLongExtended), not inverted structure scoring.
   if (swingStructure.available) {
     score += swingStructure.direction;
     signals.push({

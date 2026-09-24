@@ -8,7 +8,7 @@ import TradingInsightCard from "./TradingInsightCard";
 import DCACalculator from "./DCACalculator";
 import { useChartLogic, type ChartRange } from "./useChartLogic";
 import { formatPhp } from "@/lib/format";
-import { getSupportResistance, BIAS_BADGE_CLASSES, BIAS_PRIORITY, isLongExtended } from "./Technicals";
+import { getSupportResistance, BIAS_BADGE_CLASSES, BIAS_PRIORITY, isLongExtended, isWatchlistBuyLowHit } from "./Technicals";
 import { useCoinScanner, formatScanResultsForJournal, formatSingleScanResult } from "./useCoinScanner";
 
 const PriceLineChart = dynamic(() => import("./PriceLineChart"), {
@@ -25,7 +25,7 @@ const RANGE_OPTIONS: { label: string; value: ChartRange }[] = [
   { label: "3M", value: "3m" },
   { label: "6M", value: "6m" },
   { label: "1Y", value: "1y" },
-  { label: "2Y", value: "2y" },
+  { label: "3Y", value: "3y" },
 ];
 
 export default function ChartView() {
@@ -62,37 +62,32 @@ export default function ChartView() {
 
   const sortedScanResults = useMemo(() => {
     return [...scanResults].sort((a, b) => {
+      // Buy-low hits first
+      const aHit = a.confluence && isWatchlistBuyLowHit(a.confluence) ? 0 : 1;
+      const bHit = b.confluence && isWatchlistBuyLowHit(b.confluence) ? 0 : 1;
+      if (aHit !== bHit) return aHit - bHit;
       const aBias = a.confluence?.bias ?? "INSUFFICIENT DATA";
       const bBias = b.confluence?.bias ?? "INSUFFICIENT DATA";
       const priorityDiff = BIAS_PRIORITY[aBias] - BIAS_PRIORITY[bBias];
       if (priorityDiff !== 0) return priorityDiff;
-      // Cross / key-level flags first (user priority triage)
-      const aFlags = a.priorityFlags?.length ?? 0;
-      const bFlags = b.priorityFlags?.length ?? 0;
-      if (aFlags !== bFlags) return bFlags - aFlags;
-      // Buy-low: among LONGs, near-ladder setups before extended "wait for dip"
       const aExt = a.confluence ? (isLongExtended(a.confluence) ? 1 : 0) : 0;
       const bExt = b.confluence ? (isLongExtended(b.confluence) ? 1 : 0) : 0;
       if (aExt !== bExt) return aExt - bExt;
-      const aScore = Math.abs(a.confluence?.score ?? 0);
-      const bScore = Math.abs(b.confluence?.score ?? 0);
-      return bScore - aScore;
+      const aScore = a.confluence?.score ?? 0;
+      const bScore = b.confluence?.score ?? 0;
+      return bScore - aScore; // higher buy-low score first
     });
   }, [scanResults]);
 
   const visibleScanResults = showAllScanResults
     ? sortedScanResults
     : sortedScanResults.filter((r) => {
-        const bias = r.confluence?.bias;
-        return bias === "STRONG LONG" || bias === "LONG" || bias === "STRONG SHORT" || bias === "SHORT" || r.error;
+        if (r.error) return true;
+        return !!r.confluence && isWatchlistBuyLowHit(r.confluence);
       });
 
   const directionalSignalCount = scanResults.filter(
-    (r) =>
-      r.confluence?.bias === "STRONG LONG" ||
-      r.confluence?.bias === "LONG" ||
-      r.confluence?.bias === "STRONG SHORT" ||
-      r.confluence?.bias === "SHORT"
+    (r) => !!r.confluence && isWatchlistBuyLowHit(r.confluence)
   ).length;
 
   const handleCopyScanResults = () => {
@@ -114,27 +109,8 @@ export default function ChartView() {
 
   const activePortfolio = useMemo(() => {
     if (!symbol || !portfolio) return null;
-    const base = portfolio.find((p) => p.symbol === symbol) || null;
-    if (!base) return null;
-
-    const buys = (transactions || [])
-      .filter((tx) => tx.symbol === symbol && String(tx.type).toLowerCase() === "buy")
-      .sort(
-        (a, b) => new Date(a.transactedAt).getTime() - new Date(b.transactedAt).getTime()
-      );
-    const firstBuyAt = buys[0]?.transactedAt ?? null;
-    const daysHeld =
-      firstBuyAt != null
-        ? Math.max(0, Math.round((Date.now() - new Date(firstBuyAt).getTime()) / (1000 * 60 * 60 * 24)))
-        : null;
-
-    return {
-      holdings: base.holdings,
-      spent: base.spent,
-      firstBuyAt,
-      daysHeld,
-    };
-  }, [symbol, portfolio, transactions]);
+    return portfolio.find((p) => p.symbol === symbol) || null;
+  }, [symbol, portfolio]);
 
   const currentPrice = useMemo(() => {
     if (selectedCoin?.currentPrice != null) {
@@ -248,7 +224,7 @@ export default function ChartView() {
             <div className="flex items-center justify-between flex-wrap gap-2">
               <span className="text-[11px] text-gray-400">
                 {visibleScanResults.length} of {sortedScanResults.length} coins shown
-                {!showAllScanResults && " (LONG/SHORT signals only)"}
+                {!showAllScanResults && " (near support / cooling into key level)"}
               </span>
               <div className="flex items-center gap-3">
                 <button
@@ -269,14 +245,14 @@ export default function ChartView() {
                   onClick={() => setShowAllScanResults((v) => !v)}
                   className="text-[11px] font-medium text-purple-700 hover:underline"
                 >
-                  {showAllScanResults ? "Show signals only" : "Show all coins"}
+                  {showAllScanResults ? "Show buy-low hits only" : "Show all coins"}
                 </button>
               </div>
             </div>
 
             {visibleScanResults.length === 0 ? (
               <p className="text-xs text-gray-500 py-2">
-                No LONG or SHORT signals right now — every tracked coin is NEUTRAL or still accumulating history.
+                No buy-low watchlist hits right now — no coin is at/near support or cooling into a key level.
                 Try "Show all coins" to see the full breakdown.
               </p>
             ) : (
@@ -357,25 +333,6 @@ export default function ChartView() {
                           {(isLongExtended(r.confluence) ||
                             r.confluence.bias.includes("LONG") ||
                             r.confluence.bias.includes("SHORT")) && <br />}
-                          {r.priorityFlags && r.priorityFlags.length > 0 && (
-                            <span className="mt-1 flex flex-wrap gap-1">
-                              {r.priorityFlags.slice(0, 4).map((f) => (
-                                <span
-                                  key={f.id}
-                                  className={`inline-block rounded border px-1 py-0.5 text-[9px] font-bold ${
-                                    f.tone === "bull"
-                                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                                      : f.tone === "bear"
-                                      ? "border-rose-200 bg-rose-50 text-rose-800"
-                                      : "border-gray-200 bg-gray-50 text-gray-600"
-                                  }`}
-                                  title="Priority check: SMA cross or key level"
-                                >
-                                  {f.label}
-                                </span>
-                              ))}
-                            </span>
-                          )}
                           <span className="text-gray-400">
                             {new Date(r.scannedAt).toLocaleTimeString("en-US", {
                               timeZone: "Asia/Manila",
@@ -539,7 +496,6 @@ export default function ChartView() {
             ) : (
               <PriceLineChart
                 points={points}
-                intradayPoints={intradayPoints}
                 journalLabels={journalLabelsInView}
                 showHigh={showHigh}
                 showLow={showLow}

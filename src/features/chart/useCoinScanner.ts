@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import type { ChartPoint, CoinSummary } from "@/validators/recordSchema";
-import { computeConfluenceSignal, isLongExtended, getScanPriorityFlags, type ConfluenceResult, type PriorityFlag } from "./Technicals";
+import { computeConfluenceSignal, isLongExtended, isWatchlistBuyLowHit, type ConfluenceResult } from "./Technicals";
 
 export interface ScanResult {
   symbol: string;
@@ -10,8 +10,6 @@ export interface ScanResult {
   /** Always 0 — scan-log / streak API removed; field kept so UI stays compatible. */
   streak: number;
   scannedAt: string; // ISO timestamp, captured at the moment this coin's scan completed
-  /** SMA crosses / key-level tags for priority triage on scan cards. */
-  priorityFlags: PriorityFlag[];
 }
 
 // Fetch a bounded number of coins at once rather than firing one request per
@@ -87,14 +85,6 @@ export function useCoinScanner(allCoins: CoinSummary[]) {
             points.length > 0
               ? computeConfluenceSignal(points, { currentPrice: coin.currentPrice, intradayPoints })
               : null;
-          const priorityFlags =
-            points.length > 0
-              ? getScanPriorityFlags(points, {
-                  currentPrice: coin.currentPrice,
-                  support: confluence?.support,
-                  resistance: confluence?.resistance,
-                })
-              : [];
           results.push({
             symbol: coin.symbol,
             name: coin.name,
@@ -102,7 +92,6 @@ export function useCoinScanner(allCoins: CoinSummary[]) {
             error: null,
             streak: 0,
             scannedAt: new Date().toISOString(),
-            priorityFlags,
           });
         } catch (err) {
           results.push({
@@ -112,7 +101,6 @@ export function useCoinScanner(allCoins: CoinSummary[]) {
             error: (err as Error).message,
             streak: 0,
             scannedAt: new Date().toISOString(),
-            priorityFlags: [],
           });
         }
         setScanProgress((prev) => ({ ...prev, completed: prev.completed + 1 }));
@@ -215,13 +203,11 @@ export function formatSingleScanResult(r: ScanResult): string {
 export function formatScanResultsForJournal(results: ScanResult[]): string {
   const dateStr = new Date().toISOString().slice(0, 10);
 
-  const isDirectional = (r: ScanResult) =>
-    r.confluence?.bias === "STRONG LONG" ||
-    r.confluence?.bias === "LONG" ||
-    r.confluence?.bias === "STRONG SHORT" ||
-    r.confluence?.bias === "SHORT";
+  const isWatchlistHit = (r: ScanResult) =>
+    !!r.confluence && isWatchlistBuyLowHit(r.confluence);
 
-  const signalResults = results.filter(isDirectional);
+  // Watchlist Scan: only coins near support / cooling into key level (buy-low)
+  const signalResults = results.filter(isWatchlistHit);
 
   if (signalResults.length === 0) {
     return `## Watchlist Scan — ${dateStr}\n\nNo LONG or SHORT signals today. All tracked coins are NEUTRAL or still accumulating price history.`;
