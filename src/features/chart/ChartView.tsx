@@ -25,7 +25,7 @@ const RANGE_OPTIONS: { label: string; value: ChartRange }[] = [
   { label: "3M", value: "3m" },
   { label: "6M", value: "6m" },
   { label: "1Y", value: "1y" },
-  { label: "2Y", value: "2y" },
+  { label: "3Y", value: "3y" },
 ];
 
 export default function ChartView() {
