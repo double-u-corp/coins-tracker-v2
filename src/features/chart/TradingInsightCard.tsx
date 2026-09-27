@@ -248,6 +248,79 @@ export function formatEntryReviewPrompt(
 }
 
 
+
+/** Compact review text for Google ?q= (stays under URL limits). Full detail stays on Copy. */
+export function formatEntryReviewPromptForGoogle(
+  symbol: string,
+  confluence: ReturnType<typeof computeConfluenceSignal>,
+  crossoverAlert: string | null,
+  activePortfolio?: {
+    holdings: number;
+    spent: number;
+    firstBuyAt?: string | null;
+    daysHeld?: number | null;
+  } | null
+): string {
+  const c = confluence;
+  const { base, pair, label } = formatAssetLabel(symbol);
+  const holdings = activePortfolio?.holdings ?? 0;
+  const spent = activePortfolio?.spent ?? 0;
+  const isAllocated = holdings > 0;
+  const avgCost = isAllocated && holdings > 0 ? spent / holdings : null;
+
+  const parts: string[] = [];
+
+  if (isAllocated) {
+    parts.push(
+      `Spot LONG review (already holding) ${label}. Pair ${pair}; search news as ${base} crypto not index/other meanings. No short/leverage. Hold, trim, or wait?`
+    );
+    if (avgCost != null) {
+      parts.push(`Avg cost ~${avgCost.toFixed(4)}; price ${c.currentPrice}; holdings ${holdings}.`);
+    }
+  } else {
+    parts.push(
+      `Spot LONG-only entry review ${label}. Pair ${pair}; search news as ${base} crypto not other meanings. No short/leverage/margin. Stage ladder buys or wait?`
+    );
+  }
+
+  parts.push(
+    `Data: ~8 polls/day → daily H/L for RSI/SMA/ATR/range; 3h series (~14d) for swings/ladder. Bias LONG=buy bias, SHORT=hold cash (never short).`
+  );
+
+  parts.push(
+    `Snapshot: bias ${c.bias} (score ${c.score >= 0 ? "+" : ""}${c.score}/±${c.maxPossibleScore}, ${(c.confidence * 100).toFixed(0)}% conf). Macro ${c.macroTrend}. Price ${c.currentPrice}; support ${c.support}; resistance ${c.resistance}.`
+  );
+
+  if (c.invalidationLevel != null) {
+    parts.push(`Invalidation ~${Number(c.invalidationLevel).toFixed(2)}.`);
+  }
+
+  const sigBits = c.signals
+    .filter((s) => s.available && s.weight !== 0)
+    .slice(0, 6)
+    .map((s) => `${s.name}:${s.weight > 0 ? "+" : ""}${s.weight}`)
+    .join("; ");
+  if (sigBits) parts.push(`Signals: ${sigBits}.`);
+
+  if (crossoverAlert) parts.push(`Event: ${crossoverAlert}`);
+
+  if (c.entrySuggestion?.ladder?.length) {
+    const ladder = c.entrySuggestion.ladder
+      .map((l) => `~${l.price}(${l.allocationPct}%)`)
+      .join(", ");
+    parts.push(`Ladder limits: ${ladder}.`);
+  }
+  if (c.exitSuggestion?.price != null) {
+    parts.push(`TP ref ~${c.exitSuggestion.price}.`);
+  }
+
+  parts.push(
+    `Answer: 1) READY TO STAGE | WAIT FOR PULLBACK | SKIP  2) why (tech + verified news only)  3) ladder levels + invalidation  4) spot risk  5) news or none verified. Do not invent news.`
+  );
+
+  return parts.join(" ");
+}
+
 export default function TradingInsightCard({
   points,
   symbol,
@@ -279,11 +352,40 @@ export default function TradingInsightCard({
   const style = BIAS_STYLES[confluence.bias];
   const isInsufficient = confluence.bias === "INSUFFICIENT DATA";
 
+  const buildAgentPrompt = () =>
+    formatEntryReviewPrompt(symbol, confluence, crossoverAlert, activePortfolio);
+
   const handleCopyAgentPrompt = () => {
-    const prompt = formatEntryReviewPrompt(symbol, confluence, crossoverAlert, activePortfolio);
+    const prompt = buildAgentPrompt();
     navigator.clipboard.writeText(prompt);
     setAgentCopied(true);
     setTimeout(() => setAgentCopied(false), 2000);
+  };
+
+  /**
+   * Open Google with the review text.
+   * Browsers cannot programmatically paste into Google's box (security).
+   * The only auto-fill is ?q= in the URL — Google truncates long queries (~2k chars),
+   * so we always copy the FULL prompt and open a tab; user pastes with Ctrl/Cmd+V
+   * when the box is empty or truncated (same practical flow as long Catalyst prompts).
+   */
+  const handleOpenGoogleReview = () => {
+    // Full prompt on clipboard for paste into Gemini/AI Mode if needed
+    const full = buildAgentPrompt();
+    void navigator.clipboard.writeText(full).catch(() => {});
+
+    // Compact prompt fits Google ?q= without mid-sentence cut
+    const mini = formatEntryReviewPromptForGoogle(
+      symbol,
+      confluence,
+      crossoverAlert,
+      activePortfolio
+    );
+    const url = `https://www.google.com/search?q=${encodeURIComponent(mini)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+
+    setAgentCopied(true);
+    setTimeout(() => setAgentCopied(false), 2500);
   };
 
   return (
@@ -296,14 +398,22 @@ export default function TradingInsightCard({
           <button
             type="button"
             onClick={handleCopyAgentPrompt}
-            title="Copy a review prompt for an agent (technicals only — no news search)"
+            title="Copy review prompt to clipboard"
             className="rounded-md border border-gray-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
           >
             {agentCopied
-              ? "✅ Copied agent prompt"
+              ? "✅ Copied — Ctrl/Cmd+V to paste"
               : activePortfolio && activePortfolio.holdings > 0
               ? "📋 Copy hold/exit review"
               : "📋 Copy entry review"}
+          </button>
+          <button
+            type="button"
+            onClick={handleOpenGoogleReview}
+            title="Opens Google with a short full-context review (fits URL). Full long prompt also copied for paste if needed."
+            className="rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-800 hover:bg-sky-100"
+          >
+            🔍 Google review
           </button>
           <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold ${BIAS_BADGE_CLASSES[confluence.bias]}`}>
             BIAS: {confluence.bias}

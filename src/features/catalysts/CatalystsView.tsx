@@ -1,71 +1,86 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import Link from "next/link";
+import AlertBanner from "@/components/AlertBanner";
+import FormattedAiResponse from "@/components/FormattedAiResponse";
 import {
   useCatalystsLogic,
   buildPortablePrompt,
   type CatalystPrompt,
 } from "./useCatalystsLogic";
-import Dropdown from "@/components/Dropdown";
-import JournalSidebar from "@/features/chart/JournalSidebar";
-import FormattedAiResponse from "@/components/FormattedAiResponse";
 import { extractJsonArray, attachManilaFields, sortEventsChronologically } from "../../lib/macroEvents";
 
-function MacroEventsList({ rawResponse }: { rawResponse: string }) {
-  let events;
-  try {
-    events = sortEventsChronologically(attachManilaFields(extractJsonArray(rawResponse)));
-  } catch {
+/** Calendar strip from macro JSON AI response */
+function EventCalendarStrip({ raw }: { raw: string }) {
+  const events = useMemo(() => {
+    try {
+      const arr = extractJsonArray(raw);
+      if (!Array.isArray(arr) || arr.length === 0) return [];
+      return sortEventsChronologically(attachManilaFields(arr)).slice(0, 12);
+    } catch {
+      return [];
+    }
+  }, [raw]);
+
+  if (events.length === 0) {
     return (
-      <div className="text-xs text-red-600 bg-red-50 p-2.5 rounded border border-red-200">
-        ⚠️ Couldn&apos;t parse event data — try Re-Scan.
-      </div>
+      <p className="text-xs text-slate-500 py-3 text-center">
+        Run <span className="font-semibold text-slate-700">Event Calendar</span> to load verified dates (FOMC, CPI, NFP…).
+      </p>
     );
   }
 
-  if (events.length === 0) {
-    return <p className="text-xs text-gray-500">No scheduled events found.</p>;
-  }
-
   return (
-    <div className="space-y-2">
-      {events.map((evt: any, idx: number) => (
-        <div
-          key={idx}
-          className={`flex items-center justify-between gap-3 p-2.5 rounded border text-xs ${
-            evt.severity === "high" ? "bg-red-50 border-red-200" : "bg-amber-50 border-amber-200"
-          }`}
-        >
-          <div className="flex-1">
-            <span className="font-bold text-gray-900">{evt.title}</span>
-            <span className="ml-2 uppercase text-[10px] font-semibold text-gray-500">{evt.type}</span>
+    <div className="flex gap-2 overflow-x-auto pb-1 snap-x">
+      {events.map((evt: any, idx: number) => {
+        const high = evt.severity === "high" || evt.type === "FOMC" || /FOMC|CPI|NFP/i.test(String(evt.title || ""));
+        return (
+          <div
+            key={idx}
+            className={`snap-start shrink-0 w-[220px] sm:w-[240px] rounded-2xl border p-4 sm:p-5 shadow-sm ${
+              high
+                ? "border-rose-200 bg-gradient-to-br from-rose-50 to-white"
+                : "border-slate-200 bg-gradient-to-br from-slate-50 to-white"
+            }`}
+          >
+            <div className={`text-[11px] font-bold uppercase tracking-wide ${high ? "text-rose-600" : "text-slate-400"}`}>
+              {evt.type || "Event"}
+            </div>
+            <div className="mt-2 text-sm sm:text-base font-bold text-slate-900 line-clamp-3 leading-snug min-h-[3.25rem]">
+              {evt.title}
+            </div>
+            <div className="mt-3 text-sm font-bold tabular-nums text-slate-800">
+              {evt.manilaDateKey || evt.date || "—"}
+            </div>
+            <div className="mt-0.5 text-xs text-slate-500">
+              {evt.manilaTimeLabel || evt.approximateTime || "time TBD"}
+            </div>
           </div>
-          <div className="text-right">
-            <div className="font-semibold text-gray-800">{evt.manilaDateKey || evt.date}</div>
-            <div className="text-gray-500">{evt.manilaTimeLabel || (evt.approximateTime ? "time TBD" : "")}</div>
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
-type PromptCardProps = {
-  item: CatalystPrompt;
-  selectedCoin: string;
-  statusInfo: { status: string; label: string };
-  cachedData?: { response: string; timestamp: number };
-  isLoading: boolean;
-  errorMsg?: string;
-  copiedId: string | null;
-  savedStatus: Record<string, boolean>;
-  onCopyPortable: (id: string, text: string) => void;
-  onGoogle: (q: string) => void;
-  onRun: (item: CatalystPrompt, force: boolean) => void;
-  onSaveJournal: (id: string, title: string, text: string) => void;
+const SECTION_META: Record<string, { title: string; blurb: string; emoji: string }> = {
+  Macro: {
+    title: "Calendar & macro weather",
+    blurb: "Fed, CPI, geopolitics, yields — the backdrop for every spot long.",
+    emoji: "📅",
+  },
+  Live: {
+    title: "Live stress & security",
+    blurb: "Liquidations, outages, confirmed hacks — last 72 hours.",
+    emoji: "⚡",
+  },
+  Weekly: {
+    title: "Week ahead",
+    blurb: "Flows, unlocks, upgrades, PH platform rails.",
+    emoji: "🗓️",
+  },
 };
 
 function PromptCard({
   item,
-  selectedCoin,
   statusInfo,
   cachedData,
   isLoading,
@@ -76,114 +91,108 @@ function PromptCard({
   onGoogle,
   onRun,
   onSaveJournal,
-}: PromptCardProps) {
+}: {
+  item: CatalystPrompt;
+  statusInfo: { status: string; label: string };
+  cachedData?: { response: string; timestamp: number };
+  isLoading: boolean;
+  errorMsg?: string;
+  copiedId: string | null;
+  savedStatus: Record<string, boolean>;
+  onCopyPortable: (id: string, text: string) => void;
+  onGoogle: (q: string) => void;
+  onRun: (item: CatalystPrompt, force: boolean) => void;
+  onSaveJournal: (id: string, title: string, text: string) => void;
+}) {
   const isCurrent = statusInfo.status === "current";
+  const portable = buildPortablePrompt(item.prompt);
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50/50 p-4">
-      <div className="space-y-1">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="rounded bg-gray-200 text-gray-700 text-[10px] font-bold uppercase px-2 py-0.5">
-            {item.category}
-          </span>
-          <span
-            className={`rounded text-[10px] font-bold uppercase px-2 py-0.5 ${
-              item.scope === "global" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
-            }`}
-          >
-            {item.scope === "global" ? "🌐 Market-wide" : `🎯 ${selectedCoin || "Coin"}`}
-          </span>
-          {item.tier === "deepDive" && (
-            <span className="rounded text-[10px] font-bold uppercase px-2 py-0.5 bg-orange-100 text-orange-700">
-              🔬 Deep Dive
-            </span>
-          )}
-          <h3 className="font-semibold text-gray-900 text-sm">{item.title}</h3>
-          <span
-            className={`text-[10px] font-medium px-2 py-0.5 rounded border ${
-              statusInfo.status === "current"
-                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                : statusInfo.status === "expired"
-                ? "bg-amber-50 text-amber-700 border-amber-200"
-                : "bg-gray-100 text-gray-500 border-gray-200"
-            }`}
-          >
-            {statusInfo.label}
-          </span>
+    <div className="group relative flex flex-col gap-3 overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:shadow-md">
+      <div className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-violet-500 to-sky-400 opacity-80" />
+      <div className="pl-2">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900 leading-snug">{item.title}</h3>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-slate-600">
+                {item.category}
+              </span>
+              <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-bold uppercase text-sky-700">
+                Market-wide
+              </span>
+              <span
+                className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                  isCurrent ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+                }`}
+              >
+                {statusInfo.label}
+              </span>
+            </div>
+          </div>
         </div>
 
-        <p className="text-xs text-gray-600 font-mono bg-white p-2 rounded border border-gray-200 mt-1">
-          &ldquo;{item.prompt}&rdquo;
-        </p>
-
-        <div className="flex justify-end gap-2 pt-1 flex-wrap">
-          <button
-            type="button"
-            onClick={() => onCopyPortable(`${item.id}-portable`, buildPortablePrompt(item.prompt))}
-            className="px-3.5 py-2 rounded-md text-xs font-semibold bg-gray-700 text-white hover:bg-gray-800 whitespace-nowrap shadow-sm"
-          >
-            {copiedId === `${item.id}-portable` ? "✅ Copied!" : "🤝 Copy for AI"}
-          </button>
+        <div className="mt-3 flex flex-wrap gap-1.5">
           <button
             type="button"
             onClick={() => onGoogle(item.searchQuery)}
-            className="px-3.5 py-2 rounded-md text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 whitespace-nowrap shadow-sm"
+            className="rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-[11px] font-bold text-sky-800 hover:bg-sky-100"
           >
             🔍 Google
           </button>
           <button
             type="button"
+            onClick={() => onCopyPortable(item.id, portable)}
+            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50"
+          >
+            {copiedId === item.id ? "✅ Copied" : "📋 Copy prompt"}
+          </button>
+          <button
+            type="button"
             onClick={() => onRun(item, true)}
             disabled={isLoading}
-            className="px-3.5 py-2 rounded-md text-xs font-semibold bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 whitespace-nowrap shadow-sm"
+            className="rounded-lg bg-violet-600 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-violet-700 disabled:opacity-50"
           >
-            {isLoading ? "Searching..." : cachedData ? "Re-Scan" : "Run Scan"}
+            {isLoading ? "Scanning…" : "✨ AI scan"}
           </button>
-        </div>
-      </div>
-
-      {errorMsg && (
-        <div className="text-xs text-red-600 bg-red-50 p-2.5 rounded border border-red-200">⚠️ {errorMsg}</div>
-      )}
-
-      {cachedData?.response && !isLoading && (
-        <div className="rounded-lg border border-purple-200 bg-purple-50/40 p-4 mt-2 space-y-3">
-          {item.responseFormat === "json" ? (
-            <MacroEventsList rawResponse={cachedData.response} />
-          ) : (
-            <FormattedAiResponse text={cachedData.response} />
-          )}
-          <div className="pt-2 border-t border-purple-100 flex items-center justify-between">
-            <span className="text-[11px] text-gray-400 font-medium">
-              Last Updated:{" "}
-              {new Date(cachedData.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-            </span>
+          {cachedData?.response && (
             <button
               type="button"
               onClick={() => onSaveJournal(item.id, item.title, cachedData.response)}
-              className="px-3 py-1 rounded bg-purple-600 text-white text-xs font-medium hover:bg-purple-700 transition"
+              className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-bold text-emerald-800 hover:bg-emerald-100"
             >
-              {savedStatus[item.id] ? "Saved!" : "Add to Journal"}
+              {savedStatus[item.id] ? "✅ Saved" : "📓 Journal"}
             </button>
-          </div>
+          )}
         </div>
-      )}
+
+        {errorMsg && (
+          <p className="mt-2 text-[11px] font-medium text-rose-600">{errorMsg}</p>
+        )}
+
+        {cachedData?.response && (
+          <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50/80 p-3">
+            <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              Latest scan · {new Date(cachedData.timestamp).toLocaleString()}
+            </div>
+            {item.responseFormat === "json" ? (
+              <EventCalendarStrip raw={cachedData.response} />
+            ) : (
+              <div className="max-h-64 overflow-y-auto text-xs">
+                <FormattedAiResponse text={cachedData.response} />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
 export default function CatalystsView() {
   const {
-    selectedCoin,
-    setSelectedCoin,
     selectedCategory,
     setSelectedCategory,
-    selectedScope,
-    setSelectedScope,
-    coinOptions,
-    coinsLoading,
-    coinPrompts,
-    globalPrompts,
     filteredPrompts,
     copiedId,
     handleCopy,
@@ -191,9 +200,6 @@ export default function CatalystsView() {
     journalLoading,
     journalError,
     authenticated,
-    addJournalEntry,
-    deleteJournalEntry,
-    updateJournalEntry,
     aiCache,
     aiLoading,
     aiErrors,
@@ -201,221 +207,192 @@ export default function CatalystsView() {
     runAiSearch,
     getPromptStatus,
     saveAiResponseToJournal,
-    isDeepDiveOn,
-    toggleDeepDive,
   } = useCatalystsLogic();
 
-  const [activeTab, setActiveTab] = useState<"scanner" | "library">("scanner");
+  const [activeHub, setActiveHub] = useState<"weather" | "notes">("weather");
 
   const openGoogleSearch = (query: string) => {
-    window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, "_blank", "noopener,noreferrer");
+    window.open(
+      `https://www.google.com/search?q=${encodeURIComponent(query)}`,
+      "_blank",
+      "noopener,noreferrer"
+    );
   };
 
-  const renderPromptList = (items: CatalystPrompt[]) =>
-    items.map((item) => (
-      <PromptCard
-        key={item.id}
-        item={item}
-        selectedCoin={selectedCoin}
-        statusInfo={getPromptStatus(item.id, item.category)}
-        cachedData={aiCache[item.id]}
-        isLoading={!!aiLoading[item.id]}
-        errorMsg={aiErrors[item.id]}
-        copiedId={copiedId}
-        savedStatus={savedStatus}
-        onCopyPortable={handleCopy}
-        onGoogle={openGoogleSearch}
-        onRun={(item) => runAiSearch(item, true)}
-        onSaveJournal={saveAiResponseToJournal}
-      />
-    ));
+  // Force market-wide: filter to global only in this redesign
+  const marketPrompts = useMemo(
+    () => filteredPrompts.filter((p) => p.scope === "global"),
+    [filteredPrompts]
+  );
+
+  const calendarCache = aiCache["macro-calendar-events"];
+
+  const bySection = useMemo(() => {
+    const order = ["Macro", "Live", "Weekly"] as const;
+    return order.map((cat) => ({
+      cat,
+      items: marketPrompts.filter((p) => p.category === cat),
+    })).filter((s) => s.items.length > 0);
+  }, [marketPrompts]);
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Primary mode: Coin vs Market-wide */}
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => setSelectedScope("coin")}
-          className={`px-4 py-2 rounded-md text-sm font-semibold transition ${
-            selectedScope === "coin"
-              ? "bg-purple-600 text-white shadow-sm"
-              : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-          }`}
-        >
-          🎯 Coin catalysts
-        </button>
-        <button
-          type="button"
-          onClick={() => setSelectedScope("global")}
-          className={`px-4 py-2 rounded-md text-sm font-semibold transition ${
-            selectedScope === "global"
-              ? "bg-blue-600 text-white shadow-sm"
-              : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-          }`}
-        >
-          🌐 Market-wide
-        </button>
-        <div className="flex gap-1 ml-auto">
-          <button
-            type="button"
-            onClick={() => setActiveTab("scanner")}
-            className={`px-3 py-2 rounded-md text-xs font-semibold transition ${
-              activeTab === "scanner" ? "bg-gray-800 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-            }`}
-          >
-            AI Scanner
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("library")}
-            className={`px-3 py-2 rounded-md text-xs font-semibold transition ${
-              activeTab === "library" ? "bg-gray-800 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-            }`}
-          >
-            Prompt library
-          </button>
+    <div className="mx-auto flex max-w-5xl flex-col gap-6 pb-10">
+      {/* Hero */}
+      <div className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 px-5 py-6 text-white shadow-lg sm:px-8 sm:py-8">
+        <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-violet-500/30 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-8 left-1/3 h-32 w-32 rounded-full bg-sky-400/20 blur-3xl" />
+        <div className="relative">
+          <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-violet-300">Market weather</p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">Catalysts & calendar</h1>
+          <p className="mt-2 max-w-xl text-sm text-slate-300 leading-relaxed">
+            Macro and systemic risk only — Fed, CPI, geopolitics, hacks, weekly flows.
+            Per-coin entry news lives on the <span className="text-white font-semibold">Chart</span> agent review.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setActiveHub("weather")}
+              className={`rounded-full px-4 py-1.5 text-xs font-bold transition ${
+                activeHub === "weather" ? "bg-white text-slate-900" : "bg-white/10 text-white hover:bg-white/20"
+              }`}
+            >
+              🌐 Market weather
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveHub("notes")}
+              className={`rounded-full px-4 py-1.5 text-xs font-bold transition ${
+                activeHub === "notes" ? "bg-white text-slate-900" : "bg-white/10 text-white hover:bg-white/20"
+              }`}
+            >
+              📓 Macro notes
+            </button>
+            <Link
+              href="/chart"
+              className="rounded-full bg-violet-500/90 px-4 py-1.5 text-xs font-bold text-white hover:bg-violet-400"
+            >
+              Chart · coin review →
+            </Link>
+          </div>
         </div>
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm space-y-4">
-        <div>
-          <h2 className="text-lg font-bold text-gray-900">
-            {selectedScope === "coin" ? "🎯 Coin catalysts" : "🌐 Market-wide catalysts"}
-          </h2>
-          <p className="text-xs text-gray-500 mt-1">
-            {selectedScope === "coin"
-              ? "News, listings, unlocks, and upcoming events for one tracked coin (from your coins API)."
-              : "Fed/CPI, risk-off stress, alt flows, regulation, Coins.ph — same for every asset. No coin required."}
-          </p>
-        </div>
-
-        {/* Coin picker only in coin mode */}
-        {selectedScope === "coin" && (
-          <div className="flex flex-wrap items-end gap-4 border-t border-gray-100 pt-4">
-            <div className="min-w-[220px] flex-1 max-w-md">
-              {coinsLoading ? (
-                <p className="text-xs text-gray-400">Loading coins…</p>
-              ) : coinOptions.length === 0 ? (
-                <p className="text-xs text-amber-700">No coins from API. Add coins on the manage page first.</p>
-              ) : (
-                <Dropdown
-                  label="Coin"
-                  placeholder="Select a coin"
-                  value={selectedCoin}
-                  onChange={setSelectedCoin}
-                  options={coinOptions}
-                />
-              )}
-            </div>
-            <div className="flex items-center gap-3 pb-1">
+      {activeHub === "weather" && (
+        <>
+          {/* Calendar strip */}
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div>
-                <span className="text-xs font-semibold text-gray-700">Deep Dive</span>
-                <p className="text-[10px] text-gray-500">Social & competitive (opt-in)</p>
+                <h2 className="text-base font-bold text-slate-900">📅 Upcoming schedule</h2>
+                <p className="text-[11px] text-slate-500">
+                  Verified macro dates · Manila labels when available · run Event Calendar to refresh
+                </p>
               </div>
               <button
                 type="button"
-                onClick={() => selectedCoin && toggleDeepDive(selectedCoin)}
-                disabled={!selectedCoin}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition whitespace-nowrap disabled:opacity-40 ${
-                  isDeepDiveOn
-                    ? "bg-orange-500 text-white hover:bg-orange-600"
-                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                }`}
+                onClick={() => {
+                  const item = marketPrompts.find((p) => p.id === "macro-calendar-events");
+                  if (item) runAiSearch(item, true);
+                }}
+                disabled={!!aiLoading["macro-calendar-events"]}
+                className="rounded-lg bg-slate-900 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-slate-800 disabled:opacity-50"
               >
-                {isDeepDiveOn ? "ON" : "OFF"}
+                {aiLoading["macro-calendar-events"] ? "Refreshing…" : "Refresh calendar"}
               </button>
             </div>
-          </div>
-        )}
+            {aiErrors["macro-calendar-events"] && (
+              <AlertBanner variant="error" message={aiErrors["macro-calendar-events"]} />
+            )}
+            <EventCalendarStrip raw={calendarCache?.response || ""} />
+          </section>
 
-        <div className="flex gap-2 border-t border-gray-100 pt-4 overflow-x-auto">
-          {["All", "Live", "Weekly", "Monthly", "Macro"].map((cat) => (
-            <button
-              key={cat}
-              type="button"
-              onClick={() => setSelectedCategory(cat)}
-              className={`px-3.5 py-1.5 rounded-md text-xs font-semibold transition whitespace-nowrap ${
-                selectedCategory === cat
-                  ? selectedScope === "coin"
-                    ? "bg-purple-600 text-white shadow-sm"
-                    : "bg-blue-600 text-white shadow-sm"
-                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
-        </div>
-        <p className="text-[10px] text-gray-400">
-          {filteredPrompts.length} prompt{filteredPrompts.length === 1 ? "" : "s"}
-          {selectedScope === "coin" && selectedCoin ? ` · ${selectedCoin}` : ""}
-        </p>
-      </div>
-
-      {activeTab === "scanner" && (
-        <>
-          <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm space-y-4">
-            {selectedScope === "coin" && !selectedCoin && (
-              <p className="text-sm text-gray-500">Select a coin to load catalysts.</p>
-            )}
-            {selectedScope === "coin" && selectedCoin && coinPrompts.length === 0 && (
-              <p className="text-sm text-gray-500">No prompts for this category.</p>
-            )}
-            {selectedScope === "global" && globalPrompts.length === 0 && (
-              <p className="text-sm text-gray-500">No market-wide prompts for this category.</p>
-            )}
-            <div className="space-y-4">
-              {selectedScope === "coin" && selectedCoin ? renderPromptList(coinPrompts) : null}
-              {selectedScope === "global" ? renderPromptList(globalPrompts) : null}
-            </div>
+          {/* Category chips */}
+          <div className="flex flex-wrap gap-1.5">
+            {(["All", "Macro", "Live", "Weekly"] as const).map((cat) => (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setSelectedCategory(cat)}
+                className={`rounded-full px-3 py-1 text-[11px] font-bold transition ${
+                  selectedCategory === cat
+                    ? "bg-slate-900 text-white"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
           </div>
 
-          <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-            <h3 className="text-base font-semibold text-gray-900 mb-4 border-b border-gray-100 pb-2">
-              🌍 General Market Journal &amp; Notes
-            </h3>
-            <JournalSidebar
-              entries={generalEntries}
-              loading={journalLoading}
-              error={journalError}
-              defaultSymbol=""
-              authenticated={authenticated}
-              onAdd={addJournalEntry}
-              onDelete={deleteJournalEntry}
-              onUpdate={updateJournalEntry}
-            />
-          </div>
+          {/* Sections */}
+          {bySection.map(({ cat, items }) => {
+            const meta = SECTION_META[cat] || { title: cat, blurb: "", emoji: "•" };
+            return (
+              <section key={cat} className="space-y-3">
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">
+                    {meta.emoji} {meta.title}
+                  </h2>
+                  <p className="text-[11px] text-slate-500">{meta.blurb}</p>
+                </div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {items.map((item) => (
+                    <PromptCard
+                      key={item.id}
+                      item={item}
+                      statusInfo={getPromptStatus(item.id, item.category)}
+                      cachedData={aiCache[item.id]}
+                      isLoading={!!aiLoading[item.id]}
+                      errorMsg={aiErrors[item.id]}
+                      copiedId={copiedId}
+                      savedStatus={savedStatus}
+                      onCopyPortable={handleCopy}
+                      onGoogle={openGoogleSearch}
+                      onRun={runAiSearch}
+                      onSaveJournal={saveAiResponseToJournal}
+                    />
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+
+          {marketPrompts.length === 0 && (
+            <p className="text-center text-sm text-slate-500 py-8">No prompts in this filter.</p>
+          )}
         </>
       )}
 
-      {activeTab === "library" && (
-        <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm space-y-4">
-          <p className="text-xs text-gray-500">
-            Copy self-contained prompts into Gemini / Copilot / other AIs. Same filters as the scanner.
+      {activeHub === "notes" && (
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-base font-bold text-slate-900">📓 Macro journal</h2>
+          <p className="text-[11px] text-slate-500 mb-4">
+            General notes (not tied to one coin). For coin-specific logs use Chart.
           </p>
-          {(selectedScope === "coin" ? coinPrompts : globalPrompts).map((item) => {
-            const libraryId = `${item.id}-library`;
-            return (
-              <div key={item.id} className="rounded-lg border border-gray-200 bg-gray-50/50 p-4 space-y-2">
-                <h3 className="font-semibold text-gray-900 text-sm">{item.title}</h3>
-                <p className="text-xs text-gray-600 font-mono bg-white p-2 rounded border border-gray-200 whitespace-pre-wrap">
-                  {buildPortablePrompt(item.prompt)}
-                </p>
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => handleCopy(libraryId, buildPortablePrompt(item.prompt))}
-                    className="px-3.5 py-2 rounded-md text-xs font-semibold bg-gray-700 text-white hover:bg-gray-800"
-                  >
-                    {copiedId === libraryId ? "✅ Copied!" : "📋 Copy Prompt"}
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+          {journalError && <AlertBanner variant="error" message={journalError} />}
+          {journalLoading ? (
+            <p className="text-xs text-slate-500">Loading…</p>
+          ) : generalEntries.length === 0 ? (
+            <p className="text-xs text-slate-500 py-4">No macro notes yet.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {generalEntries.slice(0, 20).map((e) => (
+                <li key={e.id} className="rounded-xl border border-slate-100 bg-slate-50/80 p-3">
+                  <div className="text-[11px] text-slate-500">
+                    {new Date(e.entryDate).toLocaleDateString()}
+                  </div>
+                  <div className="text-sm font-bold text-slate-900">{e.title}</div>
+                  <div className="mt-1 text-xs text-slate-700 line-clamp-4 whitespace-pre-wrap">{e.notes}</div>
+                </li>
+              ))}
+            </ul>
+          )}
+          {!authenticated && (
+            <p className="mt-3 text-xs text-amber-700">Log in to add macro journal entries.</p>
+          )}
+        </section>
       )}
+
     </div>
   );
 }

@@ -8,7 +8,6 @@ const CatalystsPage: NextPage = () => {
       <Head>
         <title>Coins Tracker — Calendar</title>
       </Head>
-      <h1 className="mb-6 text-2xl font-bold text-gray-900">Catalysts</h1>
       <CatalystsView />
     </>
   );

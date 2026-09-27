@@ -147,36 +147,45 @@ const STATIC_GLOBAL_PROMPTS: CatalystPrompt[] = [
   {
     id: "macro-calendar-events",
     category: "Macro",
-    title: "Upcoming Macro Event Dates (FOMC, CPI, PCE, NFP)",
-    prompt: `List the top 6-8 scheduled US macro events for this month and next month that crypto traders watch: NFP, CPI, Core PCE, FOMC, major options expiries if found. For each: date, ET time if known, why it can move crypto. Only dates found in search results.${getCategoryRules("Macro")}`,
-    searchQuery: "US economic calendar CPI PCE NFP FOMC dates this month next month",
+    title: "📅 Event Calendar (FOMC, CPI, PCE, NFP, Options)",
+    prompt: `Build a trader event calendar for THIS month and NEXT month. Include only dates you can verify from search: US CPI, Core PCE, NFP, FOMC decision + press conference, major equity/crypto options expiries if found. For each: date, time (ET + note Manila if possible), severity (high/medium), 1-line why it can move BTC/alts. Output JSON array of events with fields title, date, type, severity, approximateTime. Do NOT invent dates.${getCategoryRules("Macro")}`,
+    searchQuery: "US economic calendar CPI PCE NFP FOMC schedule this month next month options expiry",
     scope: "global",
     searchProfile: "authoritative",
     responseFormat: "json",
   },
   {
+    id: "macro-geopolitics-risk",
+    category: "Macro",
+    title: "🌍 Geopolitics & War Risk (Oil, Safe-Haven, Risk-Off)",
+    prompt: `Geopolitical or war-related developments in the last 7 days that could drive risk-off in crypto over the next 1-2 weeks (Middle East, major power conflict, energy shock, sanctions). Separate CONFIRMED vs RUMOR. No invented military claims. Implication for spot LONG alt entries: Risk-on / Mixed / Risk-off.${getCategoryRules("Macro")}`,
+    searchQuery: "geopolitical risk Middle East war oil shock sanctions markets this week crypto",
+    scope: "global",
+    searchProfile: "trend",
+  },
+  {
     id: "macro-briefing",
     category: "Macro",
-    title: "Macro Briefing (DXY, Yields, Risk Appetite)",
-    prompt: `Macro briefing for crypto risk appetite: (1) DXY and 10y yield this week and implication for BTC/alts, (2) geopolitical or financial stress that could force risk-off in the next 1-2 weeks. No FOMC/CPI calendar dates. No SEC/legal.${getCategoryRules("Macro")}`,
-    searchQuery: "DXY treasury yield risk off crypto this week",
+    title: "💵 Macro Briefing (DXY, Yields, Liquidity)",
+    prompt: `Macro briefing for crypto risk appetite (no calendar dates, no SEC): (1) DXY and US 10y yield direction this week, (2) liquidity/risk appetite implication for BTC vs alts, (3) any banking or credit stress headlines. Spot LONG filter: favorable / neutral / unfavorable for staging alt buys.${getCategoryRules("Macro")}`,
+    searchQuery: "DXY treasury yield risk appetite crypto BTC alts this week",
     scope: "global",
     searchProfile: "trend",
   },
   {
     id: "macro-regulation-sec",
     category: "Macro",
-    title: "Regulatory & Policy Watch (SEC, CFTC, Legislation)",
-    prompt: `Regulatory/legal/policy crypto developments in the last 7 days that could affect liquidity in coming weeks. Flag known decision dates. No DXY/yields.${getCategoryRules("Macro")}`,
-    searchQuery: "crypto regulation SEC CFTC lawsuit bill stablecoin rule this week",
+    title: "⚖️ Regulation & Policy Watch",
+    prompt: `Regulatory/legal/policy crypto developments in the last 7 days (SEC, CFTC, EU, stablecoin bills, major court dates). Flag known decision dates. Liquidity impact for spot markets if stated.${getCategoryRules("Macro")}`,
+    searchQuery: "crypto regulation SEC CFTC stablecoin bill court ruling this week",
     scope: "global",
     searchProfile: "trend",
   },
   {
     id: "global-crypto-stress",
     category: "Live",
-    title: "Crypto Market Stress (Liquidations, Risk-Off, BTC Dominance)",
-    prompt: `Is broader crypto under stress (past 72h + next few days)? Liquidation cascades, BTC dominance shifts, confirmed stablecoin issues, exchange outages, risk-off from alts. Overall: Risk-on / Mixed / Risk-off. Implication for altcoin LONG entries this week. No invented $ figures.`,
+    title: "⚡ Market Stress (Liqs, Dominance, Outages)",
+    prompt: `Is broader crypto under stress (past 72h + next few days)? Liquidations, BTC dominance shifts, stablecoin issues, exchange outages. Overall: Risk-on / Mixed / Risk-off. Implication for altcoin LONG entries this week. No invented $ figures.`,
     searchQuery: "crypto liquidations BTC dominance risk off exchange outage stablecoin",
     scope: "global",
     searchProfile: "breaking",
@@ -184,17 +193,17 @@ const STATIC_GLOBAL_PROMPTS: CatalystPrompt[] = [
   {
     id: "global-hacks-exploit-risks",
     category: "Live",
-    title: "DeFi Hacks & Exploit Risk (Market-Wide)",
-    prompt: `Recent exploits, bridge hacks, emergency pauses in past 72h — official or security-firm confirmed only. Protocol, $ impact if known, contagion notes if stated.`,
-    searchQuery: "crypto exploit hack flash loan bridge drain compromise",
+    title: "🔓 Hacks & Exploits (Confirmed)",
+    prompt: `Exploits, bridge hacks, emergency pauses in past 72h — official or security-firm confirmed only. Protocol, impact if known, contagion if stated. If none, say none verified.`,
+    searchQuery: "crypto exploit hack bridge drain security firm confirmed",
     scope: "global",
     searchProfile: "breaking",
   },
   {
     id: "global-altcoin-season-flow",
     category: "Weekly",
-    title: "Altcoin Flow & Sector Rotation (Weekly)",
-    prompt: `Past 7d and next 7d: flows favoring BTC, ETH, or alt sectors (L2, AI, RWA, meme, DeFi)? Facts vs opinion. One-line implication for selective mid-cap LONG entries. No invented flow numbers.`,
+    title: "📊 Weekly Flow & Sector Rotation",
+    prompt: `Past 7d and next 7d: BTC vs ETH vs alt sectors (L2, AI, RWA, meme, DeFi). Facts vs opinion. One-line implication for selective mid-cap LONG entries. No invented flow numbers.`,
     searchQuery: "crypto altcoin season BTC ETH sector rotation ETF flows this week",
     scope: "global",
     searchProfile: "weekly",
@@ -202,9 +211,18 @@ const STATIC_GLOBAL_PROMPTS: CatalystPrompt[] = [
   {
     id: "weekly-coins-ph",
     category: "Weekly",
-    title: "Coins.ph Platform Updates (PH Spot)",
-    prompt: `Official Coins.ph announcements (listings, delistings, fees, maintenance) in 7-day lookback or lookahead. Flag PHP spot pair impact.`,
-    searchQuery: "Coins.ph official announcement listing delisting update",
+    title: "🇵🇭 PH Spot (Coins.ph / Local Rails)",
+    prompt: `Official Coins.ph / major PH platform announcements (listings, delistings, fees, maintenance) in 7-day lookback or lookahead. Flag PHP spot pair impact for local traders.`,
+    searchQuery: "Coins.ph official announcement listing delisting maintenance",
+    scope: "global",
+    searchProfile: "weekly",
+  },
+  {
+    id: "weekly-crypto-calendar",
+    category: "Weekly",
+    title: "🗓️ Crypto Week Ahead (Upgrades, Unlocks, Listings)",
+    prompt: `Market-wide crypto calendar next 7 days: major mainnet upgrades, large token unlocks, exchange listings/delistings (global). CONFIRM vs RUMOR. No single-meme-coin speculation.${getCategoryRules("Weekly")}`,
+    searchQuery: "crypto unlock schedule mainnet upgrade listing delisting this week",
     scope: "global",
     searchProfile: "weekly",
   },
@@ -214,9 +232,15 @@ export function useCatalystsLogic() {
   const [selectedCoin, setSelectedCoin] = useState<string>("");
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
   /** coin = this asset; global = market-wide only (no coin picker). */
-  const [selectedScope, setSelectedScope] = useState<"coin" | "global">("coin");
+  const [selectedScope, setSelectedScope] = useState<"coin" | "global">("global");
   const [allCoins, setAllCoins] = useState<CoinSummary[]>([]);
   const [coinsLoading, setCoinsLoading] = useState(true);
+
+  // Market-weather redesign: always global (coin news → Chart agent review)
+  useEffect(() => {
+    setSelectedScope("global");
+  }, []);
+
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [aiCache, setAiCache] = useState<Record<string, CachedAiLog>>({});
@@ -341,9 +365,10 @@ export function useCatalystsLogic() {
     setDeepDiveCoins((prev) => ({ ...prev, [coin]: !prev[coin] }));
   };
 
+  // Market-weather page: global prompts are primary. Coin prompts stay available if scope=coin.
   const allPrompts = useMemo(() => {
     const visible = coinSpecificPrompts.filter((p) => p.tier !== "deepDive" || isDeepDiveOn);
-    return [...visible, ...STATIC_GLOBAL_PROMPTS];
+    return [...STATIC_GLOBAL_PROMPTS, ...visible];
   }, [coinSpecificPrompts, isDeepDiveOn]);
 
   const filteredPrompts = useMemo(() => {
