@@ -1,133 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/router";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import Dropdown from "@/components/Dropdown";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
-import type { CoinSummary, DailyRecord } from "@/validators/recordSchema";
-
-export interface CoinOption {
-  symbol: string;
-  name: string;
-  currentPrice?: number | null;
-}
-
-export type MultiCoinRecords = Record<string, DailyRecord[]>;
-
-export function useCalendarLogic() {
-  const router = useRouter();
-
-  const [coinOptions, setCoinOptions] = useState<CoinOption[]>([]);
-  const [selectedSymbol, setSelectedSymbol] = useState<string>("");
-  const [hasAppliedInitialSymbol, setHasAppliedInitialSymbol] = useState(false);
-  const [monthCursor, setMonthCursor] = useState<Date>(() => new Date());
-  
-  const [allCoinsData, setAllCoinsData] = useState<MultiCoinRecords>({});
-  
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/coins")
-      .then((res) => res.json())
-      .then((data: { coins: CoinSummary[] }) => {
-        if (!cancelled && Array.isArray(data.coins)) {
-          setCoinOptions(data.coins.map((c) => ({ 
-            symbol: c.symbol, 
-            name: c.name,
-            currentPrice: c.currentPrice 
-          })));
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (hasAppliedInitialSymbol) return;
-    if (!router.isReady) return;
-    if (coinOptions.length === 0) return;
-
-    const queriedSymbol = typeof router.query.symbol === "string" ? router.query.symbol.toUpperCase() : "";
-    if (queriedSymbol) {
-      const matched = coinOptions.find((c) => c.symbol === queriedSymbol);
-      if (matched) {
-        setSelectedSymbol(matched.symbol);
-      }
-    }
-    setHasAppliedInitialSymbol(true);
-  }, [router.isReady, router.query.symbol, coinOptions, hasAppliedInitialSymbol]);
-
-  const monthParam = useMemo(() => {
-    const y = monthCursor.getFullYear();
-    const m = String(monthCursor.getMonth() + 1).padStart(2, "0");
-    return `${y}-${m}`;
-  }, [monthCursor]);
-
-  useEffect(() => {
-    if (coinOptions.length === 0) return;
-
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    Promise.all(
-      coinOptions.map((coin) =>
-        fetch(`/api/coins?type=calendar&symbol=${coin.symbol}&month=${monthParam}`)
-          .then((res) => (res.ok ? res.json() : { days: [] }))
-          .then((data: { days: DailyRecord[] }) => ({ symbol: coin.symbol, days: data.days || [] }))
-          .catch(() => ({ symbol: coin.symbol, days: [] }))
-      )
-    )
-      .then((results) => {
-        if (!cancelled) {
-          const map: MultiCoinRecords = {};
-          results.forEach((r) => {
-            map[r.symbol] = r.days;
-          });
-          setAllCoinsData(map);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) setError((err as Error).message);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [monthParam, coinOptions]);
-
-  const days = useMemo(() => {
-    return selectedSymbol ? allCoinsData[selectedSymbol] || [] : [];
-  }, [selectedSymbol, allCoinsData]);
-
-  function goToPreviousMonth() {
-    setMonthCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
-  }
-
-  function goToNextMonth() {
-    setMonthCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
-  }
-
-  return {
-    coinOptions,
-    selectedSymbol,
-    setSelectedSymbol,
-    monthCursor,
-    goToPreviousMonth,
-    goToNextMonth,
-    days,
-    allCoinsData,
-    loading,
-    error,
-  };
-}
+import { useCalendarLogic } from "./useCalendarLogic";
 
 export default function CalendarView() {
   const {
@@ -151,36 +27,38 @@ export default function CalendarView() {
     year: "numeric",
   });
 
-  const formatDateShort = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-    });
-  };
+  const formatDateShort = (dateStr: string) =>
+    new Date(dateStr).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
-  // --- SINGLE COIN MODE PROCESSING ---
-  const recordsWithData = days
-    .filter((d) => d.high != null && d.low != null)
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const recordsWithData = useMemo(
+    () =>
+      days
+        .filter((d) => d.high != null && d.low != null)
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+    [days]
+  );
 
-  const monthHighest = recordsWithData.length > 0 ? Math.max(...recordsWithData.map((d) => d.high as number)) : null;
-  const monthLowest = recordsWithData.length > 0 ? Math.min(...recordsWithData.map((d) => d.low as number)) : null;
+  const monthHighest =
+    recordsWithData.length > 0 ? Math.max(...recordsWithData.map((d) => d.high as number)) : null;
+  const monthLowest =
+    recordsWithData.length > 0 ? Math.min(...recordsWithData.map((d) => d.low as number)) : null;
   const highestRecord = recordsWithData.find((d) => d.high === monthHighest);
   const lowestRecord = recordsWithData.find((d) => d.low === monthLowest);
-  const volatilitySpread = monthHighest && monthLowest && monthLowest > 0 ? ((monthHighest - monthLowest) / monthLowest) * 100 : 0;
+  const volatilitySpread =
+    monthHighest && monthLowest && monthLowest > 0
+      ? ((monthHighest - monthLowest) / monthLowest) * 100
+      : 0;
 
-  // --- ALL COINS COMPUTED SPREADS, DYNAMIC RANK & SORTING ---
   const coinCardsData = coinOptions.map((coin) => {
     const coinDays = (allCoinsData[coin.symbol] || []).filter(
       (d) => d.high != null && d.low != null
     );
-
     const coinHigh = coinDays.length > 0 ? Math.max(...coinDays.map((d) => d.high as number)) : null;
     const coinLow = coinDays.length > 0 ? Math.min(...coinDays.map((d) => d.low as number)) : null;
     const highRec = coinDays.find((d) => d.high === coinHigh);
     const lowRec = coinDays.find((d) => d.low === coinLow);
-    const spread = coinHigh && coinLow && coinLow > 0 ? ((coinHigh - coinLow) / coinLow) * 100 : 0;
-
+    const spread =
+      coinHigh && coinLow && coinLow > 0 ? ((coinHigh - coinLow) / coinLow) * 100 : 0;
     return { coin, coinDays, coinHigh, coinLow, highRec, lowRec, spread };
   });
 
@@ -191,74 +69,70 @@ export default function CalendarView() {
       if (marketSortBy === "name") return a.coin.name.localeCompare(b.coin.name);
       return 0;
     })
-    .map((item, index) => ({
-      ...item,
-      rank: index + 1,
-    }));
+    .map((item, index) => ({ ...item, rank: index + 1 }));
 
   const currentSortedCoin = sortedCoinCards.find((c) => c.coin.symbol === selectedSymbol);
 
   const coinDropdownOptions = [
     { label: "🌐 All Coins (Overview)", value: "" },
     ...sortedCoinCards.map(({ coin, rank, spread }) => ({
-      label: `#${rank} ${coin.name} (${coin.symbol})${spread > 0 ? ` — ${spread.toFixed(1)}% swing` : ""}`,
+      label: `#${rank} ${coin.name} (${coin.symbol})${spread > 0 ? ` — ${spread.toFixed(1)}%` : ""}`,
       value: coin.symbol,
     })),
   ];
 
-  // --- COPY SUMMARY HANDLER (Includes Ranking) ---
   const handleCopySummary = async () => {
     const rankText = currentSortedCoin ? `Rank #${currentSortedCoin.rank}` : "Rank #N/A";
-    const summaryText = 
+    const summaryText =
       `👑 ${rankText}\n` +
-      `🏆 Month High ${highestRecord ? formatDateShort(highestRecord.date) : 'N/A'}\n` +
-      `${monthHighest != null ? formatPhp(monthHighest) : '₱0.00'}\n` +
-      `📉 Month Low ${lowestRecord ? formatDateShort(lowestRecord.date) : 'N/A'}\n` +
-      `${monthLowest != null ? formatPhp(monthLowest) : '₱0.00'}\n` +
-      `📊 Monthly Swing\n` +
-      `High-to-Low Spread\n` +
-      `${volatilitySpread.toFixed(1)}%`;
+      `${currentSortedCoin?.coin.name || selectedSymbol} (${selectedSymbol})\n` +
+      `Month: ${monthLabel}\n` +
+      `🏆 Month High ${highestRecord ? formatDateShort(highestRecord.date) : "N/A"}\n` +
+      `${monthHighest != null ? formatPhp(monthHighest) : "—"}\n` +
+      `📉 Month Low ${lowestRecord ? formatDateShort(lowestRecord.date) : "N/A"}\n` +
+      `${monthLowest != null ? formatPhp(monthLowest) : "—"}\n` +
+      `📊 Monthly Swing ${volatilitySpread.toFixed(1)}%`;
 
     try {
       await navigator.clipboard.writeText(summaryText);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error("Failed to copy text: ", err);
+    } catch {
+      /* ignore */
     }
   };
 
   return (
-    <div className="flex flex-col gap-6">
-{/* Navigation Header / Back Button */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Link 
-          href="/" 
-          className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors"
+    <div className="mx-auto flex max-w-6xl flex-col gap-5 pb-10">
+      {/* Top bar — same button style as Chart page (rounded-md, not pills) */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <Link
+          href="/"
+          className="inline-flex w-fit items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors"
         >
           <span>←</span>
           <span>Back to Home</span>
         </Link>
 
         {selectedSymbol && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={handleCopySummary}
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-md hover:bg-purple-100 transition-colors shadow-sm"
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-md hover:bg-purple-100 transition-colors"
             >
               <span>📋</span>
-              <span>{copied ? "Copied to Clipboard!" : "Copy Summary"}</span>
+              <span>{copied ? "Copied!" : "Copy Summary"}</span>
             </button>
             <Link
-              href={`/chart?symbol=${selectedSymbol}`}
+              href={`/chart?symbol=${encodeURIComponent(selectedSymbol)}`}
               className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-3 py-1.5 rounded-md hover:bg-blue-100 transition-colors"
             >
               <span>📈</span>
               <span>View Chart</span>
             </Link>
             <Link
-              href={`/manage?symbol=${selectedSymbol}`}
+              href={`/manage?symbol=${encodeURIComponent(selectedSymbol)}`}
               className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-md hover:bg-emerald-100 transition-colors"
             >
               <span>⚙️</span>
@@ -276,89 +150,83 @@ export default function CalendarView() {
         )}
       </div>
 
-      {/* Top Controls Bar */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <div className="min-w-[240px]">
+
+      {/* Controls */}
+      <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 flex-1 min-w-0">
+          <div className="min-w-0">
             <Dropdown
-              label="Select Coin"
+              label="Coin"
               placeholder="Choose a coin"
               value={selectedSymbol}
               onChange={setSelectedSymbol}
               options={coinDropdownOptions}
             />
           </div>
-
-          <div className="min-w-[220px]">
+          <div className="min-w-0">
             <Dropdown
-              label="Sort rank by"
+              label="Sort rank"
               placeholder="Sort order"
               value={marketSortBy}
               onChange={setMarketSortBy}
               options={[
-                { label: "🔥 Highest Volatility (Swing)", value: "volatility-desc" },
-                { label: "❄️ Lowest Volatility (Swing)", value: "volatility-asc" },
-                { label: "🔤 Coin Name (A-Z)", value: "name" },
+                { label: "🔥 Highest swing", value: "volatility-desc" },
+                { label: "❄️ Lowest swing", value: "volatility-asc" },
+                { label: "🔤 Name A–Z", value: "name" },
               ]}
             />
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-3 sm:justify-start">
+        <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50 px-2 py-1.5 sm:justify-center">
           <button
             type="button"
             onClick={goToPreviousMonth}
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="rounded-lg px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-white"
           >
             ← Prev
           </button>
-          <span className="min-w-[8rem] text-center text-sm font-semibold text-gray-900">
-            {monthLabel}
-          </span>
+          <span className="min-w-[7.5rem] text-center text-xs font-bold text-slate-900">{monthLabel}</span>
           <button
             type="button"
             onClick={goToNextMonth}
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="rounded-lg px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-white"
           >
             Next →
           </button>
         </div>
       </div>
 
-      {/* Banners */}
       {!loading && coinOptions.length === 0 && (
-        <AlertBanner
-          variant="info"
-          message="No coins are being monitored yet — add one from Manage Coins."
-        />
+        <AlertBanner variant="info" message="No coins monitored yet — add one from Manage Coins." />
       )}
-      {error && (
-        <AlertBanner
-          variant="error"
-          message={`Failed to load data: ${error}`}
-        />
-      )}
+      {error && <AlertBanner variant="error" message={`Failed to load data: ${error}`} />}
       {loading && <AlertBanner variant="info" message="Loading record data…" />}
 
-      {/* SINGLE COIN SUMMARY BAR */}
+      {/* Single-coin stats */}
       {!loading && !error && selectedSymbol && (
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-center justify-between gap-4 bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-            <div className="flex items-center gap-3">
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
               {currentSortedCoin && (
-                <span className="rounded-md bg-purple-100 px-2.5 py-1 text-xs font-bold text-purple-700 font-mono">
-                  Rank #{currentSortedCoin.rank} ({marketSortBy === "volatility-desc" ? "Highest Swing" : marketSortBy === "volatility-asc" ? "Lowest Swing" : "A-Z"})
+                <span className="rounded-full bg-violet-100 px-2.5 py-0.5 text-[11px] font-bold text-violet-800">
+                  #{currentSortedCoin.rank}{" "}
+                  {marketSortBy === "volatility-desc"
+                    ? "highest swing"
+                    : marketSortBy === "volatility-asc"
+                    ? "lowest swing"
+                    : "A–Z"}
                 </span>
               )}
-              <h2 className="text-xl font-bold text-gray-900">
-                {currentSortedCoin?.coin.name || selectedSymbol} ({selectedSymbol})
+              <h2 className="text-lg font-bold text-slate-900 truncate">
+                {currentSortedCoin?.coin.name || selectedSymbol}
+                <span className="ml-1.5 text-sm font-semibold text-slate-400">{selectedSymbol}</span>
               </h2>
             </div>
-            
             {currentSortedCoin?.coin.currentPrice != null && (
               <div className="text-right">
-                <div className="text-xs font-bold uppercase text-gray-500">Current Price</div>
-                <div className="text-2xl font-bold text-gray-900 font-mono">
+                <div className="text-[10px] font-bold uppercase text-slate-400">Now</div>
+                <div className="text-xl font-bold tabular-nums text-slate-900">
                   {formatPhp(currentSortedCoin.coin.currentPrice)}
                 </div>
               </div>
@@ -366,133 +234,97 @@ export default function CalendarView() {
           </div>
 
           {recordsWithData.length > 0 && (
-            <div className="flex flex-col md:flex-row gap-4 bg-gray-50 border border-gray-200 rounded-lg p-4 shadow-sm">
-              <div className="flex-1 flex items-center justify-between bg-white border border-green-200 p-3 rounded-md shadow-sm">
-                <div>
-                  <span className="text-xs font-bold uppercase text-green-700 flex items-center gap-1.5">
-                    <span>🏆</span> Month High
-                  </span>
-                  {highestRecord && (
-                    <span className="text-[11px] font-medium text-gray-500">
-                      {formatDateShort(highestRecord.date)}
-                    </span>
-                  )}
-                </div>
-                <span className="text-lg font-bold text-green-700 font-mono">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <div className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-3.5">
+                <div className="text-[10px] font-bold uppercase text-emerald-700">🏆 Month high</div>
+                <div className="mt-1 text-lg font-bold tabular-nums text-emerald-800">
                   {formatPhp(monthHighest as number)}
-                </span>
-              </div>
-
-              <div className="flex-1 flex items-center justify-between bg-white border border-red-200 p-3 rounded-md shadow-sm">
-                <div>
-                  <span className="text-xs font-bold uppercase text-red-700 flex items-center gap-1.5">
-                    <span>📉</span> Month Low
-                  </span>
-                  {lowestRecord && (
-                    <span className="text-[11px] font-medium text-gray-500">
-                      {formatDateShort(lowestRecord.date)}
-                    </span>
-                  )}
                 </div>
-                <span className="text-lg font-bold text-red-700 font-mono">
+                {highestRecord && (
+                  <div className="text-[11px] text-slate-500">{formatDateShort(highestRecord.date)}</div>
+                )}
+              </div>
+              <div className="rounded-xl border border-rose-200 bg-gradient-to-br from-rose-50 to-white p-3.5">
+                <div className="text-[10px] font-bold uppercase text-rose-700">📉 Month low</div>
+                <div className="mt-1 text-lg font-bold tabular-nums text-rose-800">
                   {formatPhp(monthLowest as number)}
-                </span>
-              </div>
-
-              <div className="flex-1 flex items-center justify-between bg-white border border-blue-200 p-3 rounded-md shadow-sm">
-                <div>
-                  <span className="text-xs font-bold uppercase text-blue-700 flex items-center gap-1.5">
-                    <span>📊</span> Monthly Swing
-                  </span>
-                  <span className="text-[11px] font-medium text-gray-500">
-                    High-to-Low Spread
-                  </span>
                 </div>
-                <span className="text-lg font-bold text-blue-700 font-mono">
+                {lowestRecord && (
+                  <div className="text-[11px] text-slate-500">{formatDateShort(lowestRecord.date)}</div>
+                )}
+              </div>
+              <div className="rounded-xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white p-3.5">
+                <div className="text-[10px] font-bold uppercase text-sky-700">📊 Monthly swing</div>
+                <div className="mt-1 text-lg font-bold tabular-nums text-sky-800">
                   {volatilitySpread.toFixed(1)}%
-                </span>
+                </div>
+                <div className="text-[11px] text-slate-500">High → low spread</div>
               </div>
             </div>
           )}
         </div>
       )}
 
-      {/* MARKET OVERVIEW BANNER & HINT */}
+      {/* Overview banner */}
       {!loading && !error && !selectedSymbol && (
-        <div className="flex flex-col gap-4">
-          <div className="rounded-lg border border-purple-200 bg-purple-50 p-4 text-xs text-purple-900 flex items-center justify-between">
-            <div>
-              <h4 className="font-bold text-purple-900 text-sm flex items-center gap-1.5">
-                <span>🌐</span> Market Overview Dashboard ({monthLabel})
-              </h4>
-              <p className="text-purple-700 mt-0.5">
-                Click any coin card below or use the dropdown to inspect detailed daily highs and lows.
-              </p>
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-blue-100 bg-blue-50/50 p-4 text-xs text-blue-900 shadow-sm">
-            <h4 className="font-bold mb-2 flex items-center gap-1.5 text-sm text-blue-950">
-              <span>💡</span> Volatility Swing Strategy Guide
-            </h4>
-            <div className="space-y-2 text-blue-900">
-              <p>
-                <strong className="text-blue-950">High Swing Coins (&gt;25–30% Spread):</strong> These are your Dip-Buying Targets. Wide volatility means they experience sharp sell-offs down to their Month Lows. Set your fixed budgets and ladder your entries closer to their recorded Month Lows.
-              </p>
-              <p>
-                <strong className="text-blue-950">Low Swing Coins (&lt;15% Spread):</strong> These are your Consolidation / Range Plays. Tight spreads mean they are trading in a narrow channel. Keep an eye on these for potential volume breakouts.
-              </p>
-            </div>
-          </div>
+        <div className="rounded-2xl border border-violet-100 bg-violet-50/80 p-4 text-xs text-violet-950">
+          <h4 className="font-bold text-sm text-violet-900">🌐 Market overview · {monthLabel}</h4>
+          <p className="mt-1 text-violet-800/90">
+            Ranked by monthly high–low swing. Tap a card for daily highs/lows. High swing (&gt;25–30%) → dip-ladder
+            candidates; tight swing (&lt;15%) → range / breakout watch.
+          </p>
         </div>
       )}
 
-      {/* DISPLAY MODE 1: SINGLE COIN DAILY GRID */}
+      {/* Daily grid */}
       {!loading && !error && selectedSymbol && recordsWithData.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {recordsWithData.map((record) => {
-            const dateObj = new Date(record.date);
-            const formattedDate = dateObj.toLocaleDateString(undefined, {
+            const formattedDate = new Date(record.date).toLocaleDateString(undefined, {
               weekday: "short",
               month: "short",
               day: "numeric",
-              year: "numeric",
             });
-
             const isMonthHigh = record.high === monthHighest;
             const isMonthLow = record.low === monthLowest;
 
             return (
               <div
                 key={record.date}
-                className={`flex flex-col justify-between rounded-lg border bg-white p-4 transition-colors ${
-                  isMonthHigh || isMonthLow ? "border-gray-400 shadow-md" : "border-gray-200 shadow-sm hover:border-gray-300"
+                className={`rounded-xl border bg-white p-3.5 shadow-sm transition ${
+                  isMonthHigh || isMonthLow
+                    ? "border-slate-400 shadow-md ring-1 ring-slate-200"
+                    : "border-slate-200 hover:border-slate-300"
                 }`}
               >
-                <div className="flex items-center justify-between border-b border-gray-100 pb-2 mb-3">
-                  <span className="text-sm font-semibold text-gray-900">
-                    {formattedDate}
-                  </span>
-                  <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                <div className="mb-2.5 flex items-center justify-between border-b border-slate-100 pb-2">
+                  <span className="text-xs font-bold text-slate-900">{formattedDate}</span>
+                  <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">
                     {selectedSymbol}
                   </span>
                 </div>
-
-                <div className="space-y-2 text-sm">
-                  <div className={`flex items-baseline justify-between gap-2 rounded px-2 py-1.5 ${isMonthHigh ? "bg-green-50 border border-green-200" : ""}`}>
-                    <span className={`text-xs font-medium uppercase tracking-wide flex items-center gap-1 ${isMonthHigh ? "text-green-800 font-bold" : "text-gray-500"}`}>
-                      {isMonthHigh && <span>🏆</span>} High
+                <div className="space-y-1.5 text-sm">
+                  <div
+                    className={`flex items-baseline justify-between rounded-lg px-2 py-1.5 ${
+                      isMonthHigh ? "border border-emerald-200 bg-emerald-50" : "bg-slate-50"
+                    }`}
+                  >
+                    <span className={`text-[10px] font-bold uppercase ${isMonthHigh ? "text-emerald-800" : "text-slate-400"}`}>
+                      {isMonthHigh ? "🏆 " : ""}High
                     </span>
-                    <span className={`break-all text-right font-mono ${isMonthHigh ? "font-bold text-green-700" : "font-semibold text-green-600"}`}>
+                    <span className={`font-mono text-sm font-bold tabular-nums ${isMonthHigh ? "text-emerald-700" : "text-emerald-600"}`}>
                       {formatPhp(record.high)}
                     </span>
                   </div>
-                  
-                  <div className={`flex items-baseline justify-between gap-2 rounded px-2 py-1.5 ${isMonthLow ? "bg-red-50 border border-red-200" : ""}`}>
-                    <span className={`text-xs font-medium uppercase tracking-wide flex items-center gap-1 ${isMonthLow ? "text-red-800 font-bold" : "text-gray-500"}`}>
-                      {isMonthLow && <span>📉</span>} Low
+                  <div
+                    className={`flex items-baseline justify-between rounded-lg px-2 py-1.5 ${
+                      isMonthLow ? "border border-rose-200 bg-rose-50" : "bg-slate-50"
+                    }`}
+                  >
+                    <span className={`text-[10px] font-bold uppercase ${isMonthLow ? "text-rose-800" : "text-slate-400"}`}>
+                      {isMonthLow ? "📉 " : ""}Low
                     </span>
-                    <span className={`break-all text-right font-mono ${isMonthLow ? "font-bold text-red-700" : "font-semibold text-red-600"}`}>
+                    <span className={`font-mono text-sm font-bold tabular-nums ${isMonthLow ? "text-rose-700" : "text-rose-600"}`}>
                       {formatPhp(record.low)}
                     </span>
                   </div>
@@ -503,99 +335,73 @@ export default function CalendarView() {
         </div>
       )}
 
-      {/* DISPLAY MODE 2: CLICKABLE ALL COINS SUMMARY CARDS GRID */}
+      {/* All-coins grid */}
       {!loading && !error && !selectedSymbol && sortedCoinCards.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {sortedCoinCards.map(({ coin, coinDays, coinHigh, coinLow, highRec, lowRec, spread, rank }) => (
-            <div
+            <button
               key={coin.symbol}
+              type="button"
               onClick={() => setSelectedSymbol(coin.symbol)}
-              className="flex flex-col justify-between rounded-lg border border-gray-200 bg-white p-4 shadow-sm hover:border-purple-400 hover:shadow-md transition-all cursor-pointer group"
+              className="flex flex-col rounded-xl border border-slate-200 bg-white p-3.5 text-left shadow-sm transition hover:border-violet-400 hover:shadow-md"
             >
-              <div className="flex items-center justify-between border-b border-gray-100 pb-2 mb-3">
-                <div className="flex items-center gap-2">
-                  <span className="rounded bg-purple-100 px-1.5 py-0.5 text-xs font-bold text-purple-700 font-mono">
+              <div className="mb-2.5 flex items-start justify-between gap-2 border-b border-slate-100 pb-2">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <span className="shrink-0 rounded-md bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-800">
                     #{rank}
                   </span>
-                  <span className="text-sm font-bold text-gray-900 group-hover:text-purple-700 transition-colors">
-                    {coin.name}
-                  </span>
+                  <span className="truncate text-sm font-bold text-slate-900">{coin.name}</span>
                 </div>
-                
-                <div className="flex flex-col items-end">
-                  <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-600 font-mono mb-1">
-                    {coin.symbol}
-                  </span>
+                <div className="shrink-0 text-right">
+                  <div className="text-[10px] font-bold text-slate-400">{coin.symbol}</div>
                   {coin.currentPrice != null && (
-                    <span className="text-[11px] font-bold text-gray-700 font-mono">
+                    <div className="text-[11px] font-bold tabular-nums text-slate-700">
                       {formatPhp(coin.currentPrice)}
-                    </span>
+                    </div>
                   )}
                 </div>
               </div>
 
               {coinDays.length === 0 ? (
-                <div className="py-6 text-center text-xs text-gray-400 italic">
-                  No data for {monthLabel}
-                </div>
+                <div className="py-5 text-center text-[11px] italic text-slate-400">No data · {monthLabel}</div>
               ) : (
-                <div className="space-y-3 text-sm">
-                  <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded p-2">
+                <div className="space-y-1.5 text-sm">
+                  <div className="flex items-center justify-between rounded-lg border border-emerald-100 bg-emerald-50/80 px-2 py-1.5">
                     <div>
-                      <span className="text-xs font-bold uppercase text-green-800 flex items-center gap-1">
-                        <span>🏆</span> Month High
-                      </span>
+                      <div className="text-[10px] font-bold uppercase text-emerald-800">🏆 High</div>
                       {highRec && (
-                        <span className="text-[11px] font-medium text-gray-500">
-                          {formatDateShort(highRec.date)}
-                        </span>
+                        <div className="text-[10px] text-slate-500">{formatDateShort(highRec.date)}</div>
                       )}
                     </div>
-                    <span className="font-bold text-green-700 font-mono text-sm">
+                    <span className="font-mono text-xs font-bold text-emerald-700">
                       {coinHigh != null ? formatPhp(coinHigh) : "—"}
                     </span>
                   </div>
-
-                  <div className="flex items-center justify-between bg-red-50 border border-red-200 rounded p-2">
+                  <div className="flex items-center justify-between rounded-lg border border-rose-100 bg-rose-50/80 px-2 py-1.5">
                     <div>
-                      <span className="text-xs font-bold uppercase text-red-800 flex items-center gap-1">
-                        <span>📉</span> Month Low
-                      </span>
+                      <div className="text-[10px] font-bold uppercase text-rose-800">📉 Low</div>
                       {lowRec && (
-                        <span className="text-[11px] font-medium text-gray-500">
-                          {formatDateShort(lowRec.date)}
-                        </span>
+                        <div className="text-[10px] text-slate-500">{formatDateShort(lowRec.date)}</div>
                       )}
                     </div>
-                    <span className="font-bold text-red-700 font-mono text-sm">
+                    <span className="font-mono text-xs font-bold text-rose-700">
                       {coinLow != null ? formatPhp(coinLow) : "—"}
                     </span>
                   </div>
-
-                  <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded p-2">
-                    <div>
-                      <span className="text-xs font-bold uppercase text-blue-800 flex items-center gap-1">
-                        <span>📊</span> Monthly Swing
-                      </span>
-                      <span className="text-[11px] font-medium text-gray-500">
-                        High-to-Low Spread
-                      </span>
-                    </div>
-                    <span className="font-bold text-blue-700 font-mono text-sm">
-                      {spread.toFixed(1)}%
-                    </span>
+                  <div className="flex items-center justify-between rounded-lg border border-sky-100 bg-sky-50/80 px-2 py-1.5">
+                    <div className="text-[10px] font-bold uppercase text-sky-800">📊 Swing</div>
+                    <span className="font-mono text-xs font-bold text-sky-700">{spread.toFixed(1)}%</span>
                   </div>
                 </div>
               )}
-            </div>
+            </button>
           ))}
         </div>
       )}
 
-      {/* Empty States */}
       {!loading && !error && selectedSymbol && recordsWithData.length === 0 && (
-        <div className="rounded-lg border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500">
-          No records available for {selectedSymbol} in {monthLabel}.
+        <div className="rounded-2xl border border-dashed border-slate-200 py-10 text-center text-sm text-slate-500">
+          No records for {selectedSymbol} in {monthLabel}.
         </div>
       )}
     </div>
