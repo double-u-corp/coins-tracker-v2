@@ -3,7 +3,7 @@ import Link from "next/link";
 import Dropdown from "@/components/Dropdown";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp, formatCoinAmount } from "@/lib/format";
-import { useTradeLogic, TradeType } from "./useTradeLogic";
+import { useTradeLogic, TradeType, formatCycleReviewPrompt } from "./useTradeLogic";
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -68,6 +68,9 @@ export default function TradeView() {
     saveEdit,
     coinAnalytics,
     analyticsSummary,
+    riskBudget,
+    setRiskBudget,
+    riskStatus,
   } = useTradeLogic();
 
   const isCashFlow = type === "deposit" || type === "withdraw";
@@ -75,6 +78,8 @@ export default function TradeView() {
   const [txCoinFilter, setTxCoinFilter] = useState<string>("all");
   const [analyticsFilter, setAnalyticsFilter] = useState<"all" | "underwater" | "in_profit" | "holdings">("all");
   const [analyticsSort, setAnalyticsSort] = useState<"underwater" | "unrealized_pct" | "realized">("underwater");
+  const [cycleReviewCopied, setCycleReviewCopied] = useState<string | null>(null);
+
 
   const filteredAnalytics = useMemo(() => {
     let rows = [...coinAnalytics];
@@ -454,7 +459,99 @@ export default function TradeView() {
         )}
       </section>
 
-      {/* —— Open patience —— */}
+      {/* —— Risk budget (#3) —— */}
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2 className="text-base font-bold tracking-tight text-slate-900">Risk budget</h2>
+            <p className="text-[11px] text-slate-500">
+              Soft limits for spot sizing · stored in this browser
+            </p>
+          </div>
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase ${
+              riskStatus.ok
+                ? "bg-emerald-100 text-emerald-800"
+                : "bg-rose-100 text-rose-800"
+            }`}
+          >
+            {riskStatus.ok ? "Within budget" : "Over budget"}
+          </span>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 text-xs">
+            <div className="rounded-lg bg-slate-50 border border-slate-100 px-2 py-2">
+              <div className="text-[10px] font-bold uppercase text-slate-400">Equity</div>
+              <div className="font-bold tabular-nums text-slate-900">{formatPhp(riskStatus.equity)}</div>
+            </div>
+            <div className="rounded-lg bg-slate-50 border border-slate-100 px-2 py-2">
+              <div className="text-[10px] font-bold uppercase text-slate-400">Cash</div>
+              <div className="font-bold tabular-nums text-slate-900">{formatPhp(riskStatus.cash)}</div>
+            </div>
+            <div className="rounded-lg bg-slate-50 border border-slate-100 px-2 py-2">
+              <div className="text-[10px] font-bold uppercase text-slate-400">Open names</div>
+              <div className="font-bold tabular-nums text-slate-900">
+                {riskStatus.openNames}
+                {riskBudget.maxOpenNames > 0 ? ` / ${riskBudget.maxOpenNames}` : ""}
+              </div>
+            </div>
+            <div className="rounded-lg bg-slate-50 border border-slate-100 px-2 py-2">
+              <div className="text-[10px] font-bold uppercase text-slate-400">Largest bag</div>
+              <div className="font-bold tabular-nums text-slate-900 truncate">
+                {riskStatus.maxCoin.symbol} · {riskStatus.maxCoin.pct.toFixed(1)}%
+              </div>
+            </div>
+          </div>
+          {!riskStatus.ok && (
+            <ul className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-medium text-rose-900 space-y-0.5">
+              {riskStatus.breaches.map((b) => (
+                <li key={b}>⚠ {b}</li>
+              ))}
+            </ul>
+          )}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <label className="flex flex-col gap-1 text-[11px] font-semibold text-slate-600">
+              Max % per coin
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                value={riskBudget.maxPctPerCoin}
+                onChange={(e) => setRiskBudget({ maxPctPerCoin: Number(e.target.value) || 0 })}
+                className="rounded-md border border-slate-200 px-2 py-1.5 text-sm font-bold text-slate-900"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-[11px] font-semibold text-slate-600">
+              Max open names
+              <input
+                type="number"
+                min={0}
+                max={50}
+                step={1}
+                value={riskBudget.maxOpenNames}
+                onChange={(e) => setRiskBudget({ maxOpenNames: Number(e.target.value) || 0 })}
+                className="rounded-md border border-slate-200 px-2 py-1.5 text-sm font-bold text-slate-900"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-[11px] font-semibold text-slate-600">
+              Max % alts (ex BTC/ETH)
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                value={riskBudget.maxPctAlts}
+                onChange={(e) => setRiskBudget({ maxPctAlts: Number(e.target.value) || 0 })}
+                className="rounded-md border border-slate-200 px-2 py-1.5 text-sm font-bold text-slate-900"
+              />
+            </label>
+          </div>
+          <p className="text-[10px] text-slate-400">Set a field to 0 to disable that limit.</p>
+        </div>
+      </section>
+
+{/* —— Open patience —— */}
       <section className="space-y-3">
         <div>
           <h2 className="text-base font-bold tracking-tight text-slate-900">Profit &amp; patience</h2>
@@ -561,14 +658,14 @@ export default function TradeView() {
             ) : (
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {filteredAnalytics.map((c) => {
-         const badge =
-  c.holdings > 0 && c.openCycleCostRecovered
-    ? { t: "Recovered", c: "bg-emerald-500 text-white" }
-    : c.status === "in_profit"
-    ? { t: c.holdings > 0 ? "Profit" : "Closed +", c: "bg-emerald-100 text-emerald-800" }
-    : c.status === "underwater"
-    ? { t: c.holdings > 0 ? "Under" : "Closed -", c: "bg-amber-400 text-amber-950" }
-    : { t: c.holdings > 0 ? "Flat" : "Closed", c: "bg-slate-100 text-slate-600" };
+                  const badge =
+                    c.holdings > 0 && c.openCycleCostRecovered
+                      ? { t: "Recovered", c: "bg-emerald-500 text-white" }
+                      : c.status === "in_profit"
+                      ? { t: c.holdings > 0 ? "Profit" : "Closed +", c: "bg-emerald-100 text-emerald-800" }
+                      : c.status === "underwater"
+                      ? { t: c.holdings > 0 ? "Under" : "Closed −", c: "bg-amber-400 text-amber-950" }
+                      : { t: c.holdings > 0 ? "Flat" : "Closed", c: "bg-slate-100 text-slate-600" };
                   return (
                     <div
                       key={c.symbol}
@@ -741,7 +838,7 @@ export default function TradeView() {
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center justify-between px-3 py-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
                       <span
                         className={`text-sm font-bold tabular-nums ${
                           cy.realizedPnl >= 0 ? "text-emerald-600" : "text-rose-600"
@@ -749,12 +846,46 @@ export default function TradeView() {
                       >
                         {cy.realizedPnl >= 0 ? "+" : ""}
                         {formatPhp(cy.realizedPnl)}
+                        {cy.totalBoughtPhp > 0 && (
+                          <span className="ml-1 text-[10px] font-semibold text-slate-400">
+                            ({((cy.realizedPnl / cy.totalBoughtPhp) * 100) >= 0 ? "+" : ""}
+                            {((cy.realizedPnl / cy.totalBoughtPhp) * 100).toFixed(1)}%)
+                          </span>
+                        )}
                       </span>
-                      {cy.freeCoinsCarried > 0 && (
-                        <span className="text-[10px] font-semibold text-emerald-700">
-                          Free {formatCoinAmount(cy.freeCoinsCarried)}
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1.5">
+                        {cy.freeCoinsCarried > 0 && (
+                          <span className="text-[10px] font-semibold text-emerald-700">
+                            Free {formatCoinAmount(cy.freeCoinsCarried)}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const key = `${cy.symbol}-c${cy.cycleIndex}-${cy.endAt}`;
+                            const text = formatCycleReviewPrompt({
+                              symbol: cy.symbol,
+                              name: cy.name,
+                              cycle: cy,
+                            });
+                            void navigator.clipboard.writeText(text).then(() => {
+                              setCycleReviewCopied(key);
+                              setTimeout(() => setCycleReviewCopied(null), 2000);
+                            });
+                          }}
+                          className="inline-flex items-center gap-1 rounded-md border border-violet-200 bg-violet-50 px-2 py-1 text-[10px] font-bold text-violet-800 hover:bg-violet-100"
+                        >
+                          {cycleReviewCopied === `${cy.symbol}-c${cy.cycleIndex}-${cy.endAt}`
+                            ? "✅ Copied"
+                            : "📝 Review"}
+                        </button>
+                        <Link
+                          href={`/chart?symbol=${encodeURIComponent(cy.symbol)}`}
+                          className="inline-flex items-center gap-1 rounded-md border border-sky-200 bg-sky-50 px-2 py-1 text-[10px] font-bold text-sky-800 hover:bg-sky-100"
+                        >
+                          Chart
+                        </Link>
+                      </div>
                     </div>
                   </div>
                 ))}

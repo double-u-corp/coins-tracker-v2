@@ -352,6 +352,20 @@ export default function TradingInsightCard({
   const style = BIAS_STYLES[confluence.bias];
   const isInsufficient = confluence.bias === "INSUFFICIENT DATA";
 
+  const holdings = activePortfolio?.holdings ?? 0;
+  const spent = activePortfolio?.spent ?? 0;
+  const isAllocated = holdings > 0;
+  const avgCost = isAllocated && holdings > 0 ? spent / holdings : null;
+  const px = currentPrice ?? confluence.currentPrice;
+  const unrealizedPhp =
+    isAllocated && avgCost != null && px != null ? (px - avgCost) * holdings : null;
+  const unrealizedPct =
+    isAllocated && avgCost != null && avgCost > 0 && px != null
+      ? ((px - avgCost) / avgCost) * 100
+      : null;
+  const daysHeld = activePortfolio?.daysHeld ?? null;
+  const firstBuyAt = activePortfolio?.firstBuyAt ?? null;
+
   const buildAgentPrompt = () =>
     formatEntryReviewPrompt(symbol, confluence, crossoverAlert, activePortfolio);
 
@@ -423,6 +437,76 @@ export default function TradingInsightCard({
           </span>
         </div>
       </div>
+
+      {/* #2 Position bridge — only when you hold this coin */}
+      {isAllocated && (
+        <div className="mb-3 rounded-lg border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-violet-800">
+              🎒 Open position
+            </span>
+            <span className="text-[11px] font-semibold text-violet-700">
+              Spot LONG · no leverage
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="rounded-md bg-white/80 border border-violet-100 px-2 py-1.5">
+              <div className="text-[10px] font-bold uppercase text-gray-400">Holdings</div>
+              <div className="text-sm font-bold tabular-nums text-gray-900">
+                {holdings.toLocaleString(undefined, { maximumFractionDigits: 6 })}
+              </div>
+            </div>
+            <div className="rounded-md bg-white/80 border border-violet-100 px-2 py-1.5">
+              <div className="text-[10px] font-bold uppercase text-gray-400">Avg cost</div>
+              <div className="text-sm font-bold tabular-nums text-gray-900">
+                {avgCost != null ? formatPhp(avgCost) : "—"}
+              </div>
+            </div>
+            <div className="rounded-md bg-white/80 border border-violet-100 px-2 py-1.5">
+              <div className="text-[10px] font-bold uppercase text-gray-400">Unrealized</div>
+              <div
+                className={`text-sm font-bold tabular-nums ${
+                  unrealizedPhp == null
+                    ? "text-gray-900"
+                    : unrealizedPhp >= 0
+                    ? "text-emerald-700"
+                    : "text-rose-700"
+                }`}
+              >
+                {unrealizedPhp != null ? (
+                  <>
+                    {unrealizedPhp >= 0 ? "+" : ""}
+                    {formatPhp(unrealizedPhp)}
+                    {unrealizedPct != null && (
+                      <span className="ml-1 text-[11px] font-semibold">
+                        ({unrealizedPct >= 0 ? "+" : ""}
+                        {unrealizedPct.toFixed(1)}%)
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  "—"
+                )}
+              </div>
+            </div>
+            <div className="rounded-md bg-white/80 border border-violet-100 px-2 py-1.5">
+              <div className="text-[10px] font-bold uppercase text-gray-400">Days held</div>
+              <div className="text-sm font-bold tabular-nums text-gray-900">
+                {daysHeld != null ? `${daysHeld}d` : "—"}
+                {firstBuyAt && (
+                  <span className="ml-1 text-[10px] font-medium text-gray-400">
+                    since {String(firstBuyAt).slice(0, 10)}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          <p className="mt-2 text-[11px] text-violet-900/80">
+            You already hold this coin — use <span className="font-semibold">hold/exit review</span> (not a fresh
+            entry). Bias below is context; decision is hold, trim, or wait.
+          </p>
+        </div>
+      )}
 
       <div className="space-y-3">
         {isInsufficient && (

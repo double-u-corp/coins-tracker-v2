@@ -218,6 +218,15 @@ const STATIC_GLOBAL_PROMPTS: CatalystPrompt[] = [
     searchProfile: "weekly",
   },
   {
+    id: "live-social-x-sentiment",
+    category: "Live",
+    title: "📣 Social & X (Twitter) — Market Noise Check",
+    prompt: `Scan X/Twitter and major crypto social chatter for the last 24-48 hours that could move BTC/alts risk appetite (not single meme spam). Cover: (1) viral narratives or FUD that mainstream crypto Twitter is amplifying, (2) notable influencer or project-account claims that are CONFIRMED vs pure rumor, (3) coordinated hype or panic themes. Overall social tone: Bullish / Mixed / Bearish for spot LONG alts. List 3-5 concrete themes with source handles or links when found. Do not invent posts or metrics.`,
+    searchQuery: "crypto Twitter X sentiment BTC alts FUD hype this week site:x.com OR twitter",
+    scope: "global",
+    searchProfile: "breaking",
+  },
+  {
     id: "weekly-crypto-calendar",
     category: "Weekly",
     title: "🗓️ Crypto Week Ahead (Upgrades, Unlocks, Listings)",

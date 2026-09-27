@@ -31,6 +31,70 @@ export interface ClosedTradeCycle {
   freeCoinsCarried: number;
 }
 
+export interface RiskBudgetSettings {
+  /** Max % of total equity (portfolio value + cash) to put in one coin. 0 = off */
+  maxPctPerCoin: number;
+  /** Max number of coins with holdings > 0. 0 = off */
+  maxOpenNames: number;
+  /** Max % of equity in non-BTC/ETH alts combined. 0 = off */
+  maxPctAlts: number;
+}
+
+const RISK_BUDGET_STORAGE_KEY = "tradeview_risk_budget_v1";
+const DEFAULT_RISK_BUDGET: RiskBudgetSettings = {
+  maxPctPerCoin: 15,
+  maxOpenNames: 8,
+  maxPctAlts: 60,
+};
+
+function loadRiskBudget(): RiskBudgetSettings {
+  if (typeof window === "undefined") return { ...DEFAULT_RISK_BUDGET };
+  try {
+    const raw = localStorage.getItem(RISK_BUDGET_STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_RISK_BUDGET };
+    const parsed = JSON.parse(raw) as Partial<RiskBudgetSettings>;
+    return {
+      maxPctPerCoin: Number(parsed.maxPctPerCoin) || 0,
+      maxOpenNames: Number(parsed.maxOpenNames) || 0,
+      maxPctAlts: Number(parsed.maxPctAlts) || 0,
+    };
+  } catch {
+    return { ...DEFAULT_RISK_BUDGET };
+  }
+}
+
+/** Post-trade review prompt for a closed cycle (journal / agent). */
+export function formatCycleReviewPrompt(input: {
+  symbol: string;
+  name: string;
+  cycle: ClosedTradeCycle;
+}): string {
+  const { symbol, name, cycle: cy } = input;
+  const base = symbol.endsWith("PHP") && symbol.length > 3 ? symbol.slice(0, -3) : symbol;
+  const retPct =
+    cy.totalBoughtPhp > 0 ? (cy.realizedPnl / cy.totalBoughtPhp) * 100 : null;
+  const lines: string[] = [];
+  lines.push(`Post-trade review — closed cycle for **${name}** (${symbol} / ${base}).`);
+  lines.push(`Spot LONG only · no leverage · PHP pair.`);
+  lines.push(``);
+  lines.push(`## Cycle facts`);
+  lines.push(`- Cycle #${cy.cycleIndex} · ${cy.closeReason}`);
+  lines.push(`- Held **${cy.daysHeld} days** (${cy.startAt.slice(0, 10)} → ${cy.endAt.slice(0, 10)})`);
+  lines.push(`- Bought ₱${cy.totalBoughtPhp.toFixed(2)} · Sold ₱${cy.totalSoldPhp.toFixed(2)}`);
+  lines.push(`- Realized P&L: **${cy.realizedPnl >= 0 ? "+" : ""}${cy.realizedPnl.toFixed(2)} PHP**${retPct != null ? ` (${retPct >= 0 ? "+" : ""}${retPct.toFixed(1)}% on capital)` : ""}`);
+  if (cy.avgBuyPrice != null) lines.push(`- Avg buy: ${cy.avgBuyPrice}`);
+  if (cy.avgSellPrice != null) lines.push(`- Avg sell: ${cy.avgSellPrice}`);
+  if (cy.freeCoinsCarried > 0) {
+    lines.push(`- House-money leftover when cycle closed: ${cy.freeCoinsCarried} coins`);
+  }
+  lines.push(``);
+  lines.push(`## Answer`);
+  lines.push(`1. What went well / poorly (2 bullets)`);
+  lines.push(`2. Was hold time appropriate for a spot swing?`);
+  lines.push(`3. One rule to keep for the next cycle on this coin`);
+  return lines.join("\n");
+}
+
 /** Per-coin analytics for “am I profitable?” and “what’s taking long?” */
 export interface CoinAnalytics {
   symbol: string;
@@ -336,21 +400,29 @@ export function buildCoinAnalytics(
       unrealizedPnl != null ? realizedPnl + unrealizedPnl : state ? realizedPnl : null;
 
     const firstBuyAt = state?.firstBuyAt ?? null;
-    // Current open cycle only — does not include closed history
-    const openCycleStartAt = state?.cycleStartAt && (state.units > 0 || holdings > 0) ? state.cycleStartAt : null;
-    const positionStart = openCycleStartAt || (holdings > 0 ? firstBuyAt : null);
+    const openCycleStartAt =
+      state?.cycleStartAt && (state.units > 0 || holdings > 0) ? state.cycleStartAt : null;
+
+    // House money: this cycle's sells already covered buys. Do not run hold/underwater clocks on free bag.
+    const openCycleCostRecovered =
+      holdings > 0 &&
+      (state?.cycleBoughtPhp ?? 0) > 0 &&
+      (state?.cycleSoldPhp ?? 0) >= (state?.cycleBoughtPhp ?? 0);
+
+    // New capital after a recovered_reentry still has cycleStartAt = that new buy → timed.
+    // Pure recovered bag (no new paid capital yet): no hold-day tracking.
+    const positionStart = openCycleCostRecovered ? null : openCycleStartAt || (holdings > 0 ? firstBuyAt : null);
     const daysSinceFirstBuy = positionStart
       ? Math.max(0, Math.round((now - new Date(positionStart).getTime()) / (1000 * 60 * 60 * 24)))
       : null;
 
     const isUnderwater =
-      holdings > 0 && unrealizedPnl != null ? unrealizedPnl < 0 : false;
+      holdings > 0 && !openCycleCostRecovered && unrealizedPnl != null ? unrealizedPnl < 0 : false;
     const isInProfitOpen =
       holdings > 0 && unrealizedPnl != null ? unrealizedPnl > 0 : false;
 
-    // Underwater clock for *current* open lot only
     const daysUnderwater =
-      isUnderwater && daysSinceFirstBuy != null ? daysSinceFirstBuy : isUnderwater ? null : 0;
+      isUnderwater && daysSinceFirstBuy != null ? daysSinceFirstBuy : 0;
 
     let status: CoinAnalytics["status"] = "no_position";
     if (holdings > 0) {
@@ -391,10 +463,7 @@ export function buildCoinAnalytics(
       status,
       closedCycles: state?.closedCycles ? [...state.closedCycles] : [],
       openCycleStartAt: openCycleStartAt,
-      openCycleCostRecovered:
-        holdings > 0 &&
-        (state?.cycleBoughtPhp ?? 0) > 0 &&
-        (state?.cycleSoldPhp ?? 0) >= (state?.cycleBoughtPhp ?? 0),
+      openCycleCostRecovered,
       openCycleRealizedPnl: state?.cycleRealizedPnl ?? 0,
       openCycleBoughtPhp: state?.cycleBoughtPhp ?? 0,
       openCycleSoldPhp: state?.cycleSoldPhp ?? 0,
@@ -451,6 +520,20 @@ export function useTradeLogic() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [type, setType] = useState<TradeType>("buy");
+  const [riskBudget, setRiskBudgetState] = useState<RiskBudgetSettings>(() => loadRiskBudget());
+
+  const setRiskBudget = useCallback((next: Partial<RiskBudgetSettings>) => {
+    setRiskBudgetState((prev) => {
+      const merged = { ...prev, ...next };
+      try {
+        localStorage.setItem(RISK_BUDGET_STORAGE_KEY, JSON.stringify(merged));
+      } catch {
+        /* ignore */
+      }
+      return merged;
+    });
+  }, []);
+
   const [symbol, setSymbol] = useState("");
   const [phpAmount, setPhpAmount] = useState("");
   const [coinAmount, setCoinAmount] = useState("");
@@ -668,12 +751,67 @@ export function useTradeLogic() {
     }
   }
 
+
+  const riskStatus = useMemo(() => {
+    const phpCash = portfolio.find((p) => p.symbol === "PHP");
+    const cash = phpCash?.holdings ?? 0;
+    const coinRows = portfolio.filter((p) => p.symbol !== "PHP" && p.holdings > 0);
+    const equity =
+      cash +
+      coinRows.reduce((s, p) => s + (p.currentValue ?? 0), 0);
+    const openNames = coinRows.length;
+    const perCoin = coinRows.map((p) => ({
+      symbol: p.symbol,
+      pct: equity > 0 ? ((p.currentValue ?? 0) / equity) * 100 : 0,
+      value: p.currentValue ?? 0,
+    }));
+    const maxCoin = perCoin.reduce(
+      (best, row) => (row.pct > best.pct ? row : best),
+      { symbol: "—", pct: 0, value: 0 }
+    );
+    const altSymbols = new Set(["BTC", "BTCPHP", "ETH", "ETHPHP"]);
+    const altPct =
+      equity > 0
+        ? (coinRows
+            .filter((p) => !altSymbols.has(p.symbol.toUpperCase()))
+            .reduce((s, p) => s + (p.currentValue ?? 0), 0) /
+            equity) *
+          100
+        : 0;
+
+    const breaches: string[] = [];
+    if (riskBudget.maxOpenNames > 0 && openNames > riskBudget.maxOpenNames) {
+      breaches.push(`Open names ${openNames} > max ${riskBudget.maxOpenNames}`);
+    }
+    if (riskBudget.maxPctPerCoin > 0 && maxCoin.pct > riskBudget.maxPctPerCoin) {
+      breaches.push(
+        `${maxCoin.symbol} is ${maxCoin.pct.toFixed(1)}% of equity (max ${riskBudget.maxPctPerCoin}%)`
+      );
+    }
+    if (riskBudget.maxPctAlts > 0 && altPct > riskBudget.maxPctAlts) {
+      breaches.push(`Alts ${altPct.toFixed(1)}% of equity (max ${riskBudget.maxPctAlts}%)`);
+    }
+
+    return {
+      equity,
+      cash,
+      openNames,
+      maxCoin,
+      altPct,
+      breaches,
+      ok: breaches.length === 0,
+    };
+  }, [portfolio, riskBudget]);
+
   return {
     coinOptions,
     transactions,
     portfolio,
     coinAnalytics,
     analyticsSummary,
+    riskBudget,
+    setRiskBudget,
+    riskStatus,
     loading,
     loadError,
     type,

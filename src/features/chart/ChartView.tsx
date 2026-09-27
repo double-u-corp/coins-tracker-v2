@@ -126,8 +126,24 @@ export default function ChartView() {
 
   const activePortfolio = useMemo(() => {
     if (!symbol || !portfolio) return null;
-    return portfolio.find((p) => p.symbol === symbol) || null;
-  }, [symbol, portfolio]);
+    const row = portfolio.find((p) => p.symbol === symbol);
+    if (!row || !(row.holdings > 0)) return row ? { ...row, firstBuyAt: null, daysHeld: null } : null;
+
+    // Position bridge: first buy date + days held from transaction history
+    const buys = (transactions || [])
+      .filter((tx) => tx.symbol === symbol && tx.type === "buy")
+      .map((tx) => new Date(tx.transactedAt).getTime())
+      .filter((t) => Number.isFinite(t))
+      .sort((a, b) => a - b);
+    const firstBuyMs = buys.length > 0 ? buys[0] : null;
+    const firstBuyAt = firstBuyMs != null ? new Date(firstBuyMs).toISOString() : null;
+    const daysHeld =
+      firstBuyMs != null
+        ? Math.max(0, Math.floor((Date.now() - firstBuyMs) / (24 * 60 * 60 * 1000)))
+        : null;
+
+    return { ...row, firstBuyAt, daysHeld };
+  }, [symbol, portfolio, transactions]);
 
   const currentPrice = useMemo(() => {
     if (selectedCoin?.currentPrice != null) {
