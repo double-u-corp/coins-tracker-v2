@@ -10,6 +10,7 @@ import { useChartLogic, type ChartRange } from "./useChartLogic";
 import { formatPhp } from "@/lib/format";
 import { getSupportResistance, BIAS_BADGE_CLASSES, BIAS_PRIORITY, isLongExtended, isWatchlistBuyLowHit, isNearSupportWorthCheck } from "./Technicals";
 import { useCoinScanner, formatScanResultsForJournal, formatSingleScanResult } from "./useCoinScanner";
+import MacroDayBanner from "./MacroDayBanner";
 
 const PriceLineChart = dynamic(() => import("./PriceLineChart"), {
   ssr: false,
@@ -224,6 +225,8 @@ export default function ChartView() {
           </div>
         )}
       </div>
+
+      <MacroDayBanner />
 
       {/* Watchlist Scan — check every tracked coin's confluence signal at once
           instead of clicking through the dropdown one by one */}

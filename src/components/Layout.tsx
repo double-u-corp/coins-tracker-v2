@@ -6,7 +6,8 @@ import { useAuth } from "@/features/auth/useAuth";
 const PUBLIC_NAV_LINKS = [
   { href: "/", label: "Home" },
   { href: "/calendar", label: "Calendar" },
-  { href: "/chart", label: "Chart" },
+  { href: "/chart", label: "Spot" },
+    { href: "/pastTrade", label: "3h Trading" },
 ];
 
 const PROTECTED_NAV_LINKS = [

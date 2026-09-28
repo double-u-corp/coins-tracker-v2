@@ -245,7 +245,7 @@ export function getSwingStructure(
 export interface LadderLevel {
   price: number;
   allocationPct: number;
-  basis: "swing-low" | "support";
+  basis: "swing-low" | "support" | "swing-high" | "resistance";
 }
 
 /** Builds a 2-3 tranche entry ladder anchored to actual confirmed swing
@@ -289,6 +289,51 @@ export function buildEntryLadder(points: ChartPoint[], support: number, currentP
     price,
     allocationPct: weights[i],
     basis: Math.abs(price - support) / support < 0.01 ? "support" : "swing-low",
+  }));
+}
+
+/** Mirror of buildEntryLadder for the short side: stages 2-3 tranches
+ * anchored to confirmed swing HIGHS at/above the current price, falling
+ * back to the plain resistance level. Higher (more aggressive) tranches
+ * get a bigger suggested allocation — filling higher into resistance is a
+ * better short price if it happens, same "deepest tranche wins" idea as
+ * the long ladder, just mirrored to the top of the range instead of the
+ * bottom. Only meaningful for leverage/margin trading (spot has no short). */
+export function buildShortLadder(points: ChartPoint[], resistance: number, currentPrice: number): LadderLevel[] {
+  const swings = detectSwingPoints(points, 3);
+  const swingHighs = swings
+    .filter((s) => s.type === "high" && s.price >= currentPrice * 0.99)
+    .map((s) => s.price)
+    .sort((a, b) => a - b); // closest to current price first
+
+  const dedup: number[] = [];
+  for (const lvl of swingHighs) {
+    if (dedup.every((d) => Math.abs(d - lvl) / d > 0.01)) dedup.push(lvl);
+    if (dedup.length >= 3) break;
+  }
+  // Never stage short entries below market (breakout case: resistance can sit below price)
+  if (
+    resistance >= currentPrice * 0.995 &&
+    dedup.every((d) => Math.abs(d - resistance) / resistance > 0.01)
+  ) {
+    dedup.push(resistance);
+  }
+  const levels = dedup
+    .filter((p) => p >= currentPrice * 0.995)
+    .sort((a, b) => a - b)
+    .slice(0, 3);
+
+  if (levels.length === 0) {
+    // Deep breakout: anchor a single tranche slightly above market, not below
+    const emergency = Math.max(resistance, currentPrice * 1.01);
+    return [{ price: emergency, allocationPct: 100, basis: "resistance" }];
+  }
+
+  const weights = levels.length === 3 ? [30, 30, 40] : levels.length === 2 ? [40, 60] : [100];
+  return levels.map((price, i) => ({
+    price,
+    allocationPct: weights[i],
+    basis: Math.abs(price - resistance) / resistance < 0.01 ? "resistance" : "swing-high",
   }));
 }
 
@@ -565,6 +610,92 @@ export function isNearSupportWorthCheck(c: ConfluenceResult): boolean {
   return false;
 }
 
+/**
+ * Mirror of isLongExtended for the short side — leverage/margin only, since
+ * spot has no short to chase. True when price has already fallen far (lower
+ * range and/or clearly below the bottom short-ladder tranche) — bias can
+ * stay bearish, but the short is already extended: better to wait for a
+ * relief bounce back up into the ladder than to chase it lower.
+ */
+export function isShortExtended(c: ConfluenceResult): boolean {
+  if (!c.bias.includes("SHORT")) return false;
+  const price = c.currentPrice;
+  if (price == null || !Number.isFinite(price)) return false;
+
+  const range = c.resistance - c.support;
+  const positionInRange = range > 0 ? (price - c.support) / range : 0.5;
+
+  // Lower 40% of range is chasing weakness
+  if (positionInRange <= 0.4) return true;
+
+  const atrBuffer = c.atr != null && c.atr > 0 ? 1.5 * c.atr : c.resistance * 0.08;
+  if (c.resistance > 0 && price < c.resistance - atrBuffer) return true;
+
+  const ladder = c.entrySuggestion?.ladder;
+  if (ladder && ladder.length > 0) {
+    const bottom = Math.min(...ladder.map((l) => l.price));
+    if (bottom < c.resistance * 0.99 && price < bottom * 0.97) return true;
+  }
+  return false;
+}
+
+/**
+ * Fast-trade (leverage) scan keep-rule for the SHORT side — the mirror of
+ * isWatchlistBuyLowHit. Excludes LONG/STRONG LONG (not a short candidate);
+ * includes SHORT/STRONG SHORT/NEUTRAL when price is near resistance or in
+ * the upper third of the range — same "still worth watching before a
+ * confirmed bias" allowance the buy-low version gives NEUTRAL near the
+ * floor, just flipped to the top of the range. Spot has no equivalent
+ * (isWatchlistBuyLowHit explicitly excludes SHORT — "hold cash" is the
+ * correct spot read); this only matters once shorting is actually on the
+ * table.
+ */
+export function isFastTradeShortReadyHit(c: ConfluenceResult): boolean {
+  if (c.bias === "INSUFFICIENT DATA") return false;
+  if (c.bias.includes("LONG")) return false;
+
+  const price = c.currentPrice;
+  const resistance = c.resistance;
+  if (price == null || !Number.isFinite(price) || resistance == null || resistance <= 0) return false;
+
+  if (isShortExtended(c)) return false;
+
+  const nearResistanceBuffer = c.atr != null && c.atr > 0 ? 1.0 * c.atr : resistance * 0.05;
+  const atOrNearKey = price >= resistance - nearResistanceBuffer;
+
+  const range = resistance - c.support;
+  const positionInRange = range > 0 ? (price - c.support) / range : 0.5;
+  const upperThird = positionInRange >= 0.67;
+  const justOverResistance = price <= resistance * 1.03 && price > resistance;
+
+  return atOrNearKey || upperThird || justOverResistance;
+}
+
+/**
+ * Display-only mirror of isNearSupportWorthCheck: price near/above key
+ * resistance (no bias/score change) — plugs secondary "worth to check"
+ * cards for a possible short on the fast-trade scan. Never plugs LONG bias
+ * here (mirrors the "never plug shorts" rule the support-side version uses
+ * for spot, just flipped).
+ */
+export function isNearResistanceWorthCheck(c: ConfluenceResult): boolean {
+  const price = c.currentPrice;
+  const resistance = c.resistance;
+  if (price == null || !Number.isFinite(price) || resistance == null || resistance <= 0) return false;
+  if (c.bias === "INSUFFICIENT DATA") return false;
+  if (c.bias.includes("LONG")) return false;
+
+  const nearResistanceBuffer = c.atr != null && c.atr > 0 ? 1.0 * c.atr : resistance * 0.05;
+  if (price >= resistance - nearResistanceBuffer) return true;
+
+  const range = resistance - c.support;
+  if (range > 0 && (price - c.support) / range >= 0.67) return true;
+
+  if (price <= resistance * 1.03 && price > resistance) return true;
+
+  return false;
+}
+
 export function computeConfluenceSignal(
   points: ChartPoint[],
   overrides?: {
@@ -578,11 +709,25 @@ export function computeConfluenceSignal(
     // real daily history and keeps using `points` regardless. Falls back
     // to `points` when omitted — this stays fully functional without it.
     intradayPoints?: ChartPoint[] | null;
+    // "spot" (default) preserves every existing string/behavior exactly.
+    // "leverage" is for margin/short pages where `points` IS the 3-hour
+    // series (not daily): it swaps "day(s)" wording for "candle(s)" in the
+    // history-length messages below, and — most importantly — lets a SHORT
+    // bias produce a real short-side entry ladder + take-profit/cover
+    // target instead of the spot-only "hold cash, never short" framing.
+    mode?: "spot" | "leverage";
+    // Display label for the lookback window used in "position in range"
+    // messages (e.g. "30-day range" for daily spot data, "7-day range" for
+    // a 56-candle/3h lookback). Defaults to the historical spot wording.
+    rangeLabel?: string;
   }
 ): ConfluenceResult {
   const signals: SignalContribution[] = [];
   let score = 0;
   let maxPossible = 0;
+  const mode = overrides?.mode ?? "spot";
+  const unit = mode === "leverage" ? "candle" : "day";
+  const rangeLabel = overrides?.rangeLabel ?? "30-day range";
 
   // Prefer a live/monitored price over the last chart point's derived
   // value — daily chart data can lag behind the actual latest tick (e.g.
@@ -614,7 +759,7 @@ export function computeConfluenceSignal(
     score += s;
     signals.push({ name: "RSI (14)", weight: s, detail, available: true });
   } else {
-    signals.push({ name: "RSI (14)", weight: 0, detail: "Not enough history yet (needs 14+ days)", available: false });
+    signals.push({ name: "RSI (14)", weight: 0, detail: `Not enough history yet (needs 14+ ${unit}s)`, available: false });
   }
 
   // --- Price vs 20 SMA (short-term trend) ---
@@ -635,7 +780,7 @@ export function computeConfluenceSignal(
       available: true,
     });
   } else {
-    signals.push({ name: "Price vs 20 SMA", weight: 0, detail: "Not enough history yet (needs 20+ days)", available: false });
+    signals.push({ name: "Price vs 20 SMA", weight: 0, detail: `Not enough history yet (needs 20+ ${unit}s)`, available: false });
   }
 
   // --- 20 SMA vs 50 SMA (medium-term momentum) ---
@@ -656,7 +801,7 @@ export function computeConfluenceSignal(
       available: true,
     });
   } else {
-    signals.push({ name: "20 SMA vs 50 SMA", weight: 0, detail: "Not enough history yet (needs 50+ days)", available: false });
+    signals.push({ name: "20 SMA vs 50 SMA", weight: 0, detail: `Not enough history yet (needs 50+ ${unit}s)`, available: false });
   }
 
   // --- 50 SMA vs 200 SMA (macro trend — double-weighted) ---
@@ -683,7 +828,7 @@ export function computeConfluenceSignal(
     signals.push({
       name: "50 SMA vs 200 SMA (Macro Trend)",
       weight: 0,
-      detail: "Not enough history yet (needs 200+ days)",
+      detail: `Not enough history yet (needs 200+ ${unit}s)`,
       available: false,
     });
   }
@@ -698,16 +843,16 @@ export function computeConfluenceSignal(
   maxPossible += 1;
   {
     let s = 0;
-    let detail = `Mid-range (${(positionInRange * 100).toFixed(0)}% of 30-day range)`;
+    let detail = `Mid-range (${(positionInRange * 100).toFixed(0)}% of ${rangeLabel})`;
     if (positionInRange > 1) {
       // Price has broken ABOVE the established range. The mean-reversion
       // framing below (near-resistance = bearish/"expensive") is backwards
       // here — a genuine breakout is often bullish continuation, not a
       // sell signal. Treated as neutral rather than guessing a direction
       // this specific signal isn't well-positioned to call.
-      detail = `Trading above the 30-day range (${((positionInRange - 1) * 100).toFixed(0)}% beyond resistance) — breakout, range no longer applies`;
+      detail = `Trading above the ${rangeLabel} (${((positionInRange - 1) * 100).toFixed(0)}% beyond resistance) — breakout, range no longer applies`;
     } else if (positionInRange < 0) {
-      detail = `Trading below the 30-day range (${(Math.abs(positionInRange) * 100).toFixed(0)}% beyond support) — breakdown, range no longer applies`;
+      detail = `Trading below the ${rangeLabel} (${(Math.abs(positionInRange) * 100).toFixed(0)}% beyond support) — breakdown, range no longer applies`;
     } else if (positionInRange <= 0.25) {
       s = 1;
       detail = `Near range support (${(positionInRange * 100).toFixed(0)}% of range) — discount zone`;
@@ -716,7 +861,7 @@ export function computeConfluenceSignal(
       detail = `Near range resistance (${(positionInRange * 100).toFixed(0)}% of range) — expensive zone`;
     }
     score += s;
-    signals.push({ name: "Position in 30-Day Range", weight: s, detail, available: points.length >= 5 });
+    signals.push({ name: `Position in ${rangeLabel}`, weight: s, detail, available: points.length >= 5 });
   }
 
   // --- Swing structure (higher-highs/higher-lows vs lower-highs/lower-lows) ---
@@ -817,10 +962,16 @@ export function computeConfluenceSignal(
       invalidationNote = `Resistance near ${liquiditySweep.sweptLevel.toFixed(2)} was already swept and rejected (high of ~${liquiditySweep.extremePrice.toFixed(2)}, ${liquiditySweep.daysAgo} day(s) ago) — the stop is anchored just above that tested high rather than the naive resistance line, for the same stop-hunt reason. If price closes above ~${invalidationLevel.toFixed(2)}, re-evaluate — momentum may be turning.`;
     } else if (atr !== null) {
       invalidationLevel = resistance + 1.5 * atr;
-      invalidationNote = `If price closes above ~${invalidationLevel.toFixed(2)} (resistance reclaimed by more than the recent ATR-14 of ${atr.toFixed(2)}), re-evaluate — momentum may be turning.`;
+      invalidationNote =
+        mode === "leverage"
+          ? `If price closes above ~${invalidationLevel.toFixed(2)} (resistance reclaimed by more than the recent ATR-14 of ${atr.toFixed(2)}), this short thesis is invalidated.`
+          : `If price closes above ~${invalidationLevel.toFixed(2)} (resistance reclaimed by more than the recent ATR-14 of ${atr.toFixed(2)}), re-evaluate — momentum may be turning.`;
     } else {
       invalidationLevel = resistance * 1.03;
-      invalidationNote = `If price closes above ~${invalidationLevel.toFixed(2)} (resistance reclaimed), re-evaluate. (Flat 3% buffer — not enough history yet for a volatility-based ATR stop.)`;
+      invalidationNote =
+        mode === "leverage"
+          ? `If price closes above ~${invalidationLevel.toFixed(2)} (resistance reclaimed), this short thesis is invalidated. (Flat 3% buffer — not enough history yet for a volatility-based ATR stop.)`
+          : `If price closes above ~${invalidationLevel.toFixed(2)} (resistance reclaimed), re-evaluate. (Flat 3% buffer — not enough history yet for a volatility-based ATR stop.)`;
     }
   }
 
@@ -848,15 +999,44 @@ export function computeConfluenceSignal(
         price: resistance,
         note: "Near-term target — worth considering taking some profit if price reaches this level.",
       };
+    } else if (bias.includes("SHORT")) {
+      if (mode === "leverage") {
+        // Real short-side staging — anchored to swing highs, mirroring the
+        // long ladder at the top of the range instead of the bottom.
+        const shortLadder = buildShortLadder(swingSeries, resistance, currentPrice);
+        entrySuggestion = {
+          ladder: shortLadder,
+          note:
+            liquiditySweep?.type === "bearish"
+              ? `The first tranche sits near a level that was already tested and rejected — price swept to ~${liquiditySweep.extremePrice.toFixed(2)} and failed, which is somewhat higher-conviction than an untested level.`
+              : currentPrice >= resistance * 0.98
+              ? "Price is already near the bottom of this ladder — current conditions look like a reasonable zone to start shorting, not just the target."
+              : "Rather than shorting all at once, consider splitting across these tranches — higher fills are lower-risk if they happen, at the cost of maybe not filling at all if price never rallies that far.",
+        };
+        exitSuggestion = {
+          price: support,
+          note: "Near-term target to cover / take profit on the short — worth considering closing some of the position if price reaches this level.",
+        };
+      } else {
+        entrySuggestion = {
+          ladder,
+          note: "Technicals don't support buying at the current price — this isn't a signal to short (spot only, no leverage here). These are buyback levels worth waiting for on a pullback, staged from least to most aggressive.",
+        };
+        exitSuggestion = {
+          price: resistance,
+          note: "If you're already holding, this is a level worth watching to trim or take profit — not a fresh buy target.",
+        };
+      }
     } else {
+      // NEUTRAL — no confirmed directional setup either way.
       entrySuggestion = {
         ladder,
-        note: "Technicals don't support buying at the current price — this isn't a signal to short (spot only, no leverage here). These are buyback levels worth waiting for on a pullback, staged from least to most aggressive.",
+        note:
+          mode === "leverage"
+            ? "No confirmed directional edge right now on either side — these are the nearest support levels worth watching for a long if price dips into them. There's no confirmed short setup here either; sizing down or waiting for a clearer signal is reasonable."
+            : "Technicals are mixed right now — these are levels worth watching for a pullback entry, not a signal to buy immediately.",
       };
-      exitSuggestion = {
-        price: resistance,
-        note: "If you're already holding, this is a level worth watching to trim or take profit — not a fresh buy target.",
-      };
+      exitSuggestion = null;
     }
   }
 

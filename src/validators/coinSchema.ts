@@ -73,11 +73,19 @@ export const monthQuerySchema = z
  * correctly — this was purely a validation-layer bug, not a date-math one. */
 export const chartYearsQuerySchema = z.coerce.number().min(0.01).max(5);
 
-/** Validates the `hours` query param for the intraday chart (granularity=3h)
- * — capped at 30 days' worth of hours, which is already generous for
- * swing/entry-ladder purposes and far below the 3-year Record retention
- * window, so there's no risk of this ever requesting pruned data. */
-export const chartHoursQuerySchema = z.coerce.number().int().min(1).max(24 * 30);
+/** Validates the `hours` query param for the intraday chart (granularity=3h).
+ * Originally capped at 30 days (24*30) — enough for the daily chart's own
+ * swing/entry-ladder overlay, which only needs a couple weeks of recent
+ * turning points. Raised to 180 days (24*180) to also support a second
+ * consumer of this same endpoint: the past-trade page, which runs its
+ * ENTIRE technical read (RSI-14, SMA-20/50/200) directly off these
+ * intraday points rather than daily bars, and a 200-period SMA needs real
+ * history to populate at all. 180 days is still comfortably inside the
+ * 3-year Record retention window (no risk of requesting pruned data), and
+ * existing callers that pass a smaller `hours` value (e.g. the daily
+ * chart's hardcoded 336) are completely unaffected — this only raises the
+ * ceiling, it doesn't change what a caller gets unless they ask for more. */
+export const chartHoursQuerySchema = z.coerce.number().int().min(1).max(24 * 180);
 
 /** Validates the `granularity` query param for the chart page. */
 export const chartGranularitySchema = z.enum(["daily", "weekly", "monthly", "yearly"]);
