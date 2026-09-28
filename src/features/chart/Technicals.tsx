@@ -112,6 +112,32 @@ export function calculateATR(points: ChartPoint[], period = 14): number | null {
   return ranges.reduce((a, b) => a + b, 0) / period;
 }
 
+/**
+ * Path ATR for sparse event-driven series (3h poll points where high=low=close).
+ * Classic HL ATR is ~0 on those points. This uses mean absolute consecutive
+ * price change over `period` steps — a usable volatility proxy for stops.
+ */
+export function calculatePathATR(points: ChartPoint[], period = 14): number | null {
+  if (points.length < period + 1) return null;
+  const prices = points.map(getEffectivePrice);
+  const changes: number[] = [];
+  for (let i = prices.length - period; i < prices.length; i++) {
+    if (i <= 0) continue;
+    changes.push(Math.abs(prices[i] - prices[i - 1]));
+  }
+  if (changes.length < period) return null;
+  const slice = changes.slice(-period);
+  const mean = slice.reduce((a, b) => a + b, 0) / slice.length;
+  return mean > 0 ? mean : null;
+}
+
+/** Prefer classic ATR when it has width; else path ATR for flat HL points. */
+export function resolveVolatilityATR(points: ChartPoint[], period = 14): number | null {
+  const classic = calculateATR(points, period);
+  if (classic != null && classic > 0) return classic;
+  return calculatePathATR(points, period);
+}
+
 export type DivergenceSignal = "bullish" | "bearish" | null;
 
 /** Simplified regular RSI divergence check — compares the price/RSI pivot
@@ -517,6 +543,78 @@ export interface ConfluenceResult {
   exitSuggestion: { price: number; note: string } | null;
 }
 
+export interface RiskLeverageInfo {
+  avgEntryPrice: number | null; // ladder tranches, weighted by allocation%
+  stopDistancePct: number | null; // |avgEntry - invalidationLevel| / avgEntry
+  rewardDistancePct: number | null; // |avgEntry - exitPrice| / avgEntry
+  riskRewardRatio: number | null; // reward / risk — below ~1.5 is a thin setup
+  suggestedMaxLeverage: number | null; // see note below — a simplified estimate, not exchange-specific
+  quality: "good" | "thin" | "unavailable";
+}
+
+// Rough isolated-margin approximation: a position roughly liquidates when
+// price has moved ~(100% / leverage) against entry (ignoring fees, funding,
+// and maintenance-margin details, which vary by exchange). We size
+// suggested leverage so the STOP trips at only ~60% of that estimated
+// liquidation distance — leaving real headroom for slippage/fees/funding
+// instead of a stop and a liquidation being the same price. This is
+// deliberately conservative and deliberately simplified: always check your
+// actual exchange's liquidation formula before sizing a real position.
+const LIQUIDATION_SAFETY_FACTOR = 0.6;
+const MAX_SUGGESTED_LEVERAGE = 20; // sane ceiling regardless of the math above
+const MIN_GOOD_RISK_REWARD = 1.5;
+
+/**
+ * The actual leverage-specific "advantage" beyond plain bias direction: a
+ * reward:risk ratio (is this setup even worth taking, regardless of which
+ * way it points?) and a suggested max leverage derived from how tight the
+ * stop is (a 1%-away stop supports far more leverage than a 6%-away stop
+ * before the stop and liquidation converge). Returns "unavailable" when the
+ * confluence result has no entry/exit/invalidation to measure from (e.g.
+ * NEUTRAL bias, or INSUFFICIENT DATA).
+ */
+export function computeRiskLeverage(c: ConfluenceResult): RiskLeverageInfo {
+  const unavailable: RiskLeverageInfo = {
+    avgEntryPrice: null,
+    stopDistancePct: null,
+    rewardDistancePct: null,
+    riskRewardRatio: null,
+    suggestedMaxLeverage: null,
+    quality: "unavailable",
+  };
+
+  if (!c.entrySuggestion || c.entrySuggestion.ladder.length === 0 || !c.exitSuggestion || c.invalidationLevel == null) {
+    return unavailable;
+  }
+
+  const ladder = c.entrySuggestion.ladder;
+  // Size R:R off the FIRST tranche only — weighted full-ladder average assumes
+  // every limit fills, which leverage traders often never get.
+  const primary = ladder[0];
+  const avgEntryPrice = primary.price;
+  if (!Number.isFinite(avgEntryPrice) || avgEntryPrice <= 0) return unavailable;
+
+  const stopDistancePct = Math.abs(avgEntryPrice - c.invalidationLevel) / avgEntryPrice;
+  const rewardDistancePct = Math.abs(avgEntryPrice - c.exitSuggestion.price) / avgEntryPrice;
+
+  // Refuse microscopic stops (broken ATR / entry glued to invalidation)
+  const MIN_STOP_PCT = 0.004; // 0.4%
+  if (stopDistancePct < MIN_STOP_PCT) return unavailable;
+
+  const riskRewardRatio = rewardDistancePct / stopDistancePct;
+  const rawMaxLeverage = LIQUIDATION_SAFETY_FACTOR / stopDistancePct;
+  const suggestedMaxLeverage = Math.max(1, Math.min(MAX_SUGGESTED_LEVERAGE, Math.floor(rawMaxLeverage)));
+
+  return {
+    avgEntryPrice,
+    stopDistancePct,
+    rewardDistancePct,
+    riskRewardRatio,
+    suggestedMaxLeverage,
+    quality: riskRewardRatio >= MIN_GOOD_RISK_REWARD ? "good" : "thin",
+  };
+}
+
 /**
  * Buy-low helper for LONG / STRONG LONG only.
  * True when price has already run (upper range and/or clearly above the
@@ -640,19 +738,15 @@ export function isShortExtended(c: ConfluenceResult): boolean {
 }
 
 /**
- * Fast-trade (leverage) scan keep-rule for the SHORT side — the mirror of
- * isWatchlistBuyLowHit. Excludes LONG/STRONG LONG (not a short candidate);
- * includes SHORT/STRONG SHORT/NEUTRAL when price is near resistance or in
- * the upper third of the range — same "still worth watching before a
- * confirmed bias" allowance the buy-low version gives NEUTRAL near the
- * floor, just flipped to the top of the range. Spot has no equivalent
- * (isWatchlistBuyLowHit explicitly excludes SHORT — "hold cash" is the
- * correct spot read); this only matters once shorting is actually on the
- * table.
+ * Fast-trade (leverage) actionable SHORT keep-rule.
+ * Requires SHORT/STRONG SHORT bias and price near resistance / upper third.
+ * NEUTRAL near resistance is NOT actionable — use isNearResistanceWorthCheck
+ * for display-only plugs. Density gating is applied in the scanner.
  */
 export function isFastTradeShortReadyHit(c: ConfluenceResult): boolean {
   if (c.bias === "INSUFFICIENT DATA") return false;
-  if (c.bias.includes("LONG")) return false;
+  // Actionable short only — NEUTRAL near resistance is display-only (isNearResistanceWorthCheck)
+  if (!c.bias.includes("SHORT")) return false;
 
   const price = c.currentPrice;
   const resistance = c.resistance;
@@ -934,7 +1028,7 @@ export function computeConfluenceSignal(
 
   const divergence = detectRSIDivergence(points);
   const liquiditySweep = detectLiquiditySweep(points, 20, 5, currentPrice);
-  const atr = calculateATR(points, 14);
+  const atr = resolveVolatilityATR(points, 14);
 
   let invalidationLevel: number | null = null;
   let invalidationNote: string | null = null;
@@ -948,8 +1042,9 @@ export function computeConfluenceSignal(
       const buffer = atr !== null ? 0.5 * atr : liquiditySweep.sweptLevel * 0.01;
       invalidationLevel = liquiditySweep.extremePrice - buffer;
       invalidationNote = `Support near ${liquiditySweep.sweptLevel.toFixed(2)} was already swept and reclaimed (low of ~${liquiditySweep.extremePrice.toFixed(2)}, ${liquiditySweep.daysAgo} day(s) ago) — the stop is anchored just below that tested low rather than the naive support line, since that naive line is exactly what a repeat stop-hunt would target. If price closes below ~${invalidationLevel.toFixed(2)}, this long thesis is invalidated.`;
-    } else if (atr !== null) {
-      invalidationLevel = support - 1.5 * atr;
+    } else if (atr !== null && atr > 0) {
+      const buf = Math.max(1.5 * atr, support * 0.005);
+      invalidationLevel = support - buf;
       invalidationNote = `If price closes below ~${invalidationLevel.toFixed(2)} (support broken by more than the recent ATR-14 of ${atr.toFixed(2)}), this long thesis is invalidated.`;
     } else {
       invalidationLevel = support * 0.97;
@@ -960,8 +1055,9 @@ export function computeConfluenceSignal(
       const buffer = atr !== null ? 0.5 * atr : liquiditySweep.sweptLevel * 0.01;
       invalidationLevel = liquiditySweep.extremePrice + buffer;
       invalidationNote = `Resistance near ${liquiditySweep.sweptLevel.toFixed(2)} was already swept and rejected (high of ~${liquiditySweep.extremePrice.toFixed(2)}, ${liquiditySweep.daysAgo} day(s) ago) — the stop is anchored just above that tested high rather than the naive resistance line, for the same stop-hunt reason. If price closes above ~${invalidationLevel.toFixed(2)}, re-evaluate — momentum may be turning.`;
-    } else if (atr !== null) {
-      invalidationLevel = resistance + 1.5 * atr;
+    } else if (atr !== null && atr > 0) {
+      const buf = Math.max(1.5 * atr, resistance * 0.005);
+      invalidationLevel = resistance + buf;
       invalidationNote =
         mode === "leverage"
           ? `If price closes above ~${invalidationLevel.toFixed(2)} (resistance reclaimed by more than the recent ATR-14 of ${atr.toFixed(2)}), this short thesis is invalidated.`

@@ -222,6 +222,14 @@ export default function ChartView() {
               <span>⚙️</span>
               <span>Manage Coin</span>
             </Link>
+            <Link
+              href={`/structure?symbol=${encodeURIComponent(symbol)}`}
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-md hover:bg-indigo-100 transition-colors"
+              title="3h structure deep dive — entry ladder companion to Spot"
+            >
+              <span>🔎</span>
+              <span>3h Structure</span>
+            </Link>
           </div>
         )}
       </div>

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
 import { useHomeLogic } from "./useHomeLogic";
@@ -7,6 +7,7 @@ import NewRecordModal from "./NewRecordModal";
 import NewsSection from "./NewsSection";
 import PriceUpdateModal from "./PriceUpdateModal";
 import type { CoinSummary } from "@/validators/recordSchema";
+import { parsePriceMovePercents } from "./priceMoveSignals";
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return "No cron runs recorded yet";
@@ -66,7 +67,14 @@ function CoinCard({ coin, canUpdatePrice, onUpdatePriceClick }: CoinCardProps) {
             className="rounded bg-gray-100 border border-gray-200 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-200 transition-colors"
             title={`See ${coin.symbol}'s chart`}
           >
-            Chart
+            Spot
+          </Link>
+          <Link
+            href={`/past-trade?symbol=${encodeURIComponent(coin.symbol)}`}
+            className="rounded bg-indigo-50 border border-indigo-200 px-2 py-1 text-xs font-medium text-indigo-800 hover:bg-indigo-100 transition-colors"
+            title={`3h structure ladder for ${coin.symbol}`}
+          >
+            3h
           </Link>
         </div>
       </div>
@@ -161,6 +169,30 @@ export default function HomeTable() {
     triggerCronManually,
   } = useHomeLogic();
 
+  const [movePctBySymbol, setMovePctBySymbol] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/news?limit=40")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { items?: { headline?: string }[] } | null) => {
+        if (cancelled || !data?.items) return;
+        const headlines = data.items.map((i) => i.headline || "").filter(Boolean);
+        setMovePctBySymbol(parsePriceMovePercents(headlines));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [lastCronRun]);
+
+  const openHoldings = useMemo(() => {
+    return (portfolio || []).filter(
+      (row: { symbol?: string; holdings?: number }) =>
+        row.symbol && row.symbol !== "PHP" && (row.holdings ?? 0) > 0
+    ) as { symbol: string; holdings?: number; currentPrice?: number | null }[];
+  }, [portfolio]);
+
   return (
     <div>
       <NewRecordModal open={alertModalOpen} records={alertRecords} onClose={closeAlertModal} />
@@ -185,6 +217,73 @@ export default function HomeTable() {
         onCancelEdit={cancelEditRecord}
         onSaveEdit={saveEditRecord}
       />
+
+      {/* Attention board — not a second chart */}
+      <div className="mb-4 flex flex-wrap items-center gap-2 text-[11px]">
+        <Link
+          href="/chart"
+          className="rounded-md border border-purple-200 bg-purple-50 px-2.5 py-1 font-semibold text-purple-800 hover:bg-purple-100"
+        >
+          📈 Spot
+        </Link>
+        <Link
+          href="/past-trade"
+          className="rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 font-semibold text-indigo-800 hover:bg-indigo-100"
+        >
+          🔎 3h Structure
+        </Link>
+        <Link
+          href="/catalysts"
+          className="rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1 font-semibold text-sky-800 hover:bg-sky-100"
+        >
+          🌐 Catalysts
+        </Link>
+        <Link
+          href="/trade"
+          className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-800 hover:bg-emerald-100"
+        >
+          💼 Portfolio
+        </Link>
+        <span className="text-gray-400 ml-1">
+          Suggested Spot scan: ~08:15 &amp; ~20:15 Manila
+        </span>
+      </div>
+
+      {openHoldings.length > 0 && (
+        <div className="mb-4 rounded-lg border border-indigo-100 bg-indigo-50/50 px-3 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-indigo-900">
+              Open positions ({openHoldings.length})
+            </span>
+            <Link href="/trade" className="text-[11px] font-semibold text-indigo-700 hover:underline">
+              Portfolio →
+            </Link>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {openHoldings.slice(0, 16).map((row) => (
+              <span
+                key={row.symbol}
+                className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-white px-2 py-1 text-[11px]"
+              >
+                <span className="font-bold text-indigo-950">{row.symbol}</span>
+                <Link
+                  href={`/chart?symbol=${encodeURIComponent(row.symbol)}`}
+                  className="font-semibold text-purple-700 hover:underline"
+                >
+                  Spot
+                </Link>
+                <span className="text-gray-300">|</span>
+                <Link
+                  href={`/past-trade?symbol=${encodeURIComponent(row.symbol)}`}
+                  className="font-semibold text-indigo-700 hover:underline"
+                >
+                  3h
+                </Link>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Header section with Title and Run Cron Button */}
       <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
@@ -356,8 +455,36 @@ export default function HomeTable() {
                   <span>{coin.symbol}</span>
                   <span className={isSelected ? "text-brand-300" : hasHoldings ? "text-indigo-300" : "text-gray-300"}>|</span>
                   <span>{formatPhp(coin.currentPrice)}</span>
-
-                  <PriceDirectionArrow direction={coin.priceDirection} inverse={isSelected} />
+                  {(() => {
+                    const pct =
+                      movePctBySymbol[coin.symbol.toUpperCase()] ??
+                      movePctBySymbol[coin.symbol.replace(/PHP$/i, "").toUpperCase()];
+                    if (pct == null || !Number.isFinite(pct)) {
+                      // Fallback: direction only when no recent signal %
+                      return (
+                        <PriceDirectionArrow direction={coin.priceDirection} inverse={isSelected} />
+                      );
+                    }
+                    const up = pct > 0;
+                    const down = pct < 0;
+                    const color = isSelected
+                      ? up
+                        ? "text-green-200"
+                        : down
+                        ? "text-red-200"
+                        : "text-brand-200"
+                      : up
+                      ? "text-green-600"
+                      : down
+                      ? "text-red-600"
+                      : "text-gray-500";
+                    return (
+                      <span className={`font-bold tabular-nums ${color}`}>
+                        {up ? "+" : ""}
+                        {pct.toFixed(1)}%
+                      </span>
+                    );
+                  })()}
                 </button>
               );
             })}

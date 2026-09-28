@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import type { ChartPoint } from "@/validators/recordSchema";
 import { formatPhp } from "@/lib/format";
 import {
   computeConfluenceSignal,
+  isLongExtended,
   BIAS_BADGE_CLASSES,
   type ConfluenceResult,
 } from "../../features/chart/Technicals";
-import { formatSingleScanResult, type ScanResult } from "../../features/chart/useCoinScanner";
 import { PAST_TRADE_RANGE_LABEL, type SeriesDensity } from "./usePastTradeLogic";
 
 interface PastTradeInsightCardProps {
@@ -23,30 +24,24 @@ function formatAgo(ms: number): string {
   if (hours < 1) return `${Math.round(ms / (60 * 1000))}m ago`;
   if (hours < 48) return `${hours.toFixed(1)}h ago`;
   return `${(hours / 24).toFixed(1)}d ago`;
-
-}
-
-function ladderTitle(bias: ConfluenceResult["bias"]): string {
-  if (bias.includes("SHORT")) return "Short Entry Ladder";
-  if (bias.includes("LONG")) return "Long Entry Ladder";
-  return "Levels to Watch";
 }
 
 function basisLabel(basis: string): string {
   switch (basis) {
     case "swing-low":
-      return "confirmed swing low";
-    case "swing-high":
-      return "confirmed swing high";
+      return "swing low";
     case "support":
-      return "range support";
+      return "support";
+    case "swing-high":
+      return "swing high";
     case "resistance":
-      return "range resistance";
+      return "resistance";
     default:
       return basis;
   }
 }
 
+/** 3h structure deep-dive for SPOT — not leverage, not shorting. */
 export default function PastTradeInsightCard({
   points,
   symbol,
@@ -63,7 +58,7 @@ export default function PastTradeInsightCard({
       support,
       resistance,
       currentPrice,
-      mode: "leverage",
+      mode: "spot",
       rangeLabel: PAST_TRADE_RANGE_LABEL,
     });
   }, [points, symbol, currentPrice, support, resistance]);
@@ -71,8 +66,10 @@ export default function PastTradeInsightCard({
   if (!symbol) {
     return (
       <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-        <h3 className="text-sm font-semibold text-gray-900">Fast-Trade Signal</h3>
-        <p className="mt-2 text-xs text-gray-500">Select a coin to view its 3h entry/exit read.</p>
+        <h3 className="text-sm font-semibold text-gray-900">3h Structure Deep Dive</h3>
+        <p className="mt-2 text-xs text-gray-500">
+          Select a coin. Spot decides the bias — this page refines entry structure from finer prints.
+        </p>
       </div>
     );
   }
@@ -80,183 +77,177 @@ export default function PastTradeInsightCard({
   if (!confluence) {
     return (
       <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-        <h3 className="text-sm font-semibold text-gray-900">
-          Fast-Trade Signal <span className="text-brand-600">({symbol})</span>
-        </h3>
-        <p className="mt-2 text-xs text-gray-500">Loading 3h candles…</p>
+        <h3 className="text-sm font-semibold text-gray-900">3h Structure Deep Dive</h3>
+        <p className="mt-2 text-xs text-gray-500">Loading structure for {symbol}…</p>
       </div>
     );
   }
 
   const c = confluence;
-  const insufficient = c.bias === "INSUFFICIENT DATA";
+  const extended = c.bias.includes("LONG") && isLongExtended(c);
+  const spotHref = `/chart?symbol=${encodeURIComponent(symbol)}`;
 
-  const handleCopy = () => {
-    const scanResult: ScanResult = {
-      symbol,
-      name: symbol,
-      confluence: c,
-      error: null,
-      streak: 0,
-      scannedAt: new Date().toISOString(),
-    };
-    navigator.clipboard.writeText(formatSingleScanResult(scanResult));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const copyLadder = () => {
+    const lines = [
+      `${symbol} — 3h structure (spot companion)`,
+      `Price ${c.currentPrice} | Support ${c.support} | Resistance ${c.resistance}`,
+      `3h structure read (confirm on Spot): ${c.bias}`,
+    ];
+    if (c.entrySuggestion) {
+      lines.push("Entry ladder:");
+      for (const l of c.entrySuggestion.ladder) {
+        lines.push(`  ~${l.price} (${l.basis}) ${l.allocationPct}%`);
+      }
+    }
+    if (c.invalidationLevel != null) lines.push(`Invalidation ~${c.invalidationLevel}`);
+    void navigator.clipboard.writeText(lines.join("\n")).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
   };
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-2 border-b border-gray-100 pb-3">
-        <h3 className="text-sm font-semibold text-gray-900">
-          Fast-Trade Signal <span className="text-brand-600">({symbol}/PHP · intraday)</span>
-        </h3>
-        {!insufficient && (
+    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-900">
+            3h Structure Deep Dive <span className="text-brand-600 font-bold">({symbol})</span>
+          </h3>
+          <p className="text-[11px] text-gray-500 mt-0.5">
+            Spot decides buy / wait / cash. This page only refines <span className="font-semibold">where</span> to stage limits.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href={spotHref}
+            className="rounded-md border border-purple-200 bg-purple-50 px-2.5 py-1 text-[11px] font-semibold text-purple-800 hover:bg-purple-100"
+          >
+            📈 Open Spot chart
+          </Link>
           <button
             type="button"
-            onClick={handleCopy}
-            className="text-[11px] font-semibold text-white bg-gray-700 hover:bg-gray-800 rounded px-2.5 py-1 transition"
+            onClick={copyLadder}
+            className="rounded-md border border-gray-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
           >
-            {copied ? "✅ Copied!" : "📋 Copy summary"}
+            {copied ? "✅ Copied" : "📋 Copy ladder"}
           </button>
+          <span className={`rounded-md border px-2 py-0.5 text-[10px] font-bold ${BIAS_BADGE_CLASSES[c.bias]}`}>
+            3h read: {c.bias}
+          </span>
+        </div>
+      </div>
+
+      <div
+        className={`rounded-md border px-3 py-2 text-[11px] ${
+          seriesDensity.isFastEnough
+            ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+            : "border-amber-200 bg-amber-50 text-amber-950"
+        }`}
+      >
+        {seriesDensity.isFastEnough ? (
+          <span>
+            ✅ Prints often enough for structure
+            {seriesDensity.avgRecentGapHours != null &&
+              ` (~${seriesDensity.avgRecentGapHours.toFixed(1)}h between recent prints)`}
+            {seriesDensity.lastObservedAgoMs != null &&
+              ` · last ${formatAgo(seriesDensity.lastObservedAgoMs)}`}
+          </span>
+        ) : (
+          <span>
+            ⚠️ Sparse prints — treat levels carefully; confirm on{" "}
+            <Link href={spotHref} className="font-semibold underline">
+              Spot
+            </Link>
+            .
+          </span>
         )}
       </div>
 
-      {/* Data freshness/density — the real "can I fast-trade this coin"
-          check, since this feed only prints a new point when a new high/low
-          actually happens (see usePastTradeLogic's computeSeriesDensity).
-          A quiet coin can still show a confident-looking SMA/RSI signal
-          below even though the data behind it is stale or thin, so this
-          goes first. */}
-      {seriesDensity.pointCount >= 2 && (
-        <div
-          className={`rounded-md border p-2.5 text-[11px] ${
-            seriesDensity.isFastEnough
-              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-              : "border-amber-200 bg-amber-50 text-amber-800"
-          }`}
-        >
-          <span className="font-semibold">
-            {seriesDensity.isFastEnough ? "✅ Printing frequently" : "⚠️ Printing slowly"}
-          </span>
-          {" — "}
-          last new high/low {seriesDensity.lastObservedAgoMs != null ? formatAgo(seriesDensity.lastObservedAgoMs) : "unknown"}
-          {seriesDensity.avgRecentGapHours != null && (
-            <>, averaging ~{seriesDensity.avgRecentGapHours.toFixed(1)}h between recent prints</>
-          )}
-          {seriesDensity.spanDays != null && <> · {Math.round(seriesDensity.spanDays)} day(s) of history</>}
-          {!seriesDensity.isFastEnough && (
-            <span className="block mt-1 font-normal">
-              This coin isn't setting new highs/lows often enough right now for a confident
-              fast-trade read off this feed — consider a more active coin, or size this down and
-              treat it more like a spot-timeframe idea than a fast trade.
-            </span>
+      {extended && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-950">
+          ⏳ Extended vs support/ladder — wait for pullback. Do not chase.
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 text-xs">
+        <div className="rounded-md border border-gray-100 bg-gray-50 px-2 py-1.5">
+          <div className="text-[10px] font-bold uppercase text-gray-400">Price</div>
+          <div className="font-bold tabular-nums">{formatPhp(c.currentPrice)}</div>
+        </div>
+        <div className="rounded-md border border-gray-100 bg-gray-50 px-2 py-1.5">
+          <div className="text-[10px] font-bold uppercase text-gray-400">Support</div>
+          <div className="font-bold tabular-nums text-emerald-800">{formatPhp(c.support)}</div>
+        </div>
+        <div className="rounded-md border border-gray-100 bg-gray-50 px-2 py-1.5">
+          <div className="text-[10px] font-bold uppercase text-gray-400">Resistance</div>
+          <div className="font-bold tabular-nums text-rose-800">{formatPhp(c.resistance)}</div>
+        </div>
+        <div className="rounded-md border border-gray-100 bg-gray-50 px-2 py-1.5">
+          <div className="text-[10px] font-bold uppercase text-gray-400">Prints</div>
+          <div className="font-bold tabular-nums">{seriesDensity.pointCount}</div>
+        </div>
+      </div>
+
+      <div className="rounded-md border border-gray-100 bg-gray-50/80 p-3 space-y-1">
+        <div className="text-[10px] font-bold uppercase text-gray-500">What the 3h prints show</div>
+        {c.signals
+          .filter((s) => s.available)
+          .map((s) => (
+            <div key={s.name} className="flex justify-between gap-2 text-[11px]">
+              <span className="text-gray-600">{s.name}</span>
+              <span className="text-right text-gray-900">
+                {s.detail}
+                {s.weight !== 0 && (
+                  <span className="ml-1 font-semibold text-gray-500">
+                    ({s.weight > 0 ? "+" : ""}
+                    {s.weight})
+                  </span>
+                )}
+              </span>
+            </div>
+          ))}
+      </div>
+
+      {c.entrySuggestion && c.entrySuggestion.ladder.length > 0 && (
+        <div className="rounded-md border border-indigo-100 bg-indigo-50/50 p-3">
+          <div className="text-xs font-bold text-indigo-950">Spot entry ladder (from 3h swings)</div>
+          <p className="mt-0.5 text-[10px] text-indigo-800/80">
+            Stage limit buys on weakness — only if Spot bias supports a long.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {c.entrySuggestion.ladder.map((l) => (
+              <li
+                key={`${l.price}-${l.basis}`}
+                className="flex justify-between text-[11px] font-semibold text-gray-900"
+              >
+                <span>
+                  ~{formatPhp(l.price)}{" "}
+                  <span className="font-normal text-gray-500">({basisLabel(l.basis)})</span>
+                </span>
+                <span className="text-indigo-700">{l.allocationPct}%</span>
+              </li>
+            ))}
+          </ul>
+          {c.entrySuggestion.note && (
+            <p className="mt-2 text-[10px] text-gray-600">{c.entrySuggestion.note}</p>
           )}
         </div>
       )}
 
-      {insufficient ? (
-        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3">
-          Not enough intraday history yet for {symbol} to call a bias (need at least 20 recorded
-          highs/lows — more for the 50/200 SMA to fill in). Check back once more history has been
-          collected, or try a coin that's been tracked longer.
-        </p>
-      ) : (
-        <>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`rounded-md border px-2.5 py-1 text-xs font-bold ${BIAS_BADGE_CLASSES[c.bias]}`}>
-              {c.bias}
-            </span>
-            <span className="text-xs text-gray-500">
-              Score {c.score >= 0 ? "+" : ""}
-              {c.score}/±{c.maxPossibleScore} · {(c.confidence * 100).toFixed(0)}% data available
-            </span>
-            {c.isCounterTrend && (
-              <span className="rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800">
-                ⚠️ Counter-trend vs macro
-              </span>
-            )}
-          </div>
-
-          <div className="text-xs text-gray-600">
-            <span className="font-semibold">Macro (50 vs 200 SMA):</span> {c.macroTrend}
-          </div>
-
-          {/* Signal breakdown — the "why" behind the score, one line per indicator */}
-          <div className="rounded-md border border-gray-100 bg-gray-50 p-3 space-y-1.5">
-            {c.signals.map((s) => (
-              <div key={s.name} className="flex items-start justify-between gap-2 text-[11px]">
-                <span className={`font-medium ${s.available ? "text-gray-700" : "text-gray-400"}`}>
-                  {s.name}
-                </span>
-                <span className={`text-right ${!s.available ? "text-gray-400" : s.weight > 0 ? "text-emerald-700" : s.weight < 0 ? "text-rose-700" : "text-gray-500"}`}>
-                  {s.detail}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          {c.divergence && (
-            <p className="text-[11px] text-sky-800 bg-sky-50 border border-sky-200 rounded-md p-2">
-              🔍 Possible {c.divergence} RSI divergence — worth a manual look, not a standalone
-              signal on its own.
-            </p>
-          )}
-
-          {c.liquiditySweep && (
-            <p className="text-[11px] text-purple-800 bg-purple-50 border border-purple-200 rounded-md p-2">
-              🎣 {c.liquiditySweep.type === "bullish" ? "Bullish" : "Bearish"} liquidity sweep: swept{" "}
-              {formatPhp(c.liquiditySweep.sweptLevel)} to an extreme of {formatPhp(c.liquiditySweep.extremePrice)}{" "}
-              ({c.liquiditySweep.daysAgo} print(s) ago).
-            </p>
-          )}
-
-          {/* Entry ladder — where the technicals say to stage in */}
-          {c.entrySuggestion && (
-            <div className="rounded-md border border-emerald-100 bg-emerald-50/50 p-3 space-y-1.5">
-              <div className="text-xs font-bold text-gray-900">{ladderTitle(c.bias)}</div>
-              {c.entrySuggestion.ladder.map((level, i) => (
-                <div key={i} className="flex items-center justify-between text-[11px]">
-                  <span className="font-mono font-semibold text-gray-800">
-                    ~{formatPhp(level.price)}
-                  </span>
-                  <span className="text-gray-500">{basisLabel(level.basis)}</span>
-                  <span className="font-semibold text-emerald-700">{level.allocationPct}%</span>
-                </div>
-              ))}
-              <p className="text-[11px] text-gray-600 pt-1 border-t border-emerald-100">
-                {c.entrySuggestion.note}
-              </p>
-            </div>
-          )}
-
-          {/* Exit / take-profit target */}
-          {c.exitSuggestion && (
-            <div className="rounded-md border border-blue-100 bg-blue-50/50 p-3">
-              <div className="text-xs font-bold text-gray-900">Exit / Take-Profit Target</div>
-              <div className="mt-1 flex items-center justify-between text-[11px]">
-                <span className="font-mono font-semibold text-gray-800">
-                  ~{formatPhp(c.exitSuggestion.price)}
-                </span>
-              </div>
-              <p className="mt-1 text-[11px] text-gray-600">{c.exitSuggestion.note}</p>
-            </div>
-          )}
-
-          {/* Invalidation / stop-loss */}
-          {c.invalidationNote && (
-            <div className="rounded-md border border-rose-100 bg-rose-50/50 p-3">
-              <div className="text-xs font-bold text-gray-900">Invalidation / Stop</div>
-              <p className="mt-1 text-[11px] text-gray-700">{c.invalidationNote}</p>
-            </div>
-          )}
-
-          <p className="text-[10px] text-gray-400 pt-2 border-t border-gray-100">
-            Leverage/margin trading carries liquidation risk beyond spot — this is a technical read
-            of recorded intraday highs/lows, not financial advice. Size and leverage are your call.
-          </p>
-        </>
+      {c.invalidationNote && (
+        <div className="rounded-md border border-rose-100 bg-rose-50/50 p-3">
+          <div className="text-xs font-bold text-gray-900">Invalidation (spot)</div>
+          <p className="mt-1 text-[11px] text-gray-700">{c.invalidationNote}</p>
+        </div>
       )}
+
+      <p className="text-[10px] text-gray-400 border-t border-gray-100 pt-2">
+        PHP spot · long-only · no leverage. Confirm bias on{" "}
+        <Link href={spotHref} className="font-semibold text-purple-700 hover:underline">
+          Spot chart
+        </Link>
+        .
+      </p>
     </div>
   );
 }

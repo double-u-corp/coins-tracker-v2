@@ -254,7 +254,7 @@ async function handleIntradayChart(
     return res.status(400).json({ error: "A valid `symbol` query param is required" });
   }
   if (!hoursResult.success) {
-    return res.status(400).json({ error: "`hours` must be a number between 1 and 720" });
+    return res.status(400).json({ error: "`hours` must be a number between 1 and 4320 (180 days)" });
   }
 
   const coin = await prisma.coin.findUnique({ where: { symbol: symbolResult.data } });

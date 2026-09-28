@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import Dropdown from "@/components/Dropdown";
@@ -40,10 +40,6 @@ export default function PastTradeView() {
     authenticated,
   } = usePastTradeLogic();
 
-  const [showHigh, setShowHigh] = useState(true);
-  const [showLow, setShowLow] = useState(true);
-  const [showKeyLevels, setShowKeyLevels] = useState(true);
-
   const selectedCoin = useMemo(() => {
     return allCoins.find((c) => c.symbol === symbol) || null;
   }, [allCoins, symbol]);
@@ -67,6 +63,31 @@ export default function PastTradeView() {
           <span>←</span>
           <span>Back to Home</span>
         </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          {symbol && (
+            <Link
+              href={`/chart?symbol=${encodeURIComponent(symbol)}`}
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-md hover:bg-purple-100 transition-colors"
+            >
+              📈 Spot chart
+            </Link>
+          )}
+          <Link
+            href="/chart"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-600 border border-gray-200 px-3 py-1.5 rounded-md hover:bg-gray-50"
+          >
+            All Spot
+          </Link>
+        </div>
+      </div>
+
+      <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-700">
+        <span className="font-bold">How to use:</span> Decide buy / wait / cash on{" "}
+        <Link href="/chart" className="font-semibold text-purple-700 hover:underline">
+          Spot
+        </Link>
+        . Use this page only to deep-dive <span className="font-semibold">entry ladder &amp; structure</span> from
+        finer 3h prints — not a second bias system, not spot.
       </div>
 
       <PastTradeScanPanel allCoins={allCoins} onSelectSymbol={setSymbol} />
@@ -83,44 +104,6 @@ export default function PastTradeView() {
           }))}
         />
 
-        <div
-          className={`flex flex-wrap items-center gap-1.5 rounded-md border border-gray-200 p-1 bg-white ${
-            !symbol ? "opacity-50 pointer-events-none" : ""
-          }`}
-        >
-          <button
-            type="button"
-            onClick={() => setShowHigh(!showHigh)}
-            className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
-              showHigh ? "bg-green-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-            }`}
-          >
-            High
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowLow(!showLow)}
-            className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
-              showLow ? "bg-red-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-            }`}
-          >
-            Low
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowKeyLevels(!showKeyLevels)}
-            className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
-              showKeyLevels ? "bg-purple-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-            }`}
-          >
-            Key Levels
-          </button>
-        </div>
-
-        <span className="text-xs text-gray-400">
-          Intraday (recorded highs/lows) · leverage / margin / short — for fast trades, not the spot
-          15-30 day swing view
-        </span>
       </div>
 
       {!symbol ? (
@@ -128,8 +111,7 @@ export default function PastTradeView() {
           <div className="text-4xl mb-4">⚡</div>
           <h2 className="text-lg font-bold text-gray-900 mb-2">No Coin Selected</h2>
           <p className="text-sm text-gray-500 max-w-sm">
-            Use the dropdown above to select a cryptocurrency and view its intraday chart,
-            entry/exit read, and your fast-trade journal — or run the scan above to find one.
+            Select a coin for 3h structure (ladder & swings). Confirm buy/wait on Spot first.
           </p>
         </div>
       ) : (
@@ -167,9 +149,10 @@ export default function PastTradeView() {
               <PriceLineChart
                 points={points}
                 journalLabels={journalLabelsInView}
-                showHigh={showHigh}
-                showLow={showLow}
-                showKeyLevels={showKeyLevels}
+                showHigh={true}
+                showLow={false}
+                showKeyLevels={false}
+                priceLineName="Price"
                 support={technicals.support}
                 resistance={technicals.resistance}
               />

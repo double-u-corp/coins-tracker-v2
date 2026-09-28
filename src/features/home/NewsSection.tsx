@@ -1,6 +1,7 @@
 import AlertBanner from "@/components/AlertBanner";
 import { useNewsLogic } from "./useNewsLogic";
 import type { NewsItemView } from "@/validators/newsSchema";
+import { isPriceMoveSignalHeadline } from "./priceMoveSignals";
 
 interface NewsSectionProps {
   refreshSignal?: unknown;
@@ -18,25 +19,26 @@ function formatDateTime(iso: string): string {
 
 export default function NewsSection({ refreshSignal }: NewsSectionProps) {
   const { items, loading, loadingMore, error, hasMore, loadMore } = useNewsLogic(refreshSignal);
+  const articleItems = items.filter((item) => !isPriceMoveSignalHeadline(item.headline));
   return (
     <section className="mt-8">
       <div className="mb-2 flex items-baseline justify-between">
         <h2 className="text-lg font-semibold text-gray-900">Market Signals</h2>
-        <span className="text-xs text-gray-400">Auto-generated from price movement + real articles, not curated news</span>
+        <span className="text-xs text-gray-400">Real articles from RSS (price % moves are on the filter chips, not listed here)</span>
       </div>
 
       {error && <AlertBanner variant="error" message={`Failed to load signals: ${error}`} />}
       {loading ? (
         <p className="text-sm text-gray-500">Loading…</p>
-      ) : items.length === 0 ? (
+      ) : articleItems.length === 0 ? (
         <p className="text-sm text-gray-500">
-          No signals yet — these show up after a cron run notices a notable price move (2%+), a new high/low, or a
-          matching article from the RSS news feed.
+          No article signals yet — price % moves show on the coin filter chips above. Articles appear after cron
+          matches RSS news to the market.
         </p>
       ) : (
         <ul className="flex flex-col gap-2">
-          {items.map((item, idx) => {
-            const previous = items[idx - 1];
+          {articleItems.map((item, idx) => {
+            const previous = articleItems[idx - 1];
             const isNewRun = idx > 0 && previous.cronLogId !== item.cronLogId;
             return (
               <li key={item.id}>

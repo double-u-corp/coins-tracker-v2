@@ -7,7 +7,7 @@ const PUBLIC_NAV_LINKS = [
   { href: "/", label: "Home" },
   { href: "/calendar", label: "Calendar" },
   { href: "/chart", label: "Spot" },
-    { href: "/pastTrade", label: "3h Trading" },
+    { href: "/structure", label: "3h Trading" },
 ];
 
 const PROTECTED_NAV_LINKS = [

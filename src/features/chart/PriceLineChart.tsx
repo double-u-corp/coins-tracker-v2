@@ -21,6 +21,8 @@ export interface PriceLineChartProps {
   showHigh?: boolean;
   showLow?: boolean;
   showKeyLevels?: boolean;
+  /** Label for the high/price series in tooltip (e.g. "Price" on 3h poll chart). */
+  priceLineName?: string;
   showBreakEven?: boolean;
   breakEvenPrice?: number | null;
   support?: number | null;
@@ -84,7 +86,7 @@ function DesktopTooltipContent({ active, payload, label }: any) {
 }
 
 /** Fixed strip under the chart on mobile — never covers the plot. */
-function MobileReadout({ point }: { point: ActivePoint | null }) {
+function MobileReadout({ point, priceLabel = "High" }: { point: ActivePoint | null; priceLabel?: string }) {
   if (!point) {
     return (
       <div className="rounded-md border border-dashed border-gray-200 bg-gray-50 px-3 py-2 text-[11px] text-gray-400 text-center sm:hidden">
@@ -94,7 +96,7 @@ function MobileReadout({ point }: { point: ActivePoint | null }) {
   }
 
   const rows: { label: string; value: string; color: string }[] = [];
-  if (point.high != null) rows.push({ label: "High", value: formatPhp(point.high), color: "#22c55e" });
+  if (point.high != null) rows.push({ label: priceLabel, value: formatPhp(point.high), color: "#22c55e" });
   if (point.low != null) rows.push({ label: "Low", value: formatPhp(point.low), color: "#ef4444" });
   if (point.sma20 != null) rows.push({ label: "20 SMA", value: formatPhp(point.sma20), color: "#f59e0b" });
   if (point.sma50 != null) rows.push({ label: "50 SMA", value: formatPhp(point.sma50), color: "#3b82f6" });
@@ -126,6 +128,7 @@ export default function PriceLineChart({
   showHigh = true,
   showLow = true,
   showKeyLevels = false,
+  priceLineName = "High",
   showBreakEven = false,
   breakEvenPrice,
   support: externalSupport,
@@ -301,7 +304,7 @@ export default function PriceLineChart({
             )}
 
             {showHigh && (
-              <Line type="monotone" dataKey="high" stroke="#22c55e" strokeWidth={1.5} dot={false} name="High" />
+              <Line type="monotone" dataKey="high" stroke="#22c55e" strokeWidth={1.5} dot={false} name={priceLineName} />
             )}
             {showLow && (
               <Line type="monotone" dataKey="low" stroke="#ef4444" strokeWidth={1.5} dot={false} name="Low" />
@@ -390,7 +393,7 @@ export default function PriceLineChart({
       </div>
 
       {/* Mobile-only: values sit under the chart so the plot stays visible */}
-      {isMobile && <MobileReadout point={mobilePoint} />}
+      {isMobile && <MobileReadout point={mobilePoint} priceLabel={priceLineName} />}
 
       {showRsi && (
         <div className="h-20 sm:h-28 w-full -ml-2 sm:ml-0 mt-1">

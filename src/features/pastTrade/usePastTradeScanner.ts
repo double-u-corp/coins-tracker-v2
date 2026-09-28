@@ -2,47 +2,42 @@ import { useCallback, useState } from "react";
 import type { ChartPoint, CoinSummary } from "@/validators/recordSchema";
 import {
   computeConfluenceSignal,
-  getSupportResistance,
   isLongExtended,
-  isShortExtended,
   isWatchlistBuyLowHit,
-  isFastTradeShortReadyHit,
+  getSupportResistance,
   type ConfluenceResult,
 } from "../../features/chart/Technicals";
-import { formatSingleScanResult, type ScanResult } from "../../features/chart/useCoinScanner";
 import {
-  computeSeriesDensity,
   PAST_TRADE_GRANULARITY,
   PAST_TRADE_HOURS,
-  PAST_TRADE_SR_LOOKBACK,
   PAST_TRADE_RANGE_LABEL,
+  PAST_TRADE_SR_LOOKBACK,
+  computeSeriesDensity,
   type SeriesDensity,
 } from "./usePastTradeLogic";
 
-export interface FastTradeScanResult {
+export interface StructureScanResult {
   symbol: string;
   name: string;
   confluence: ConfluenceResult | null;
-  seriesDensity: SeriesDensity | null;
+  seriesDensity: SeriesDensity;
   error: string | null;
   scannedAt: string;
 }
 
-// Same bounded-concurrency pattern as useCoinScanner's Watchlist Scan —
-// kinder to the backend/browser than firing one request per coin at once.
 const SCAN_CONCURRENCY = 5;
 
-async function fetchPastTradePoints(symbol: string): Promise<ChartPoint[]> {
+async function fetchPoints(symbol: string): Promise<ChartPoint[]> {
   const res = await fetch(
     `/api/coins?type=chart&symbol=${symbol}&granularity=${PAST_TRADE_GRANULARITY}&hours=${PAST_TRADE_HOURS}`
   );
   if (!res.ok) throw new Error(`Failed to load ${symbol} (${res.status})`);
   const data: { points: ChartPoint[] } = await res.json();
-  return data.points;
+  return data.points || [];
 }
 
 export function usePastTradeScanner(allCoins: CoinSummary[]) {
-  const [scanResults, setScanResults] = useState<FastTradeScanResult[]>([]);
+  const [scanResults, setScanResults] = useState<StructureScanResult[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState({ completed: 0, total: 0 });
   const [scanError, setScanError] = useState<string | null>(null);
@@ -50,13 +45,12 @@ export function usePastTradeScanner(allCoins: CoinSummary[]) {
 
   const runScan = useCallback(async () => {
     if (allCoins.length === 0) return;
-
     setIsScanning(true);
     setScanError(null);
     setScanResults([]);
     setScanProgress({ completed: 0, total: allCoins.length });
 
-    const results: FastTradeScanResult[] = [];
+    const results: StructureScanResult[] = [];
     let cursor = 0;
 
     async function worker() {
@@ -64,19 +58,19 @@ export function usePastTradeScanner(allCoins: CoinSummary[]) {
         const coin = allCoins[cursor];
         cursor += 1;
         try {
-          const points = await fetchPastTradePoints(coin.symbol);
+          const points = await fetchPoints(coin.symbol);
           const density = computeSeriesDensity(points);
-          let confluence: ConfluenceResult | null = null;
-          if (points.length > 0) {
-            const { support, resistance } = getSupportResistance(points, PAST_TRADE_SR_LOOKBACK);
-            confluence = computeConfluenceSignal(points, {
-              support,
-              resistance,
-              currentPrice: coin.currentPrice,
-              mode: "leverage",
-              rangeLabel: PAST_TRADE_RANGE_LABEL,
-            });
-          }
+          const sr = points.length > 0 ? getSupportResistance(points, PAST_TRADE_SR_LOOKBACK) : null;
+          const confluence =
+            points.length > 0 && sr
+              ? computeConfluenceSignal(points, {
+                  support: sr.support,
+                  resistance: sr.resistance,
+                  currentPrice: coin.currentPrice,
+                  mode: "spot",
+                  rangeLabel: PAST_TRADE_RANGE_LABEL,
+                })
+              : null;
           results.push({
             symbol: coin.symbol,
             name: coin.name,
@@ -90,7 +84,13 @@ export function usePastTradeScanner(allCoins: CoinSummary[]) {
             symbol: coin.symbol,
             name: coin.name,
             confluence: null,
-            seriesDensity: null,
+            seriesDensity: {
+              pointCount: 0,
+              spanDays: null,
+              avgRecentGapHours: null,
+              lastObservedAgoMs: null,
+              isFastEnough: false,
+            },
             error: (err as Error).message,
             scannedAt: new Date().toISOString(),
           });
@@ -114,97 +114,43 @@ export function usePastTradeScanner(allCoins: CoinSummary[]) {
   return { scanResults, isScanning, scanProgress, scanError, hasScanned, runScan };
 }
 
-/** Which "bucket" a scanned coin falls into for the fast-trade digest. */
-export type FastTradeBucket = "long-ready" | "long-extended" | "short-ready" | "short-extended" | null;
+export type StructureBucket = "near-ladder" | "extended-wait" | null;
 
-export function classifyFastTradeResult(r: FastTradeScanResult): FastTradeBucket {
+export function classifyStructureResult(r: StructureScanResult): StructureBucket {
   if (!r.confluence) return null;
   const c = r.confluence;
-  if (c.bias.includes("LONG")) {
-    return isLongExtended(c) ? "long-extended" : isWatchlistBuyLowHit(c) ? "long-ready" : null;
-  }
-  if (isFastTradeShortReadyHit(c)) {
-    return isShortExtended(c) ? "short-extended" : "short-ready";
-  }
+  if (!c.bias.includes("LONG")) return null;
+  if (isLongExtended(c)) return "extended-wait";
+  if (isWatchlistBuyLowHit(c) && r.seriesDensity.isFastEnough) return "near-ladder";
   return null;
 }
 
-/** Same "why" breakdown as formatSingleScanResult (useCoinScanner.ts), plus
- * a leading density line — a confident-looking LONG/SHORT bias on a coin
- * that's barely printing new extremes is exactly the case this page needs
- * to flag, not hide. */
-export function formatSingleFastTradeResult(r: FastTradeScanResult): string {
-  if (!r.confluence) return `**${r.symbol}** — no data available.`;
-  const scanResult: ScanResult = {
-    symbol: r.symbol,
-    name: r.name,
-    confluence: r.confluence,
-    error: r.error,
-    streak: 0,
-    scannedAt: r.scannedAt,
-  };
-  const base = formatSingleScanResult(scanResult);
-  if (!r.seriesDensity || r.seriesDensity.pointCount < 2) return base;
-
-  const d = r.seriesDensity;
-  const densityLine = d.isFastEnough
-    ? `- ✅ Printing frequently${d.avgRecentGapHours != null ? ` (~${d.avgRecentGapHours.toFixed(1)}h between recent prints)` : ""}`
-    : `- ⚠️ Printing slowly${d.avgRecentGapHours != null ? ` (~${d.avgRecentGapHours.toFixed(1)}h between recent prints)` : ""} — thin data, lower-confidence read`;
-
-  return `${base}\n${densityLine}`;
-}
-
-/** Builds a full Markdown digest of the fast-trade scan, split into the
- * four buckets above — mirrors formatScanResultsForJournal (useCoinScanner)
- * but covers BOTH directions, since leverage makes SHORT an actionable
- * entry instead of "hold cash". */
-export function formatFastTradeScanForJournal(results: FastTradeScanResult[]): string {
+export function formatStructureScanForJournal(results: StructureScanResult[]): string {
   const dateStr = new Date().toISOString().slice(0, 10);
-
-  const buckets: Record<Exclude<FastTradeBucket, null>, FastTradeScanResult[]> = {
-    "long-ready": [],
-    "long-extended": [],
-    "short-ready": [],
-    "short-extended": [],
-  };
-
-  for (const r of results) {
-    const bucket = classifyFastTradeResult(r);
-    if (bucket) buckets[bucket].push(r);
+  const near = results.filter((r) => classifyStructureResult(r) === "near-ladder");
+  const ext = results.filter((r) => classifyStructureResult(r) === "extended-wait");
+  if (near.length === 0 && ext.length === 0) {
+    return `## 3h Structure Scan — ${dateStr}\n\nNo LONG near-ladder setups on dense prints. Confirm on Spot chart.`;
   }
-
-  const total =
-    buckets["long-ready"].length +
-    buckets["long-extended"].length +
-    buckets["short-ready"].length +
-    buckets["short-extended"].length;
-
-  if (total === 0) {
-    return `## Fast-Trade Scan — ${dateStr}\n\nNo LONG or SHORT entries ready today. All scanned coins are NEUTRAL, extended, or still accumulating history.`;
+  const lines = [
+    `## 3h Structure Scan — ${dateStr}`,
+    "",
+    "Spot decides bias. 3h only stages entries.",
+    "",
+  ];
+  if (near.length) {
+    lines.push(`### Near ladder (${near.length})`);
+    for (const r of near) {
+      const c = r.confluence!;
+      lines.push(`- **${r.symbol}** ${c.bias} · ${c.currentPrice} · S ${c.support} R ${c.resistance}`);
+    }
+    lines.push("");
   }
-
-  const sections: string[] = [`## Fast-Trade Scan — ${dateStr}`];
-
-  if (buckets["long-ready"].length > 0) {
-    sections.push(
-      `\n### 🟢 LONG — near support / ready (${buckets["long-ready"].length})\n\n${buckets["long-ready"].map(formatSingleFastTradeResult).join("\n\n")}`
-    );
+  if (ext.length) {
+    lines.push(`### Extended — wait pullback (${ext.length})`);
+    for (const r of ext) {
+      lines.push(`- **${r.symbol}**`);
+    }
   }
-  if (buckets["short-ready"].length > 0) {
-    sections.push(
-      `\n### 🔴 SHORT — near resistance / ready (${buckets["short-ready"].length})\n\n${buckets["short-ready"].map(formatSingleFastTradeResult).join("\n\n")}`
-    );
-  }
-  if (buckets["long-extended"].length > 0) {
-    sections.push(
-      `\n### ⏳ LONG — extended, wait for pullback (${buckets["long-extended"].length})\n\n${buckets["long-extended"].map(formatSingleFastTradeResult).join("\n\n")}`
-    );
-  }
-  if (buckets["short-extended"].length > 0) {
-    sections.push(
-      `\n### ⏳ SHORT — extended, wait for bounce (${buckets["short-extended"].length})\n\n${buckets["short-extended"].map(formatSingleFastTradeResult).join("\n\n")}`
-    );
-  }
-
-  return sections.join("\n");
+  return lines.join("\n");
 }
