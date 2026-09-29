@@ -21,7 +21,7 @@ export interface PriceLineChartProps {
   showHigh?: boolean;
   showLow?: boolean;
   showKeyLevels?: boolean;
-  /** Label for the high/price series in tooltip (e.g. "Price" on 3h poll chart). */
+  /** Label for high/price series in tooltip (e.g. "Price" on 3h poll chart). */
   priceLineName?: string;
   showBreakEven?: boolean;
   breakEvenPrice?: number | null;
@@ -253,7 +253,9 @@ export default function PriceLineChart({
         <IndicatorPill active={showSma50} onClick={() => setShowSma50(!showSma50)} color="blue" label="50 SMA" />
         <IndicatorPill active={showSma200} onClick={() => setShowSma200(!showSma200)} color="purple" label="200 SMA" />
         <IndicatorPill active={showRsi} onClick={() => setShowRsi(!showRsi)} color="indigo" label="RSI" />
-        <IndicatorPill active={showSwing} onClick={() => setShowSwing(!showSwing)} color="teal" label="Swing" />
+        {!!intradayPoints?.length && (
+          <IndicatorPill active={showSwing} onClick={() => setShowSwing(!showSwing)} color="teal" label="Swing" />
+        )}
       </div>
 
       <div className="h-64 sm:h-96 w-full -ml-2 sm:ml-0">
@@ -421,7 +423,7 @@ export default function PriceLineChart({
         </div>
       )}
 
-      {showSwing && (
+      {showSwing && !!intradayPoints?.length && (
         <div className="w-full sm:ml-0 mt-1">
           <div className="mb-1 flex items-center justify-between px-1">
             <span className="text-[11px] font-semibold text-teal-800">Swing · 8-check price (7 days)</span>

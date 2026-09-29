@@ -70,7 +70,7 @@ function CoinCard({ coin, canUpdatePrice, onUpdatePriceClick }: CoinCardProps) {
             Spot
           </Link>
           <Link
-            href={`/past-trade?symbol=${encodeURIComponent(coin.symbol)}`}
+            href={`/structure?symbol=${encodeURIComponent(coin.symbol)}`}
             className="rounded bg-indigo-50 border border-indigo-200 px-2 py-1 text-xs font-medium text-indigo-800 hover:bg-indigo-100 transition-colors"
             title={`3h structure ladder for ${coin.symbol}`}
           >
@@ -219,7 +219,7 @@ export default function HomeTable() {
       />
 
       {/* Attention board — not a second chart */}
-      <div className="mb-4 flex flex-wrap items-center gap-2 text-[11px]">
+      {/* <div className="mb-4 flex flex-wrap items-center gap-2 text-[11px]">
         <Link
           href="/chart"
           className="rounded-md border border-purple-200 bg-purple-50 px-2.5 py-1 font-semibold text-purple-800 hover:bg-purple-100"
@@ -247,9 +247,9 @@ export default function HomeTable() {
         <span className="text-gray-400 ml-1">
           Suggested Spot scan: ~08:15 &amp; ~20:15 Manila
         </span>
-      </div>
+      </div> */}
 
-      {openHoldings.length > 0 && (
+      {/* {openHoldings.length > 0 && (
         <div className="mb-4 rounded-lg border border-indigo-100 bg-indigo-50/50 px-3 py-2">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
             <span className="text-[11px] font-bold uppercase tracking-wide text-indigo-900">
@@ -283,7 +283,7 @@ export default function HomeTable() {
             ))}
           </div>
         </div>
-      )}
+      )} */}
 
       {/* Header section with Title and Run Cron Button */}
       <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
