@@ -27,6 +27,8 @@ export interface PriceLineChartProps {
   breakEvenPrice?: number | null;
   support?: number | null;
   resistance?: number | null;
+  /** Extra labeled levels (Structure S1/S2/R1/R2/sweep/mid). */
+  extraLevels?: { price: number; label: string; shortLabel?: string; color?: string; dashed?: boolean }[] | null;
 }
 
 type ActivePoint = {
@@ -133,6 +135,7 @@ export default function PriceLineChart({
   breakEvenPrice,
   support: externalSupport,
   resistance: externalResistance,
+  extraLevels = null,
 }: PriceLineChartProps) {
   const [showSma20, setShowSma20] = useState<boolean>(true);
   const [showSma50, setShowSma50] = useState<boolean>(true);
@@ -391,6 +394,24 @@ export default function PriceLineChart({
                 }}
               />
             )}
+
+            {extraLevels?.map((lvl) => (
+              <ReferenceLine
+                key={`xl-${lvl.label}-${lvl.price}`}
+                y={lvl.price}
+                stroke={lvl.color || "#6366f1"}
+                strokeWidth={1.25}
+                strokeOpacity={0.85}
+                strokeDasharray={lvl.dashed ? "5 4" : undefined}
+                label={{
+                  value: lvl.shortLabel || lvl.label,
+                  fill: lvl.color || "#6366f1",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  position: "insideTopLeft",
+                }}
+              />
+            ))}
           </ComposedChart>
         </ResponsiveContainer>
       </div>

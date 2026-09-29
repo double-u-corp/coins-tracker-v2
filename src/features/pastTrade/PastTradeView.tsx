@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import Dropdown from "@/components/Dropdown";
@@ -8,6 +8,7 @@ import PastTradeInsightCard from "./PastTradeInsightCard";
 import PastTradeScanPanel from "./PastTradeScanPanel";
 import { usePastTradeLogic } from "./usePastTradeLogic";
 import { formatPhp } from "@/lib/format";
+import { buildStructureKeyLevels } from "../../features/chart/Technicals";
 
 const PriceLineChart = dynamic(() => import("../../features/chart/PriceLineChart"), {
   ssr: false,
@@ -51,6 +52,18 @@ export default function PastTradeView() {
     const last = points[points.length - 1];
     return last.close ?? (last.high + last.low) / 2;
   }, [selectedCoin, points]);
+
+  const [showLevels, setShowLevels] = useState(true);
+
+  const keyLevels = useMemo(() => {
+    if (!points.length || technicals.support == null || technicals.resistance == null) return [];
+    return buildStructureKeyLevels(
+      points,
+      currentPrice,
+      technicals.support,
+      technicals.resistance
+    );
+  }, [points, currentPrice, technicals.support, technicals.resistance]);
 
   // Client render window (~100 points) — full series still used for ladder in insight card
   const chartPoints = useMemo(() => {
@@ -163,16 +176,51 @@ export default function PastTradeView() {
                 </p>
               </div>
             ) : (
-              <PriceLineChart
-                points={chartPoints}
-                journalLabels={journalLabelsInView}
-                showHigh={true}
-                showLow={false}
-                showKeyLevels={false}
-                priceLineName="Price"
-                support={technicals.support}
-                resistance={technicals.resistance}
-              />
+              <>
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowLevels((v) => !v)}
+                    className={`rounded px-2.5 py-1 text-[11px] font-semibold border transition-colors ${
+                      showLevels
+                        ? "bg-slate-800 text-white border-slate-800"
+                        : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                    }`}
+                  >
+                    Key levels
+                  </button>
+                  {showLevels && keyLevels.length > 0 && (
+                    <span className="text-[10px] text-gray-500">
+                      S1/S2 swing supports · R1/R2 swing resistances · sweep · mid-range
+                    </span>
+                  )}
+                </div>
+                <PriceLineChart
+                  points={chartPoints}
+                  journalLabels={journalLabelsInView}
+                  showHigh={true}
+                  showLow={false}
+                  showKeyLevels={false}
+                  priceLineName="Price"
+                  support={null}
+                  resistance={null}
+                  extraLevels={showLevels ? keyLevels : null}
+                />
+                {showLevels && keyLevels.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-gray-600">
+                    {keyLevels.map((l) => (
+                      <span key={`${l.label}-${l.price}`} className="inline-flex items-center gap-1">
+                        <span
+                          className="inline-block h-2 w-2 rounded-full"
+                          style={{ backgroundColor: l.color }}
+                        />
+                        <span className="font-semibold">{l.label}</span>
+                        <span className="font-mono">{formatPhp(l.price)}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
 
@@ -185,18 +233,19 @@ export default function PastTradeView() {
             seriesDensity={seriesDensity}
           />
 
-          <JournalSidebar
-            entries={entries}
-            loading={journalLoading}
-            error={journalError}
-            defaultSymbol={symbol}
-            authenticated={authenticated}
-            onAdd={addJournalEntry}
-            onDelete={deleteJournalEntry}
-            onUpdate={updateJournalEntry}
-          />
         </div>
       )}
+
+      <JournalSidebar
+        entries={entries}
+        loading={journalLoading}
+        error={journalError}
+        defaultSymbol={symbol || ""}
+        authenticated={authenticated}
+        onAdd={addJournalEntry}
+        onDelete={deleteJournalEntry}
+        onUpdate={updateJournalEntry}
+      />
     </div>
   );
 }

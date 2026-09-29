@@ -5,6 +5,7 @@ import { formatPhp } from "@/lib/format";
 import {
   computeConfluenceSignal,
   isLongExtended,
+  buildStructureKeyLevels,
   BIAS_BADGE_CLASSES,
   type ConfluenceResult,
 } from "../../features/chart/Technicals";
@@ -108,6 +109,23 @@ export default function PastTradeInsightCard({
       }
     }
     if (c.invalidationLevel != null) lines.push(`Invalidation ~${c.invalidationLevel}`);
+        try {
+      const levels = buildStructureKeyLevels(
+        points,
+        currentPrice,
+        support ?? confluence.support,
+        resistance ?? confluence.resistance
+      );
+      if (levels.length) {
+        lines.push("");
+        lines.push("Structure key levels:");
+        for (const lvl of levels) {
+          lines.push(`- ${lvl.shortLabel}: ${lvl.price} (${lvl.label})`);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
     void navigator.clipboard.writeText(lines.join("\n")).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);

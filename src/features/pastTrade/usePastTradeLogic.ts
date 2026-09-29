@@ -185,19 +185,20 @@ export function usePastTradeLogic() {
   }, [symbol]);
 
   const loadJournal = useCallback(() => {
-    if (!symbol) {
-      setEntries([]);
-      return;
-    }
     setJournalLoading(true);
     setJournalError(null);
-    fetch(`/api/journal?symbol=${symbol}`)
+    // No symbol → list recent notes (incl. general). With symbol → that coin (+ general null-coin notes from API).
+    const url = symbol
+      ? `/api/journal?symbol=${encodeURIComponent(symbol)}`
+      : `/api/journal`;
+    fetch(url)
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to load journal (${res.status})`);
         return res.json();
       })
       .then((data: { entries: JournalEntryView[] }) => {
-        setEntries(data.entries.filter((e) => e.symbol === symbol));
+        // Trust API filter — do not drop null-symbol (general) notes
+        setEntries(data.entries || []);
       })
       .catch((err) => setJournalError((err as Error).message))
       .finally(() => setJournalLoading(false));

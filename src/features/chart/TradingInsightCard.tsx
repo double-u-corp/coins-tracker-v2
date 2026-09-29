@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import type { ChartPoint } from "@/validators/recordSchema";
 import { formatPhp } from "@/lib/format";
-import { computeConfluenceSignal, detectCrossoverEvent, BIAS_BADGE_CLASSES, isLongExtended, type BiasLabel } from "./Technicals";
+import { computeConfluenceSignal, detectCrossoverEvent,
+  buildStructureKeyLevels,
+  type StructureKeyLevel, BIAS_BADGE_CLASSES, isLongExtended, type BiasLabel } from "./Technicals";
 
 interface TradingInsightCardProps {
   points: ChartPoint[];
@@ -101,7 +103,8 @@ export function formatEntryReviewPrompt(
     spent: number;
     firstBuyAt?: string | null;
     daysHeld?: number | null;
-  } | null
+  } | null,
+  structureLevels?: StructureKeyLevel[] | null
 ): string {
   const c = confluence;
   const { base, pair, label } = formatAssetLabel(symbol);
@@ -187,6 +190,12 @@ export function formatEntryReviewPrompt(
   lines.push(`- Macro: ${c.macroTrend}${c.isCounterTrend ? " — short-term bias conflicts with macro" : ""}`);
   lines.push(`- Price now: ${c.currentPrice}`);
   lines.push(`- Support: ${c.support} | Resistance: ${c.resistance}`);
+  if (structureLevels && structureLevels.length > 0) {
+    lines.push(`- Structure key levels (poll/swing path — placement aids, confirm bias on Spot):`);
+    for (const lvl of structureLevels) {
+      lines.push(`  - ${lvl.shortLabel || lvl.label}: ${lvl.price} (${lvl.label})`);
+    }
+  }
   lines.push(
     `- Swing series: ${c.usedIntradaySwings ? "3h / 8-check intraday" : "daily bars (intraday unavailable)"}`
   );
@@ -259,7 +268,8 @@ export function formatEntryReviewPromptForGoogle(
     spent: number;
     firstBuyAt?: string | null;
     daysHeld?: number | null;
-  } | null
+  } | null,
+  structureLevels?: StructureKeyLevel[] | null
 ): string {
   const c = confluence;
   const { base, pair, label } = formatAssetLabel(symbol);
@@ -310,6 +320,13 @@ export function formatEntryReviewPromptForGoogle(
       .join(", ");
     parts.push(`Ladder limits: ${ladder}.`);
   }
+  if (structureLevels && structureLevels.length > 0) {
+    const bits = structureLevels
+      .slice(0, 6)
+      .map((l) => `${l.shortLabel || l.label}:${l.price}`)
+      .join(" ");
+    parts.push(`Key levels: ${bits}.`);
+  }
   if (c.exitSuggestion?.price != null) {
     parts.push(`TP ref ~${c.exitSuggestion.price}.`);
   }
@@ -339,6 +356,16 @@ export default function TradingInsightCard({
     return { confluence, crossoverAlert };
   }, [symbol, points, support, resistance, currentPrice, intradayPoints]);
 
+  const structureLevels = useMemo(() => {
+    const series =
+      intradayPoints && intradayPoints.length >= 10 ? intradayPoints : points;
+    const px = currentPrice ?? (series.length ? series[series.length - 1].close ?? series[series.length - 1].high : null);
+    const s = support;
+    const r = resistance;
+    if (px == null || s == null || r == null || series.length < 10) return null;
+    return buildStructureKeyLevels(series, px, s, r);
+  }, [intradayPoints, points, currentPrice, support, resistance]);
+
   if (!symbol || points.length === 0 || !result) {
     return (
       <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
@@ -367,7 +394,7 @@ export default function TradingInsightCard({
   const firstBuyAt = activePortfolio?.firstBuyAt ?? null;
 
   const buildAgentPrompt = () =>
-    formatEntryReviewPrompt(symbol, confluence, crossoverAlert, activePortfolio);
+    formatEntryReviewPrompt(symbol, confluence, crossoverAlert, activePortfolio, structureLevels);
 
   const handleCopyAgentPrompt = () => {
     const prompt = buildAgentPrompt();
@@ -393,7 +420,8 @@ export default function TradingInsightCard({
       symbol,
       confluence,
       crossoverAlert,
-      activePortfolio
+      activePortfolio,
+      structureLevels
     );
     const url = `https://www.google.com/search?q=${encodeURIComponent(mini)}`;
     window.open(url, "_blank", "noopener,noreferrer");

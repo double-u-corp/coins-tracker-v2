@@ -283,6 +283,90 @@ export interface LadderLevel {
  * (lower) tranches get a larger suggested allocation, since a fill there
  * is a better price if it happens — this mirrors how a real trader
  * typically sizes a ladder, not an equal split. */
+
+export interface StructureKeyLevel {
+  price: number;
+  /** Full name for legend */
+  label: string;
+  /** Short tag drawn on the chart (S1, R1, …) */
+  shortLabel: string;
+  /** stroke color */
+  color: string;
+  /** solid vs dashed */
+  dashed?: boolean;
+}
+
+/**
+ * Key levels for Structure chart: nearest swing supports/resistances,
+ * range floor/ceiling, optional liquidity-sweep extreme, mid-range.
+ * Deduped within 0.4% so lines do not stack on the same print.
+ */
+export function buildStructureKeyLevels(
+  points: ChartPoint[],
+  currentPrice: number,
+  support: number,
+  resistance: number
+): StructureKeyLevel[] {
+  const levels: StructureKeyLevel[] = [];
+  const swings = detectSwingPoints(points, 3);
+  const swingLows = swings
+    .filter((s) => s.type === "low")
+    .map((s) => s.price)
+    .filter((p) => p <= currentPrice * 1.005)
+    .sort((a, b) => b - a);
+  const swingHighs = swings
+    .filter((s) => s.type === "high")
+    .map((s) => s.price)
+    .filter((p) => p >= currentPrice * 0.995)
+    .sort((a, b) => a - b);
+
+  const uniq = (arr: number[]) => {
+    const out: number[] = [];
+    for (const p of arr) {
+      if (out.every((d) => Math.abs(d - p) / d > 0.004)) out.push(p);
+    }
+    return out;
+  };
+  const lows = uniq(swingLows);
+  const highs = uniq(swingHighs);
+
+  if (lows[0] != null) levels.push({ price: lows[0], label: "S1 swing support", shortLabel: "S1", color: "#059669" });
+  if (lows[1] != null) levels.push({ price: lows[1], label: "S2 deeper support", shortLabel: "S2", color: "#10b981", dashed: true });
+  if (highs[0] != null) levels.push({ price: highs[0], label: "R1 swing resistance", shortLabel: "R1", color: "#dc2626" });
+  if (highs[1] != null) levels.push({ price: highs[1], label: "R2 higher resistance", shortLabel: "R2", color: "#f87171", dashed: true });
+
+  // Range floor / ceiling (30-ish lookback support/resistance) if not already covered
+  if (support > 0 && levels.every((l) => Math.abs(l.price - support) / support > 0.004)) {
+    levels.push({ price: support, label: "Range support", shortLabel: "Sup", color: "#047857", dashed: true });
+  }
+  if (resistance > 0 && levels.every((l) => Math.abs(l.price - resistance) / resistance > 0.004)) {
+    levels.push({ price: resistance, label: "Range resistance", shortLabel: "Res", color: "#b91c1c", dashed: true });
+  }
+
+  const sweep = detectLiquiditySweep(points, 20, 5, currentPrice);
+  if (sweep) {
+    const already = levels.some((l) => Math.abs(l.price - sweep.extremePrice) / l.price < 0.004);
+    if (!already) {
+      levels.push({
+        price: sweep.extremePrice,
+        label: sweep.type === "bullish" ? "Liquidity sweep low" : "Liquidity sweep high",
+        shortLabel: sweep.type === "bullish" ? "SwL" : "SwH",
+        color: sweep.type === "bullish" ? "#0d9488" : "#c026d3",
+        dashed: true,
+      });
+    }
+  }
+
+  if (support > 0 && resistance > support) {
+    const mid = (support + resistance) / 2;
+    if (levels.every((l) => Math.abs(l.price - mid) / mid > 0.004)) {
+      levels.push({ price: mid, label: "Mid-range", shortLabel: "Mid", color: "#94a3b8", dashed: true });
+    }
+  }
+
+  return levels.sort((a, b) => b.price - a.price);
+}
+
 export function buildEntryLadder(points: ChartPoint[], support: number, currentPrice: number): LadderLevel[] {
   const swings = detectSwingPoints(points, 3);
   const swingLows = swings
