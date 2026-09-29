@@ -119,9 +119,12 @@ export type StructureBucket = "near-ladder" | "extended-wait" | null;
 export function classifyStructureResult(r: StructureScanResult): StructureBucket {
   if (!r.confluence) return null;
   const c = r.confluence;
+  // Structure scan is location-based companion only — still requires a constructive
+  // Spot-style LONG read so we don't promote SHORT/cash setups as "near floor".
   if (!c.bias.includes("LONG")) return null;
+  if (!r.seriesDensity.isFastEnough) return null; // density gate both buckets
   if (isLongExtended(c)) return "extended-wait";
-  if (isWatchlistBuyLowHit(c) && r.seriesDensity.isFastEnough) return "near-ladder";
+  if (isWatchlistBuyLowHit(c)) return "near-ladder";
   return null;
 }
 

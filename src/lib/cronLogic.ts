@@ -51,10 +51,11 @@ async function saveNewsItem(coinId: number, cronLogId: number, signal: Generated
  * 2. For every coin in the `Coin` table (i.e. every coin added via the
  *    Manage Coins page or the seed script), fetch the current price.
  * 3. Compare it against the most recently recorded high/low.
- * 4. Persist a Record on EVERY successful poll (not only new day high/low).
- *    Sparse "extremes only" writes made the 3h structure series gappy and
- *    blocked real path-based volatility. Storage is bounded by retention
- *    (see retention.ts), not by skipping quiet prints.
+ * 4. Compare it against the most recently recorded high/low, and persist a
+ *    new Record row ONLY if this price is a new high or low for TODAY (or
+ *    the coin's first-ever observation) — see the inline comment in the
+ *    loop below. This caps storage growth instead of writing 6 rows/day/
+ *    coin regardless of whether the price actually moved meaningfully.
  * 5. Generate a bullish/bearish signal from that price movement (see
  *    newsApi.ts — heuristic, always runs) and match it against that run's
  *    RSS pull (free, no key, fetched once for the whole run — see step 0)
@@ -116,15 +117,18 @@ export async function runCronJob(): Promise<CronResult[]> {
       const isNewHigh = lastRecord !== null && price > previousHigh;
       const isNewLow = lastRecord !== null && price < previousLow;
 
-      // Persist every poll. isNewHigh / isNewLow still mark all-time extremes
-      // for Home alerts and Market Signals — they no longer gate whether the
-      // row is written. Calendar daily high/low is derived from max/min of
-      // prices that day (coins.ts toDailyRecords), so more samples only
-      // improve accuracy. 3h structure gets a denser series (~8 prints/day
-      // when cron runs on schedule) instead of gaps on quiet sessions.
-      await prisma.record.create({
-        data: { coinId: coin.id, price, high, low, isNewHigh, isNewLow, cronLogId: cronLog.id },
-      });
+      // Persist every poll, but skip near-duplicates when a manual update and
+      // the scheduled cron overlap (same coin within ~30 minutes) unless this
+      // print is a new all-time extreme worth keeping.
+      const MIN_POLL_GAP_MS = 30 * 60 * 1000;
+      const lastAt = lastRecord?.createdAt ? new Date(lastRecord.createdAt).getTime() : 0;
+      const tooSoon =
+        lastRecord != null && Date.now() - lastAt < MIN_POLL_GAP_MS && !isNewHigh && !isNewLow;
+      if (!tooSoon) {
+        await prisma.record.create({
+          data: { coinId: coin.id, price, high, low, isNewHigh, isNewLow, cronLogId: cronLog.id },
+        });
+      }
 
       const signal = generateSignalForCoin({
         symbol: coin.symbol,

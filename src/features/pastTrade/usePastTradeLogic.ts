@@ -19,8 +19,8 @@ export interface CoinOption {
 // WHAT THIS DATA ACTUALLY IS: /api/coins?type=chart&granularity=3h does NOT
 // return fixed-width 3-hour OHLC candles. Per handleIntradayChart's own
 // comment in coins.ts, it returns one point per raw Record row, and a
-// Record is only written when a cron run sets a NEW high or low for that
-// day. So this is a sparse, event-driven series of "new extreme" prices —
+// Record is written on every successful poll (after the every-poll cron change).
+// Older history may still be extremes-only. So this is a sparse, event-driven series of "new extreme" prices —
 // naturally close to the ~3h cron cadence on a volatile coin, but with real
 // gaps on a quiet one. That's a deliberate, pre-existing choice in this
 // codebase (it's exactly what swing/entry-ladder detection wants: genuine
@@ -38,7 +38,7 @@ export interface CoinOption {
 // is completely unaffected by this (this only raises the ceiling, existing
 // smaller requests are untouched).
 export const PAST_TRADE_GRANULARITY = "3h";
-export const PAST_TRADE_HOURS = 24 * 180; // 180 days — matches the schema's new max
+export const PAST_TRADE_HOURS = 24 * 60; // 60 days — enough for density/ladder; keeps scan payloads smaller
 
 // Support/resistance + "position in range" lookback, in POINTS (not fixed
 // hours, since points aren't evenly spaced — see above). 56 points is
@@ -51,7 +51,7 @@ export const PAST_TRADE_HOURS = 24 * 180; // 180 days — matches the schema's n
 // already baked into this codebase — though on a quiet coin, 56 *points*
 // here can span meaningfully more than 7 *days*.
 export const PAST_TRADE_SR_LOOKBACK = 56;
-export const PAST_TRADE_RANGE_LABEL = "recent range";
+export const PAST_TRADE_RANGE_LABEL = "recent poll-print range";
 
 export interface SeriesDensity {
   pointCount: number;

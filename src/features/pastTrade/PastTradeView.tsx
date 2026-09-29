@@ -18,6 +18,7 @@ const PriceLineChart = dynamic(() => import("../../features/chart/PriceLineChart
   ),
 });
 
+/** Structure page — Spot companion for entry ladder from poll prices. */
 export default function PastTradeView() {
   const {
     coinOptions,
@@ -45,13 +46,22 @@ export default function PastTradeView() {
   }, [allCoins, symbol]);
 
   const currentPrice = useMemo(() => {
-    if (selectedCoin?.currentPrice != null) {
-      return selectedCoin.currentPrice;
-    }
+    if (selectedCoin?.currentPrice != null) return selectedCoin.currentPrice;
     if (points.length === 0) return 0;
-    const lastPoint = points[points.length - 1];
-    return (lastPoint.high + lastPoint.low) / 2;
+    const last = points[points.length - 1];
+    return last.close ?? (last.high + last.low) / 2;
   }, [selectedCoin, points]);
+
+  // Client render window (~100 points) — full series still used for ladder in insight card
+  const chartPoints = useMemo(() => {
+    if (points.length <= 100) return points;
+    return points.slice(-100);
+  }, [points]);
+
+  const sparseNote =
+    seriesDensity.avgRecentGapHours != null && seriesDensity.avgRecentGapHours > 12
+      ? "Wider gaps in older history are normal (pre every-poll logging). Recent prints are denser."
+      : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -64,14 +74,14 @@ export default function PastTradeView() {
           <span>Back to Home</span>
         </Link>
         <div className="flex flex-wrap items-center gap-2">
-          {symbol && (
+          {symbol ? (
             <Link
               href={`/chart?symbol=${encodeURIComponent(symbol)}`}
               className="inline-flex items-center gap-1.5 text-sm font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-md hover:bg-purple-100 transition-colors"
             >
               📈 Spot chart
             </Link>
-          )}
+          ) : null}
           <Link
             href="/chart"
             className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-600 border border-gray-200 px-3 py-1.5 rounded-md hover:bg-gray-50"
@@ -86,8 +96,8 @@ export default function PastTradeView() {
         <Link href="/chart" className="font-semibold text-purple-700 hover:underline">
           Spot
         </Link>
-        . Use this page only to deep-dive <span className="font-semibold">entry ladder &amp; structure</span> from
-        finer 3h prints — not a second bias system, not spot.
+        . This page only refines the <span className="font-semibold">entry ladder</span> from poll
+        prices — not a second bias system.
       </div>
 
       <PastTradeScanPanel allCoins={allCoins} onSelectSymbol={setSymbol} />
@@ -103,32 +113,42 @@ export default function PastTradeView() {
             value: c.symbol,
           }))}
         />
-
       </div>
 
       {!symbol ? (
         <div className="flex min-h-[250px] flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-8 text-center">
-          <div className="text-4xl mb-4">⚡</div>
-          <h2 className="text-lg font-bold text-gray-900 mb-2">No Coin Selected</h2>
+          <div className="text-4xl mb-4">🔎</div>
+          <h2 className="text-lg font-bold text-gray-900 mb-2">No coin selected</h2>
           <p className="text-sm text-gray-500 max-w-sm">
-            Select a coin for 3h structure (ladder & swings). Confirm buy/wait on Spot first.
+            Select a coin for poll-price structure and ladder. Confirm buy/wait on Spot first.
           </p>
         </div>
       ) : (
         <div className="flex flex-col gap-6">
-          {chartError && <AlertBanner variant="error" message={`Failed to load chart: ${chartError}`} />}
+          {chartError ? (
+            <AlertBanner variant="error" message={`Failed to load chart: ${chartError}`} />
+          ) : null}
 
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white border border-purple-100 rounded-lg p-5 shadow-sm">
             <h2 className="text-xl font-bold text-gray-900 whitespace-nowrap">
-              {selectedCoin?.name || symbol} ({symbol?.endsWith("PHP") ? symbol : `${symbol}PHP`})
+              {selectedCoin?.name || symbol} (
+              {symbol.endsWith("PHP") ? symbol : `${symbol}PHP`})
             </h2>
-            {currentPrice > 0 && (
+            {currentPrice > 0 ? (
               <div className="text-left sm:text-right border-t sm:border-0 border-gray-100 pt-3 sm:pt-0 w-full sm:w-auto mt-2 sm:mt-0">
                 <div className="text-xs font-semibold uppercase text-gray-500">Current Price</div>
-                <div className="text-2xl font-bold text-gray-900 font-mono">{formatPhp(currentPrice)}</div>
+                <div className="text-2xl font-bold text-gray-900 font-mono">
+                  {formatPhp(currentPrice)}
+                </div>
               </div>
-            )}
+            ) : null}
           </div>
+
+          {sparseNote ? (
+            <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-100 rounded-md px-3 py-2">
+              {sparseNote}
+            </p>
+          ) : null}
 
           <div className="w-full rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
             {chartLoading ? (
@@ -137,17 +157,14 @@ export default function PastTradeView() {
               </div>
             ) : insufficientData ? (
               <div className="flex h-64 flex-col items-center justify-center text-center gap-2">
-                <p className="text-sm text-gray-500">
-                  Not enough intraday history for {symbol} yet.
-                </p>
+                <p className="text-sm text-gray-500">Not enough poll history for {symbol} yet.</p>
                 <p className="text-xs text-gray-400">
-                  {points.length} recorded point(s) available — need at least 20 for a basic read,
-                  more for the 50/200 SMA to fill in.
+                  {points.length} print(s) available — denser after every-poll logging accumulates.
                 </p>
               </div>
             ) : (
               <PriceLineChart
-                points={points}
+                points={chartPoints}
                 journalLabels={journalLabelsInView}
                 showHigh={true}
                 showLow={false}

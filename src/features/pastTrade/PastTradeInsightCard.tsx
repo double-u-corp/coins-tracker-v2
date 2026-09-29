@@ -85,6 +85,14 @@ export default function PastTradeInsightCard({
 
   const c = confluence;
   const extended = c.bias.includes("LONG") && isLongExtended(c);
+  const range = c.resistance - c.support;
+  const pos = range > 0 && c.support != null ? (c.currentPrice - c.support) / range : 0.5;
+  const positionLabel =
+    extended || pos >= 0.6
+      ? "Extended / upper zone — wait for pullback"
+      : pos <= 0.33
+      ? "Near floor / discount zone"
+      : "Mid-range — ladder watch only";
   const spotHref = `/chart?symbol=${encodeURIComponent(symbol)}`;
 
   const copyLadder = () => {
@@ -131,8 +139,8 @@ export default function PastTradeInsightCard({
           >
             {copied ? "✅ Copied" : "📋 Copy ladder"}
           </button>
-          <span className={`rounded-md border px-2 py-0.5 text-[10px] font-bold ${BIAS_BADGE_CLASSES[c.bias]}`}>
-            3h read: {c.bias}
+          <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-700">
+            Confirm bias on Spot
           </span>
         </div>
       </div>
@@ -163,6 +171,10 @@ export default function PastTradeInsightCard({
         )}
       </div>
 
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] font-semibold text-slate-800">
+        Position: {positionLabel}
+      </div>
+
       {extended && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-950">
           ⏳ Extended vs support/ladder — wait for pullback. Do not chase.
@@ -189,7 +201,7 @@ export default function PastTradeInsightCard({
       </div>
 
       <div className="rounded-md border border-gray-100 bg-gray-50/80 p-3 space-y-1">
-        <div className="text-[10px] font-bold uppercase text-gray-500">What the 3h prints show</div>
+        <div className="text-[10px] font-bold uppercase text-gray-500">Poll-path signals (confirm on Spot)</div>
         {c.signals
           .filter((s) => s.available)
           .map((s) => (

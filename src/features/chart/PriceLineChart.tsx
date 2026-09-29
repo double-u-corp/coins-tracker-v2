@@ -170,6 +170,7 @@ export default function PriceLineChart({
       const rawKeyLevel = "keyLevel" in p ? (p as any).keyLevel : undefined;
       return {
         ...p,
+        price: getEffectivePrice(p),
         sma20: sma20Series[index] ?? undefined,
         sma50: sma50Series[index] ?? undefined,
         sma200: sma200Series[index] ?? undefined,
@@ -306,7 +307,7 @@ export default function PriceLineChart({
             )}
 
             {showHigh && (
-              <Line type="monotone" dataKey="high" stroke="#22c55e" strokeWidth={1.5} dot={false} name={priceLineName} />
+              <Line type="monotone" dataKey={priceLineName === "Price" ? "price" : "high"} stroke="#22c55e" strokeWidth={1.5} dot={false} name={priceLineName} connectNulls />
             )}
             {showLow && (
               <Line type="monotone" dataKey="low" stroke="#ef4444" strokeWidth={1.5} dot={false} name="Low" />

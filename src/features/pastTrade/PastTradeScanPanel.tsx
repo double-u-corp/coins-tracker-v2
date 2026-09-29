@@ -73,7 +73,7 @@ export default function PastTradeScanPanel({ allCoins, onSelectSymbol }: PastTra
         <div>
           <h2 className="text-sm font-bold text-gray-900">3h Structure Scan</h2>
           <p className="text-[11px] text-gray-500">
-            LONG near support/ladder on denser prints.{" "}
+            Near floor / ladder on denser prints (confirm on Spot).{" "}
             <span className="font-semibold">Confirm bias on Spot</span> before buying.
           </p>
         </div>
@@ -110,7 +110,7 @@ export default function PastTradeScanPanel({ allCoins, onSelectSymbol }: PastTra
 
       {near.length > 0 && (
         <div className="space-y-1.5">
-          <div className="text-[11px] font-bold text-emerald-800">Near ladder — check Spot then stage</div>
+          <div className="text-[11px] font-bold text-emerald-800">Near floor — check Spot then stage</div>
           {near.map((r) => (
             <ResultRow key={r.symbol} r={r} onSelectSymbol={onSelectSymbol} />
           ))}

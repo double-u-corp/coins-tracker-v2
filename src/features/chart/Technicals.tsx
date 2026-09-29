@@ -113,9 +113,10 @@ export function calculateATR(points: ChartPoint[], period = 14): number | null {
 }
 
 /**
- * Path ATR for sparse event-driven series (3h poll points where high=low=close).
- * Classic HL ATR is ~0 on those points. This uses mean absolute consecutive
- * price change over `period` steps — a usable volatility proxy for stops.
+ * Path ATR for poll / flat-HL series (high=low=close per print).
+ * Mean absolute consecutive change over `period` steps, then scaled to a
+ * *daily-equivalent* so multipliers calibrated on daily ATR (1× / 1.5×)
+ * stay meaningful. With ~8 polls/day, scale by √8 (random-walk step rule).
  */
 export function calculatePathATR(points: ChartPoint[], period = 14): number | null {
   if (points.length < period + 1) return null;
@@ -127,11 +128,13 @@ export function calculatePathATR(points: ChartPoint[], period = 14): number | nu
   }
   if (changes.length < period) return null;
   const slice = changes.slice(-period);
-  const mean = slice.reduce((a, b) => a + b, 0) / slice.length;
-  return mean > 0 ? mean : null;
+  const meanStep = slice.reduce((a, b) => a + b, 0) / slice.length;
+  if (!(meanStep > 0)) return null;
+  // ~8 polls/day → daily-equivalent volatility
+  return meanStep * Math.sqrt(8);
 }
 
-/** Prefer classic ATR when it has width; else path ATR for flat HL points. */
+/** Prefer classic ATR when it has width; else daily-scaled path ATR. */
 export function resolveVolatilityATR(points: ChartPoint[], period = 14): number | null {
   const classic = calculateATR(points, period);
   if (classic != null && classic > 0) return classic;
@@ -820,7 +823,13 @@ export function computeConfluenceSignal(
   let score = 0;
   let maxPossible = 0;
   const mode = overrides?.mode ?? "spot";
-  const unit = mode === "leverage" ? "candle" : "day";
+  const unit =
+    mode === "leverage"
+      ? "candle"
+      : (overrides?.rangeLabel ?? "").toLowerCase().includes("print") ||
+          (overrides?.rangeLabel ?? "").toLowerCase().includes("poll")
+        ? "print"
+        : "day";
   const rangeLabel = overrides?.rangeLabel ?? "30-day range";
 
   // Prefer a live/monitored price over the last chart point's derived
