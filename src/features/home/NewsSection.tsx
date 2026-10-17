@@ -29,7 +29,19 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
 
       {error && <AlertBanner variant="error" message={`Failed to load signals: ${error}`} />}
       {loading ? (
-        <p className="text-sm text-gray-500">Loading…</p>
+        <ul className="space-y-3" aria-busy="true" aria-label="Loading news">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <li key={i} className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm animate-pulse">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="h-5 w-16 rounded-full bg-gray-200" />
+                <div className="h-4 w-48 max-w-[60%] rounded bg-gray-200" />
+              </div>
+              <div className="h-3 w-full rounded bg-gray-100 mb-1.5" />
+              <div className="h-3 w-3/4 rounded bg-gray-100 mb-2" />
+              <div className="h-2.5 w-28 rounded bg-gray-100" />
+            </li>
+          ))}
+        </ul>
       ) : articleItems.length === 0 ? (
         <p className="text-sm text-gray-500">
           No article signals yet — price % moves show on the coin filter chips above. Articles appear after cron
@@ -88,7 +100,7 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
           disabled={loadingMore}
           className="mt-3 w-full rounded-md border border-gray-300 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
         >
-          {loadingMore ? "Loading…" : "Load more"}
+          {loadingMore ? "Loading more…" : "Load more"}
         </button>
       )}
     </section>

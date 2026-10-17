@@ -227,7 +227,7 @@ export default function HomeTable() {
           📈 Spot
         </Link>
         <Link
-          href="/past-trade"
+          href="/structure"
           className="rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 font-semibold text-indigo-800 hover:bg-indigo-100"
         >
           🔎 3h Structure
@@ -274,7 +274,7 @@ export default function HomeTable() {
                 </Link>
                 <span className="text-gray-300">|</span>
                 <Link
-                  href={`/past-trade?symbol=${encodeURIComponent(row.symbol)}`}
+                  href={`/structure?symbol=${encodeURIComponent(row.symbol)}`}
                   className="font-semibold text-indigo-700 hover:underline"
                 >
                   3h
@@ -314,16 +314,24 @@ export default function HomeTable() {
           <h2 className="text-sm font-bold uppercase tracking-wider text-gray-700 flex items-center gap-2">
             🎯 Target Monitor &amp; Scanner
             {loading && (
-              <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-violet-600 border-t-transparent" />
+              <span className="h-3 w-16 animate-pulse rounded bg-violet-100" aria-hidden />
             )}
           </h2>
           <span className="text-xs text-gray-400">Reached &amp; Within 5% of Limit</span>
         </div>
 
         {loading ? (
-          <div className="flex items-center justify-center py-6 text-sm text-gray-500 gap-2">
-            <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-violet-600 border-t-transparent" />
-            <span>Scanning target prices…</span>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true" aria-label="Loading targets">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="rounded-lg border border-gray-100 bg-gray-50/80 p-3 animate-pulse">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="h-4 w-24 rounded bg-gray-200" />
+                  <div className="h-5 w-14 rounded-full bg-gray-200" />
+                </div>
+                <div className="h-3 w-full rounded bg-gray-200 mb-1.5" />
+                <div className="h-3 w-2/3 rounded bg-gray-200" />
+              </div>
+            ))}
           </div>
         ) : targetAlerts.length === 0 ? (
           <p className="text-xs text-gray-500 py-1">No target prices have been reached or are currently within 5% proximity.</p>
@@ -493,9 +501,29 @@ export default function HomeTable() {
       )}
 
       {loading ? (
-        <p className="rounded-lg border border-gray-200 bg-white px-4 py-6 text-center text-sm text-gray-500 shadow-sm">
-          Loading coins…
-        </p>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true" aria-label="Loading coins">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm animate-pulse">
+              <div className="flex items-start justify-between gap-2 mb-3">
+                <div>
+                  <div className="h-4 w-28 rounded bg-gray-200 mb-1.5" />
+                  <div className="h-3 w-16 rounded bg-gray-100" />
+                </div>
+                <div className="h-6 w-16 rounded bg-gray-200" />
+              </div>
+              <div className="h-7 w-32 rounded bg-gray-200 mb-3" />
+              <div className="space-y-2 mb-3">
+                <div className="h-3 w-full rounded bg-gray-100" />
+                <div className="h-3 w-4/5 rounded bg-gray-100" />
+              </div>
+              <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-100">
+                <div className="h-7 w-16 rounded bg-gray-100" />
+                <div className="h-7 w-16 rounded bg-gray-100" />
+                <div className="h-7 w-20 rounded bg-gray-100" />
+              </div>
+            </div>
+          ))}
+        </div>
       ) : coins.length === 0 && !error ? (
         <>
           {selectedCoins.length > 0 && (

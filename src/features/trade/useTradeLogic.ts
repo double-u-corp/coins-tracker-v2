@@ -40,11 +40,11 @@ export interface RiskBudgetSettings {
   maxPctAlts: number;
 }
 
-const RISK_BUDGET_STORAGE_KEY = "tradeview_risk_budget_v1";
+const RISK_BUDGET_STORAGE_KEY = "tradeview_risk_budget_v2";
 const DEFAULT_RISK_BUDGET: RiskBudgetSettings = {
-  maxPctPerCoin: 15,
-  maxOpenNames: 8,
-  maxPctAlts: 60,
+  maxPctPerCoin: 0, // 0 = disabled
+  maxOpenNames: 0,
+  maxPctAlts: 0,
 };
 
 function loadRiskBudget(): RiskBudgetSettings {

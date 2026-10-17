@@ -92,7 +92,14 @@ export default function PriceUpdateModal({
 
         {recentError && <p className="mb-2 text-xs font-medium text-red-700">{recentError}</p>}
         {recentLoading ? (
-          <p className="text-xs text-gray-500">Loading…</p>
+          <ul className="space-y-2" aria-busy="true">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <li key={i} className="flex items-center justify-between gap-2 animate-pulse">
+                <div className="h-3 w-24 rounded bg-gray-200" />
+                <div className="h-3 w-16 rounded bg-gray-200" />
+              </li>
+            ))}
+          </ul>
         ) : recentRecords.length === 0 ? (
           <p className="text-xs text-gray-500">No manual entries yet for this coin.</p>
         ) : (

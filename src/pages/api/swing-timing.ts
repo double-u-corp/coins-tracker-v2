@@ -54,7 +54,7 @@ function toManilaHour(d: Date): number {
 }
 
 function nearestSlotHour(hour: number): number {
-  let best = SLOT_HOURS[0];
+  let best: number = SLOT_HOURS[0];
   let bestDist = 24;
   for (const s of SLOT_HOURS) {
     const dist = Math.min(Math.abs(hour - s), 24 - Math.abs(hour - s));
