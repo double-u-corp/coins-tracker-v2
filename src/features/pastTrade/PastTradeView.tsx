@@ -143,22 +143,35 @@ export default function PastTradeView() {
         prices — not a second bias system.
       </div>
 
-      <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-950">
-        <span className="font-bold">🔥 Hottest poll window (Timing):</span>{" "}
-        <span className="font-semibold">11:05 PM → 02:05 AM Manila</span> — more slot-to-slot swing
-        across your coins.{" "}
-        <span className="font-semibold">Not an entry signal</span> — watch for noise/sweeps; prefer
-        quieter slots for calm limit fills. Red dots on the chart mark prints from the{" "}
-        <span className="font-semibold">11:05 PM</span> and <span className="font-semibold">02:05 AM</span>{" "}
-        slots.{" "}
-        <Link href="/timing" className="font-semibold text-rose-800 underline hover:text-rose-950">
-          Open Timing →
-        </Link>
-        {inHotWindowNow && (
-          <span className="ml-2 inline-flex items-center rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-bold text-white">
-            NOW in hot window
+      <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-950 space-y-1">
+        <div>
+          <span className="font-bold">🔥 Hottest poll window (Timing):</span>{" "}
+          <span className="font-semibold">11:05 PM → 02:05 AM Manila</span> — more slot-to-slot swing.
+          <span className="font-semibold"> Not an entry signal</span> — watch noise/sweeps; prefer quieter
+          slots for calm limit fills.{" "}
+          <Link href="/timing" className="font-semibold text-rose-800 underline hover:text-rose-950">
+            Open Timing →
+          </Link>
+          {inHotWindowNow && (
+            <span className="ml-2 inline-flex items-center rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-bold text-white">
+              NOW in hot window
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-3 text-[10px] text-rose-900/90">
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block h-2.5 w-2.5 rounded-full bg-rose-600" />
+            Red · 11:05 PM / 02:05 AM (hottest)
           </span>
-        )}
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block h-2.5 w-2.5 rounded-full bg-violet-500" />
+            Violet · 02:05 PM Manila
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block h-2.5 w-2.5 rounded-full bg-pink-500" />
+            Pink · 08:05 PM Manila
+          </span>
+        </div>
       </div>
 
       <PastTradeScanPanel allCoins={allCoins} onSelectSymbol={setSymbol} />
@@ -260,6 +273,18 @@ export default function PastTradeView() {
                   extraLevels={showLevels ? keyLevels : null}
                   highlightHotSlots
                   hotSlotHours={HOT_SLOT_HOURS}
+                  sessionMarkers={[
+                    {
+                      hours: [14],
+                      color: "#8b5cf6",
+                      name: "02:05 PM Manila",
+                    },
+                    {
+                      hours: [20],
+                      color: "#ec4899",
+                      name: "08:05 PM Manila",
+                    },
+                  ]}
                 />
                 {showLevels && keyLevels.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-gray-600">

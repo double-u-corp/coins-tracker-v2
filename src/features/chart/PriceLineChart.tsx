@@ -32,6 +32,11 @@ export interface PriceLineChartProps {
   /** Mark poll points in hottest Manila hours (default 23 = 11:05 PM, 2 = 02:05 AM). */
   highlightHotSlots?: boolean;
   hotSlotHours?: number[];
+  /**
+   * Extra session markers by Manila hour → chart series.
+   * e.g. [{ hours: [14, 20], color: "#f59e0b", name: "PM session" }]
+   */
+  sessionMarkers?: { hours: number[]; color: string; name: string }[];
 }
 
 type ActivePoint = {
@@ -141,6 +146,7 @@ export default function PriceLineChart({
   extraLevels = null,
   highlightHotSlots = false,
   hotSlotHours = [23, 2],
+  sessionMarkers = [],
 }: PriceLineChartProps) {
   const [showSma20, setShowSma20] = useState<boolean>(true);
   const [showSma50, setShowSma50] = useState<boolean>(true);
@@ -178,20 +184,26 @@ export default function PriceLineChart({
     const data = points.map((p, index) => {
       const rawKeyLevel = "keyLevel" in p ? (p as any).keyLevel : undefined;
       const rawPeriod = (p as { period?: string }).period || p.label;
-      let isHotSlot = false;
-      if (highlightHotSlots && rawPeriod) {
+      let manilaH: number | null = null;
+      if (rawPeriod) {
         const tms = new Date(rawPeriod).getTime();
         if (Number.isFinite(tms)) {
-          // Manila = UTC+8
-          const manilaH = new Date(tms + 8 * 60 * 60 * 1000).getUTCHours();
-          isHotSlot = hotSet.has(manilaH);
+          manilaH = new Date(tms + 8 * 60 * 60 * 1000).getUTCHours();
         }
       }
+      const isHotSlot = Boolean(highlightHotSlots && manilaH != null && hotSet.has(manilaH));
+      const px = getEffectivePrice(p);
+      const sessionFields: Record<string, number | null> = {};
+      (sessionMarkers || []).forEach((m, mi) => {
+        const hit = manilaH != null && m.hours.includes(manilaH);
+        sessionFields[`sessionPrice${mi}`] = hit ? px : null;
+      });
       return {
         ...p,
-        price: getEffectivePrice(p),
-        hotPrice: isHotSlot ? getEffectivePrice(p) : null,
+        price: px,
+        hotPrice: isHotSlot ? px : null,
         isHotSlot,
+        ...sessionFields,
         sma20: sma20Series[index] ?? undefined,
         sma50: sma50Series[index] ?? undefined,
         sma200: sma200Series[index] ?? undefined,
@@ -201,7 +213,7 @@ export default function PriceLineChart({
     });
 
     return { chartData: data, fallbackLevels: levels, liveEquilibrium: equilibrium };
-  }, [points, highlightHotSlots, hotSlotHours]);
+  }, [points, highlightHotSlots, hotSlotHours, sessionMarkers]);
 
   const support = externalSupport ?? fallbackLevels.support;
   const resistance = externalResistance ?? fallbackLevels.resistance;
@@ -342,6 +354,19 @@ export default function PriceLineChart({
                 isAnimationActive={false}
               />
             )}
+            {(sessionMarkers || []).map((m, mi) => (
+              <Line
+                key={`session-${mi}-${m.name}`}
+                type="monotone"
+                dataKey={`sessionPrice${mi}`}
+                stroke="none"
+                dot={{ r: 4, fill: m.color, stroke: "#fff", strokeWidth: 1 }}
+                activeDot={{ r: 5 }}
+                name={m.name}
+                connectNulls={false}
+                isAnimationActive={false}
+              />
+            ))}
             {showLow && (
               <Line type="monotone" dataKey="low" stroke="#ef4444" strokeWidth={1.5} dot={false} name="Low" />
             )}
