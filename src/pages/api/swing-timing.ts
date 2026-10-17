@@ -168,13 +168,13 @@ export default async function handler(
 
   let topMoversByHotSlot: CoinSlotHighlight[] = [];
   if (hottestSlot) {
-    const coinMap = movesBySlotCoin.get(hottestSlot.hour) || new Map();
+    const coinMap: Map<string, number[]> = movesBySlotCoin.get(hottestSlot.hour) || new Map();
     const nameBySym = new Map(coins.map((c) => [c.symbol, c.name]));
     topMoversByHotSlot = [...coinMap.entries()]
-      .map(([symbol, arr]) => ({
+      .map(([symbol, arr]: [string, number[]]) => ({
         symbol,
         name: nameBySym.get(symbol) || symbol,
-        avgAbsPct: arr.reduce((a, b) => a + b, 0) / arr.length,
+        avgAbsPct: arr.reduce((a: number, b: number) => a + b, 0) / arr.length,
         samples: arr.length,
       }))
       .filter((x) => x.samples >= 3)
