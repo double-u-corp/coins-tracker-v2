@@ -29,6 +29,9 @@ export interface PriceLineChartProps {
   resistance?: number | null;
   /** Extra labeled levels (Structure S1/S2/R1/R2/sweep/mid). */
   extraLevels?: { price: number; label: string; shortLabel?: string; color?: string; dashed?: boolean }[] | null;
+  /** Mark poll points in hottest Manila hours (default 23 = 11:05 PM, 2 = 02:05 AM). */
+  highlightHotSlots?: boolean;
+  hotSlotHours?: number[];
 }
 
 type ActivePoint = {
@@ -136,6 +139,8 @@ export default function PriceLineChart({
   support: externalSupport,
   resistance: externalResistance,
   extraLevels = null,
+  highlightHotSlots = false,
+  hotSlotHours = [23, 2],
 }: PriceLineChartProps) {
   const [showSma20, setShowSma20] = useState<boolean>(true);
   const [showSma50, setShowSma50] = useState<boolean>(true);
@@ -169,11 +174,24 @@ export default function PriceLineChart({
     const sma200Series = calculateSMASeries(points, 200);
     const rsiSeries = calculateRSISeries(points, 14);
 
+    const hotSet = new Set(hotSlotHours || [23, 2]);
     const data = points.map((p, index) => {
       const rawKeyLevel = "keyLevel" in p ? (p as any).keyLevel : undefined;
+      const rawPeriod = (p as { period?: string }).period || p.label;
+      let isHotSlot = false;
+      if (highlightHotSlots && rawPeriod) {
+        const tms = new Date(rawPeriod).getTime();
+        if (Number.isFinite(tms)) {
+          // Manila = UTC+8
+          const manilaH = new Date(tms + 8 * 60 * 60 * 1000).getUTCHours();
+          isHotSlot = hotSet.has(manilaH);
+        }
+      }
       return {
         ...p,
         price: getEffectivePrice(p),
+        hotPrice: isHotSlot ? getEffectivePrice(p) : null,
+        isHotSlot,
         sma20: sma20Series[index] ?? undefined,
         sma50: sma50Series[index] ?? undefined,
         sma200: sma200Series[index] ?? undefined,
@@ -183,7 +201,7 @@ export default function PriceLineChart({
     });
 
     return { chartData: data, fallbackLevels: levels, liveEquilibrium: equilibrium };
-  }, [points]);
+  }, [points, highlightHotSlots, hotSlotHours]);
 
   const support = externalSupport ?? fallbackLevels.support;
   const resistance = externalResistance ?? fallbackLevels.resistance;
@@ -311,6 +329,18 @@ export default function PriceLineChart({
 
             {showHigh && (
               <Line type="monotone" dataKey={priceLineName === "Price" ? "price" : "high"} stroke="#22c55e" strokeWidth={1.5} dot={false} name={priceLineName} connectNulls />
+            )}
+            {highlightHotSlots && (
+              <Line
+                type="monotone"
+                dataKey="hotPrice"
+                stroke="none"
+                dot={{ r: 4, fill: "#e11d48", stroke: "#fff", strokeWidth: 1 }}
+                activeDot={{ r: 5 }}
+                name="Hot slot (11:05 PM / 02:05 AM Manila)"
+                connectNulls={false}
+                isAnimationActive={false}
+              />
             )}
             {showLow && (
               <Line type="monotone" dataKey="low" stroke="#ef4444" strokeWidth={1.5} dot={false} name="Low" />

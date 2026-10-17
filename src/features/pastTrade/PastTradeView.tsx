@@ -10,6 +10,27 @@ import { usePastTradeLogic } from "./usePastTradeLogic";
 import { formatPhp } from "@/lib/format";
 import { buildStructureKeyLevels } from "../../features/chart/Technicals";
 
+
+/** Hottest poll window from Timing page: 11:05 PM → 02:05 AM Manila (hours 23 and 2). */
+const HOT_SLOT_HOURS = [23, 2];
+
+function manilaHourFromIso(iso: string | undefined): number | null {
+  if (!iso) return null;
+  const tms = new Date(iso).getTime();
+  if (!Number.isFinite(tms)) return null;
+  return new Date(tms + 8 * 60 * 60 * 1000).getUTCHours();
+}
+
+function isHotManilaHour(h: number | null): boolean {
+  return h != null && HOT_SLOT_HOURS.includes(h);
+}
+
+function nowInHotWindow(): boolean {
+  const h = manilaHourFromIso(new Date().toISOString());
+  // Treat 23, 0, 1, 2 as the overnight hot band
+  return h != null && (h === 23 || h === 0 || h === 1 || h === 2);
+}
+
 const PriceLineChart = dynamic(() => import("../../features/chart/PriceLineChart"), {
   ssr: false,
   loading: () => (
@@ -76,6 +97,15 @@ export default function PastTradeView() {
       ? "Wider gaps in older history are normal (pre every-poll logging). Recent prints are denser."
       : null;
 
+  const lastPrintHot = useMemo(() => {
+    if (!points.length) return false;
+    const last = points[points.length - 1] as { period?: string; label?: string };
+    const h = manilaHourFromIso(last.period || last.label);
+    return isHotManilaHour(h);
+  }, [points]);
+
+  const inHotWindowNow = nowInHotWindow();
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -111,6 +141,24 @@ export default function PastTradeView() {
         </Link>
         . This page only refines the <span className="font-semibold">entry ladder</span> from poll
         prices — not a second bias system.
+      </div>
+
+      <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-950">
+        <span className="font-bold">🔥 Hottest poll window (Timing):</span>{" "}
+        <span className="font-semibold">11:05 PM → 02:05 AM Manila</span> — more slot-to-slot swing
+        across your coins.{" "}
+        <span className="font-semibold">Not an entry signal</span> — watch for noise/sweeps; prefer
+        quieter slots for calm limit fills. Red dots on the chart mark prints from the{" "}
+        <span className="font-semibold">11:05 PM</span> and <span className="font-semibold">02:05 AM</span>{" "}
+        slots.{" "}
+        <Link href="/timing" className="font-semibold text-rose-800 underline hover:text-rose-950">
+          Open Timing →
+        </Link>
+        {inHotWindowNow && (
+          <span className="ml-2 inline-flex items-center rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-bold text-white">
+            NOW in hot window
+          </span>
+        )}
       </div>
 
       <PastTradeScanPanel allCoins={allCoins} onSelectSymbol={setSymbol} />
@@ -153,6 +201,11 @@ export default function PastTradeView() {
                 <div className="text-2xl font-bold text-gray-900 font-mono">
                   {formatPhp(currentPrice)}
                 </div>
+                {lastPrintHot && (
+                  <div className="mt-1 inline-flex items-center gap-1 rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-800">
+                    🔥 Last print: hot slot (11:05 PM / 02:05 AM)
+                  </div>
+                )}
               </div>
             ) : null}
           </div>
@@ -205,6 +258,8 @@ export default function PastTradeView() {
                   support={null}
                   resistance={null}
                   extraLevels={showLevels ? keyLevels : null}
+                  highlightHotSlots
+                  hotSlotHours={HOT_SLOT_HOURS}
                 />
                 {showLevels && keyLevels.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-gray-600">
