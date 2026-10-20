@@ -1,7 +1,109 @@
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import AlertBanner from "@/components/AlertBanner";
 import { useNewsLogic } from "./useNewsLogic";
 import { isPriceMoveSignalHeadline } from "./priceMoveSignals";
+
+/** Strip fences and turn markdown links into anchors — readable + clickable. */
+function stripFences(raw: string): string {
+  let s = (raw || "").trim();
+  s = s.replace(/^```(?:markdown|md)?\s*/i, "");
+  s = s.replace(/\s*```$/i, "");
+  return s.trim();
+}
+
+function linkifyLine(line: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  // [text](url) then bare URLs
+  const re = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|(https?:\/\/[^\s)]+)/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let key = 0;
+  while ((m = re.exec(line)) !== null) {
+    if (m.index > last) {
+      nodes.push(boldify(line.slice(last, m.index), key++));
+    }
+    if (m[1] && m[2]) {
+      nodes.push(
+        <a
+          key={key++}
+          href={m[2]}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-teal-700 underline font-medium hover:text-teal-900 break-all"
+        >
+          {m[1]}
+        </a>
+      );
+    } else if (m[3]) {
+      nodes.push(
+        <a
+          key={key++}
+          href={m[3]}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-teal-700 underline hover:text-teal-900 break-all"
+        >
+          {m[3].replace(/^https?:\/\//, "").slice(0, 48)}
+          {m[3].length > 56 ? "…" : ""}
+        </a>
+      );
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < line.length) nodes.push(boldify(line.slice(last), key++));
+  return nodes;
+}
+
+function boldify(text: string, keyBase: number): React.ReactNode {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((p, i) => {
+    if (p.startsWith("**") && p.endsWith("**")) {
+      return (
+        <strong key={`${keyBase}-${i}`} className="font-semibold text-slate-900">
+          {p.slice(2, -2)}
+        </strong>
+      );
+    }
+    return <span key={`${keyBase}-${i}`}>{p}</span>;
+  });
+}
+
+function WatchlistBody({ text }: { text: string }) {
+  const clean = stripFences(text);
+  const lines = clean.split(/\n/);
+  return (
+    <div className="space-y-1.5 text-sm text-slate-800">
+      {lines.map((line, idx) => {
+        const trimmed = line.trim();
+        if (!trimmed) return <div key={idx} className="h-2" />;
+        // bullet
+        if (/^([*\-]|\d+\.)\s+/.test(trimmed)) {
+          const content = trimmed.replace(/^([*\-]|\d+\.)\s+/, "");
+          return (
+            <div key={idx} className="flex gap-2 pl-1 leading-relaxed">
+              <span className="text-teal-600 shrink-0">•</span>
+              <span className="min-w-0">{linkifyLine(content)}</span>
+            </div>
+          );
+        }
+        // Sources header
+        if (/^sources?:?\s*$/i.test(trimmed)) {
+          return (
+            <p key={idx} className="pt-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+              Sources
+            </p>
+          );
+        }
+        return (
+          <p key={idx} className="leading-relaxed">
+            {linkifyLine(trimmed)}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 
 interface NewsSectionProps {
   refreshSignal?: number;
@@ -118,9 +220,7 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
             your coins (needs TAVILY_API_KEY; Groq optional for a cleaner summary).
           </p>
         ) : (
-          <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed text-slate-800 font-sans">
-            {watchMd}
-          </pre>
+          <WatchlistBody text={watchMd} />
         )}
 
         {watchUpdated && (

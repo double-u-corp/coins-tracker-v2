@@ -72,7 +72,9 @@ async function summarizeWithGroq(tickers: string[], searchContext: string): Prom
     `1) First line: **Sentiment:** 🟢 BULLISH | 🔴 BEARISH | ⚪ NEUTRAL — one sentence\n` +
     `2) Up to 6 bullets: **TICKER** — fact [Source](url) from context only\n` +
     `3) If a ticker has nothing in context, skip it (do not invent).\n` +
-    `4) End with "Sources:" and unique URLs from context.`;
+    `4) End with "Sources:" and unique URLs from context.
+` +
+    `5) Output plain markdown only — do NOT wrap the whole answer in a code fence (\`\`\`).`;
 
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
