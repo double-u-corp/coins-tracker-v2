@@ -236,6 +236,14 @@ export function formatEntryReviewPrompt(
   if (c.invalidationNote) lines.push(`- Invalidation detail: ${c.invalidationNote}`);
   lines.push(``);
 
+  // Concrete calendar anchor for the agent's timeframe answer (Manila)
+  const todayManila = new Date().toLocaleDateString("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
   if (isAllocated) {
     lines.push(`## Answer format (position open)`);
     lines.push(`1. Verdict: **HOLD** | **WAIT A FEW MORE DAYS** | **TRIM (partial sell)** | **SELL (exit)**`);
@@ -243,14 +251,23 @@ export function formatEntryReviewPrompt(
     lines.push(`3. If TRIM/SELL: urgency (now vs into resistance) and what would justify holding instead`);
     lines.push(`4. If HOLD/WAIT: price or event that should flip you to sell`);
     lines.push(`5. Relate to break-even and days held when relevant`);
-    lines.push(`6. News: verified only, or "none verified"`);
+    lines.push(`6. **Timeframe (required):** give a calendar window anchored to today **${todayManila} (Manila)**.`);
+    lines.push(`   - Prefer: **valid until YYYY-MM-DD** and/or **review again by YYYY-MM-DD**.`);
+    lines.push(`   - Also state a rough hold horizon if useful (e.g. 3–7 days, 1–2 weeks) — must still include at least one concrete date.`);
+    lines.push(`   - If uncertain, say so and give a short default review date (e.g. +3 or +7 Manila days), not an open-ended hold.`);
+    lines.push(`7. News: verified only, or "none verified"`);
   } else {
     lines.push(`## Answer format (no position)`);
     lines.push(`1. Verdict: **READY TO STAGE** | **WAIT FOR PULLBACK** | **SKIP**`);
     lines.push(`2. Why (max 3 technical bullets; max 2 verified news bullets if any)`);
     lines.push(`3. If READY or WAIT: which ladder level(s) and invalidation price`);
     lines.push(`4. Spot risk note (LONG only — no short / no leverage)`);
-    lines.push(`5. News: verified items only, or "none verified"`);
+    lines.push(`5. **Timeframe (required):** anchored to today **${todayManila} (Manila)**.`);
+    lines.push(`   - If READY TO STAGE: until when the ladder plan stays valid (**valid until YYYY-MM-DD**) and when to re-check if unfilled.`);
+    lines.push(`   - If WAIT FOR PULLBACK: until when to keep waiting before the idea expires or needs a fresh review (**wait until / review by YYYY-MM-DD**).`);
+    lines.push(`   - If SKIP: optional — when this setup might be worth looking at again (date or "not in the next 1–2 weeks").`);
+    lines.push(`   - Always include at least one concrete calendar date, not only "a few days."`);
+    lines.push(`6. News: verified items only, or "none verified"`);
   }
 
   return lines.join("\n");
@@ -331,9 +348,22 @@ export function formatEntryReviewPromptForGoogle(
     parts.push(`TP ref ~${c.exitSuggestion.price}.`);
   }
 
-  parts.push(
-    `Answer: 1) READY TO STAGE | WAIT FOR PULLBACK | SKIP  2) why (tech + verified news only)  3) ladder levels + invalidation  4) spot risk  5) news or none verified. Do not invent news.`
-  );
+  const todayManila = new Date().toLocaleDateString("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  if (isAllocated) {
+    parts.push(
+      `Answer: 1) HOLD | WAIT A FEW MORE DAYS | TRIM | SELL  2) why (tech + verified news only)  3) if trim/sell: urgency  4) if hold/wait: flip-to-sell trigger  5) Timeframe REQUIRED: valid until and/or review by YYYY-MM-DD (today Manila is ${todayManila}; give concrete dates, not only "a few days")  6) news or none verified. Do not invent news.`
+    );
+  } else {
+    parts.push(
+      `Answer: 1) READY TO STAGE | WAIT FOR PULLBACK | SKIP  2) why (tech + verified news only)  3) ladder levels + invalidation  4) spot risk  5) Timeframe REQUIRED: valid until / wait until / review by YYYY-MM-DD (today Manila is ${todayManila})  6) news or none verified. Do not invent news.`
+    );
+  }
 
   return parts.join(" ");
 }

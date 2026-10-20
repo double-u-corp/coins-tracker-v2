@@ -15,11 +15,34 @@ const SLOT_LABELS: Record<number, string> = {
   23: "11:05 PM Manila (US peak)",
 };
 
+/** JS getUTCDay: 0=Sun … 6=Sat — labels in Monday-first display order */
+const WEEKDAY_LABELS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+] as const;
+
 type SlotStat = {
   hour: number;
   label: string;
   sampleCount: number;
   coinCount: number;
+  avgAbsPct: number;
+  medianAbsPct: number;
+  pctMovesAbove1: number;
+  rank: number;
+  intensity: "quiet" | "normal" | "active" | "hot";
+};
+
+type WeekdayStat = {
+  /** 0=Sunday … 6=Saturday (JS) */
+  day: number;
+  label: string;
+  sampleCount: number;
   avgAbsPct: number;
   medianAbsPct: number;
   pctMovesAbove1: number;
@@ -38,19 +61,22 @@ type ResponseBody = {
   days: number;
   generatedAt: string;
   slots: SlotStat[];
+  weekdays: WeekdayStat[];
   hottestSlot: SlotStat | null;
   quietestSlot: SlotStat | null;
+  hottestWeekday: WeekdayStat | null;
+  quietestWeekday: WeekdayStat | null;
   topMoversByHotSlot: CoinSlotHighlight[];
   guidance: string[];
 };
 
 type ErrorBody = { error: string };
 
-function toManilaHour(d: Date): number {
+function toManilaParts(d: Date): { hour: number; weekday: number } {
   // Asia/Manila is UTC+8 year-round (no DST)
-  const utc = d.getTime() + d.getTimezoneOffset() * 60_000;
-  const manila = new Date(utc + 8 * 60 * 60_000);
-  return manila.getHours();
+  const utcMs = d.getTime() + d.getTimezoneOffset() * 60_000;
+  const manila = new Date(utcMs + 8 * 60 * 60_000);
+  return { hour: manila.getHours(), weekday: manila.getDay() };
 }
 
 function nearestSlotHour(hour: number): number {
@@ -74,6 +100,18 @@ function median(nums: number[]): number {
   return s.length % 2 === 0 ? (s[mid - 1] + s[mid]) / 2 : s[mid];
 }
 
+function intensityFromRank(
+  avgAbsPct: number,
+  minAvg: number,
+  maxAvg: number
+): "quiet" | "normal" | "active" | "hot" {
+  const t = maxAvg > minAvg ? (avgAbsPct - minAvg) / (maxAvg - minAvg) : 0.5;
+  if (t >= 0.75) return "hot";
+  if (t >= 0.5) return "active";
+  if (t >= 0.25) return "normal";
+  return "quiet";
+}
+
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse<ResponseBody | ErrorBody>
@@ -81,6 +119,9 @@ export default async function handler(
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
+
+  // Bust CDN/browser cache when user hits Refresh
+  res.setHeader("Cache-Control", "no-store, max-age=0");
 
   const daysRaw = Number(req.query.days ?? 30);
   const days = Number.isFinite(daysRaw) ? Math.min(90, Math.max(7, Math.round(daysRaw))) : 30;
@@ -93,9 +134,14 @@ export default async function handler(
 
   const movesBySlot = new Map<number, number[]>();
   const movesBySlotCoin = new Map<number, Map<string, number[]>>();
+  const movesByWeekday = new Map<number, number[]>();
+
   for (const h of SLOT_HOURS) {
     movesBySlot.set(h, []);
     movesBySlotCoin.set(h, new Map());
+  }
+  for (let d = 0; d <= 6; d++) {
+    movesByWeekday.set(d, []);
   }
 
   for (const coin of coins) {
@@ -116,20 +162,23 @@ export default async function handler(
       if (gapH > 5) continue;
 
       const absPct = (Math.abs(cur.price - prev.price) / prev.price) * 100;
-      const slot = nearestSlotHour(toManilaHour(cur.createdAt));
+      const { hour, weekday } = toManilaParts(cur.createdAt);
+      const slot = nearestSlotHour(hour);
       if (slot < 0) continue;
 
       movesBySlot.get(slot)!.push(absPct);
       const coinMap = movesBySlotCoin.get(slot)!;
       if (!coinMap.has(coin.symbol)) coinMap.set(coin.symbol, []);
       coinMap.get(coin.symbol)!.push(absPct);
+
+      movesByWeekday.get(weekday)!.push(absPct);
     }
   }
 
   const rawSlots: Omit<SlotStat, "rank" | "intensity">[] = SLOT_HOURS.map((hour) => {
     const samples = movesBySlot.get(hour) || [];
     const avgAbsPct =
-      samples.length > 0 ? samples.reduce((a, b) => a + b, 0) / samples.length : 0;
+      samples.length > 0 ? samples.reduce((a: number, b: number) => a + b, 0) / samples.length : 0;
     const medianAbsPct = median(samples);
     const pctMovesAbove1 =
       samples.length > 0
@@ -150,21 +199,53 @@ export default async function handler(
     };
   });
 
-  // Rank by average absolute move (hottest = 1)
   const byHeat = [...rawSlots].sort((a, b) => b.avgAbsPct - a.avgAbsPct);
   const maxAvg = byHeat[0]?.avgAbsPct || 1;
   const minAvg = byHeat[byHeat.length - 1]?.avgAbsPct || 0;
 
   const slots: SlotStat[] = rawSlots.map((s) => {
     const rank = byHeat.findIndex((x) => x.hour === s.hour) + 1;
-    const t = maxAvg > minAvg ? (s.avgAbsPct - minAvg) / (maxAvg - minAvg) : 0.5;
-    const intensity: SlotStat["intensity"] =
-      t >= 0.75 ? "hot" : t >= 0.5 ? "active" : t >= 0.25 ? "normal" : "quiet";
-    return { ...s, rank, intensity };
+    return {
+      ...s,
+      rank,
+      intensity: intensityFromRank(s.avgAbsPct, minAvg, maxAvg),
+    };
+  });
+
+  // Weekday stats (Manila calendar day of the later poll)
+  const rawWeekdays: Omit<WeekdayStat, "rank" | "intensity">[] = [];
+  for (let d = 0; d <= 6; d++) {
+    const samples = movesByWeekday.get(d) || [];
+    const avgAbsPct =
+      samples.length > 0 ? samples.reduce((a: number, b: number) => a + b, 0) / samples.length : 0;
+    rawWeekdays.push({
+      day: d,
+      label: WEEKDAY_LABELS[d],
+      sampleCount: samples.length,
+      avgAbsPct: Number(avgAbsPct.toFixed(3)),
+      medianAbsPct: Number(median(samples).toFixed(3)),
+      pctMovesAbove1:
+        samples.length > 0
+          ? Number(((samples.filter((x) => x >= 1).length / samples.length) * 100).toFixed(1))
+          : 0,
+    });
+  }
+  const wdByHeat = [...rawWeekdays].sort((a, b) => b.avgAbsPct - a.avgAbsPct);
+  const wdMax = wdByHeat[0]?.avgAbsPct || 1;
+  const wdMin = wdByHeat[wdByHeat.length - 1]?.avgAbsPct || 0;
+  const weekdays: WeekdayStat[] = rawWeekdays.map((s) => {
+    const rank = wdByHeat.findIndex((x) => x.day === s.day) + 1;
+    return {
+      ...s,
+      rank,
+      intensity: intensityFromRank(s.avgAbsPct, wdMin, wdMax),
+    };
   });
 
   const hottestSlot = [...slots].sort((a, b) => b.avgAbsPct - a.avgAbsPct)[0] || null;
   const quietestSlot = [...slots].sort((a, b) => a.avgAbsPct - b.avgAbsPct)[0] || null;
+  const hottestWeekday = [...weekdays].sort((a, b) => b.avgAbsPct - a.avgAbsPct)[0] || null;
+  const quietestWeekday = [...weekdays].sort((a, b) => a.avgAbsPct - b.avgAbsPct)[0] || null;
 
   let topMoversByHotSlot: CoinSlotHighlight[] = [];
   if (hottestSlot) {
@@ -191,20 +272,31 @@ export default async function handler(
     guidance.push(
       `Quietest window: ${quietestSlot.label} — avg |move| ${quietestSlot.avgAbsPct}%. Often better for staging limit orders with less noise.`
     );
+  }
+  if (hottestWeekday && quietestWeekday) {
     guidance.push(
-      `Hot windows suit watching for sweeps/breaks; quiet windows suit placing ladder buys when Spot already says LONG.`
+      `Most active weekday (Manila): ${hottestWeekday.label} — avg |move| ${hottestWeekday.avgAbsPct}%. Be more aware on this day.`
     );
     guidance.push(
-      `This is slot-to-slot swing across your monitored coins — not a guarantee of direction. Always confirm bias on Spot.`
+      `Quietest weekday: ${quietestWeekday.label} — avg |move| ${quietestWeekday.avgAbsPct}%.`
     );
   }
+  guidance.push(
+    `Hot time/day = more movement to watch — not an automatic entry signal. Confirm bias on Spot.`
+  );
 
   return res.status(200).json({
     days,
     generatedAt: new Date().toISOString(),
     slots: slots.sort((a, b) => a.hour - b.hour),
+    // Monday-first display order
+    weekdays: [1, 2, 3, 4, 5, 6, 0]
+      .map((d) => weekdays.find((w) => w.day === d)!)
+      .filter(Boolean),
     hottestSlot,
     quietestSlot,
+    hottestWeekday,
+    quietestWeekday,
     topMoversByHotSlot,
     guidance,
   });
