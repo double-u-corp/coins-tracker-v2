@@ -171,18 +171,21 @@ export function formatEntryReviewPrompt(
   }
 
   lines.push(`## Rules`);
-  lines.push(`- Primary filter = technical snapshot below.`);
+  lines.push(`- **Stance: NEUTRAL.** Do not default to bullish or "talk the trader into staying long."`);
+  lines.push(`- If technicals and/or verified news are weak, risk-off, or bearish → say so clearly (WAIT / SKIP / TRIM / SELL as fits). Do not soften a bearish read into HOLD out of optimism.`);
+  lines.push(`- Primary filter = technical snapshot below; news is secondary and only when verified.`);
   lines.push(`- You MAY search live news/trends; do NOT use training-memory headlines (often stale).`);
   lines.push(`- Do not invent news. Unverified → say "none verified".`);
+  lines.push(`- Balanced view: list both supportive and negative factors when both exist; do not cherry-pick only bullish points.`);
   if (isAllocated) {
-    lines.push(`- **Good verified upcoming catalysts** (listings, unlocks delayed positively, adoption) → lean HOLD or wait a few more days before selling strength.`);
-    lines.push(`- **Bad verified news ahead** (unlock dump, delist risk, exploit, regulatory hit) → lean TRIM or SELL even if price hasn't fully reacted.`);
-    lines.push(`- If technicals are extended into resistance and news is empty/mixed → consider partial take-profit, not FOMO hold.`);
-    lines.push(`- If still underwater and no clear catalyst, prefer patient hold or ladder adds only on weakness — never revenge-buy.`);
+    lines.push(`- **Verified positive catalysts** may support HOLD or a short wait — only when they outweigh technical risk.`);
+    lines.push(`- **Verified bad news** (unlock dump, delist risk, exploit, regulatory hit) → lean TRIM or SELL even if price has not fully reacted.`);
+    lines.push(`- Extended into resistance with empty/mixed news → consider TRIM, not hopeful HOLD.`);
+    lines.push(`- Underwater with no catalyst → patient hold or adds only on weakness are options; never revenge-buy. Selling is allowed when thesis is broken.`);
   } else {
-    lines.push(`- SHORT / risk-off bias → hold cash / do not buy (never short).`);
+    lines.push(`- SHORT / risk-off bias → hold cash / do not buy (never recommend shorting).`);
     lines.push(`- Price extended above the ladder → WAIT FOR PULLBACK over chasing.`);
-    lines.push(`- Thin history or low confidence → lean WAIT or SKIP.`);
+    lines.push(`- Thin history, low confidence, or bearish structure → lean WAIT or SKIP — do not force a long.`);
   }
   lines.push(``);
   lines.push(`## Technical snapshot`);
@@ -299,14 +302,14 @@ export function formatEntryReviewPromptForGoogle(
 
   if (isAllocated) {
     parts.push(
-      `Spot LONG review (already holding) ${label}. Pair ${pair}; search news as ${base} crypto not index/other meanings. No short/leverage. Hold, trim, or wait?`
+      `Spot LONG review (already holding) ${label}. Pair ${pair}; search news as ${base} crypto not index/other meanings. No short/leverage. Be NEUTRAL — do not default bullish; if bearish/weak say TRIM/SELL/WAIT. Hold, trim, or wait?`
     );
     if (avgCost != null) {
       parts.push(`Avg cost ~${avgCost.toFixed(4)}; price ${c.currentPrice}; holdings ${holdings}.`);
     }
   } else {
     parts.push(
-      `Spot LONG-only entry review ${label}. Pair ${pair}; search news as ${base} crypto not other meanings. No short/leverage/margin. Stage ladder buys or wait?`
+      `Spot LONG-only entry review ${label}. Pair ${pair}; search news as ${base} crypto not other meanings. No short/leverage/margin. Be NEUTRAL — do not force a long; if weak/bearish say WAIT or SKIP. Stage ladder buys or wait?`
     );
   }
 
