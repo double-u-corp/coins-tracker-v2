@@ -13,7 +13,6 @@ function stripFences(raw: string): string {
 
 function linkifyLine(line: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
-  // [text](url) then bare URLs
   const re = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|(https?:\/\/[^\s)]+)/g;
   let last = 0;
   let m: RegExpExecArray | null;
@@ -76,7 +75,6 @@ function WatchlistBody({ text }: { text: string }) {
       {lines.map((line, idx) => {
         const trimmed = line.trim();
         if (!trimmed) return <div key={idx} className="h-2" />;
-        // bullet
         if (/^([*\-]|\d+\.)\s+/.test(trimmed)) {
           const content = trimmed.replace(/^([*\-]|\d+\.)\s+/, "");
           return (
@@ -86,10 +84,12 @@ function WatchlistBody({ text }: { text: string }) {
             </div>
           );
         }
-        // Sources header
         if (/^sources?:?\s*$/i.test(trimmed)) {
           return (
-            <p key={idx} className="pt-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+            <p
+              key={idx}
+              className="pt-2 text-[11px] font-bold uppercase tracking-wide text-slate-500"
+            >
               Sources
             </p>
           );
@@ -103,7 +103,6 @@ function WatchlistBody({ text }: { text: string }) {
     </div>
   );
 }
-
 
 interface NewsSectionProps {
   refreshSignal?: number;
@@ -126,16 +125,21 @@ function formatDateTime(iso: string): string {
   }
 }
 
-/** Market Signals: watchlist Tavily/Groq news + existing cron price/RSS signals */
+type Channel = "web" | "social";
+
+/** Market Signals: selectable watchlist Tavily/AI news + cron RSS signals */
 export default function NewsSection({ refreshSignal }: NewsSectionProps) {
   const { items, loading, loadingMore, error, hasMore, loadMore } = useNewsLogic(refreshSignal);
 
+  const [allTickers, setAllTickers] = useState<string[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [channel, setChannel] = useState<Channel>("web");
   const [watchMd, setWatchMd] = useState("");
   const [watchUpdated, setWatchUpdated] = useState<number | null>(null);
   const [watchLoading, setWatchLoading] = useState(true);
   const [watchRefreshing, setWatchRefreshing] = useState(false);
   const [watchError, setWatchError] = useState<string | null>(null);
-  const [tickerCount, setTickerCount] = useState(0);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const loadWatchlist = useCallback(async () => {
     setWatchLoading(true);
@@ -146,36 +150,63 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
       if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
       setWatchMd(data.markdown || "");
       setWatchUpdated(data.updatedAt ?? null);
-      setTickerCount(Array.isArray(data.tickers) ? data.tickers.length : 0);
+      const tickers: string[] = Array.isArray(data.tickers) ? data.tickers : [];
+      setAllTickers(tickers);
+      if (Array.isArray(data.lastSymbols) && data.lastSymbols.length > 0) {
+        setSelected(data.lastSymbols);
+      } else if (tickers.length && selected.length === 0) {
+        const defaults = ["SOL", "ONDO", "TX"].filter((t) => tickers.includes(t));
+        setSelected(defaults.length ? defaults : tickers.slice(0, 3));
+      }
+      if (data.lastChannel === "social" || data.lastChannel === "web") {
+        setChannel(data.lastChannel);
+      }
     } catch (err) {
       setWatchError((err as Error).message);
     } finally {
       setWatchLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only hydrate selection once from cache
   }, []);
 
   useEffect(() => {
     void loadWatchlist();
   }, [loadWatchlist]);
 
+  const toggleTicker = (t: string) => {
+    setSelected((prev) => {
+      if (prev.includes(t)) return prev.filter((x) => x !== t);
+      if (prev.length >= 8) return prev; // hard cap matches API
+      return [...prev, t];
+    });
+  };
+
   const refreshWatchlist = useCallback(async () => {
+    if (selected.length === 0) {
+      setWatchError("Select at least one coin");
+      return;
+    }
     setWatchRefreshing(true);
     setWatchError(null);
     try {
-      const res = await fetch("/api/watchlist-news", { method: "POST" });
+      const res = await fetch("/api/watchlist-news", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbols: selected, channel }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Refresh failed (${res.status})`);
       setWatchMd(data.markdown || "");
       setWatchUpdated(data.updatedAt ?? null);
-      setTickerCount(Array.isArray(data.tickers) ? data.tickers.length : 0);
+      if (Array.isArray(data.tickers)) setAllTickers(data.tickers);
+      if (Array.isArray(data.lastSymbols)) setSelected(data.lastSymbols);
     } catch (err) {
       setWatchError((err as Error).message);
     } finally {
       setWatchRefreshing(false);
     }
-  }, []);
+  }, [selected, channel]);
 
-  // Prefer real articles; keep system price-move lines out of the list when possible
   const articleItems = items.filter((item) => !isPriceMoveSignalHeadline(item.headline));
 
   return (
@@ -184,25 +215,109 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
         <h2 className="text-lg font-semibold text-gray-900">Market Signals</h2>
       </div>
 
-      {/* Watchlist news — Tavily + Groq */}
       <div className="rounded-lg border border-teal-100 bg-white p-4 shadow-sm">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
           <div>
             <h3 className="text-sm font-bold text-teal-900">Watchlist news (Tavily / AI)</h3>
             <p className="text-[11px] text-slate-500">
-              Scraped headlines related to your monitored coins
-              {tickerCount > 0 ? ` (${tickerCount} tickers)` : ""}. Neutral summary — not a buy
-              signal.
+              Pick coins · up to 8 · ~10 results · names disambiguated (e.g. TRUMP = coin, not
+              president). Neutral — not a buy signal.
             </p>
           </div>
           <button
             type="button"
             onClick={() => void refreshWatchlist()}
-            disabled={watchRefreshing}
+            disabled={watchRefreshing || selected.length === 0}
             className="rounded-md border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-800 hover:bg-teal-100 disabled:opacity-50"
           >
-            {watchRefreshing ? "Scanning…" : "↻ Scan watchlist news"}
+            {watchRefreshing ? "Scanning…" : "↻ Scan selected"}
           </button>
+        </div>
+
+        {/* Channel */}
+        <div className="mb-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setChannel("web")}
+            className={`rounded-md border px-2.5 py-1 text-[11px] font-semibold ${
+              channel === "web"
+                ? "border-teal-600 bg-teal-600 text-white"
+                : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+            }`}
+          >
+            🌐 Web (news)
+          </button>
+          <button
+            type="button"
+            onClick={() => setChannel("social")}
+            className={`rounded-md border px-2.5 py-1 text-[11px] font-semibold ${
+              channel === "social"
+                ? "border-sky-600 bg-sky-600 text-white"
+                : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+            }`}
+          >
+            💬 Social (X / LinkedIn / Reddit)
+          </button>
+        </div>
+
+        {/* Coin multi-select */}
+        <div className="mb-3">
+          <button
+            type="button"
+            onClick={() => setPickerOpen((o) => !o)}
+            className="w-full sm:w-auto rounded-md border border-gray-300 bg-gray-50 px-3 py-1.5 text-xs font-semibold text-gray-800 hover:bg-gray-100"
+          >
+            {pickerOpen ? "Hide coins ▲" : "Select coins ▼"}{" "}
+            <span className="font-normal text-gray-500">
+              ({selected.length}/8)
+              {selected.length > 0 ? `: ${selected.join(", ")}` : ""}
+            </span>
+          </button>
+          {pickerOpen && (
+            <div className="mt-2 max-h-40 overflow-y-auto rounded-md border border-gray-200 bg-white p-2 flex flex-wrap gap-1.5">
+              {allTickers.map((t) => {
+                const on = selected.includes(t);
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => toggleTicker(t)}
+                    className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                      on
+                        ? "border-teal-600 bg-teal-50 text-teal-900"
+                        : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    {on ? "✓ " : ""}
+                    {t}
+                  </button>
+                );
+              })}
+              {allTickers.length === 0 && (
+                <span className="text-xs text-gray-400">Loading coin list…</span>
+              )}
+            </div>
+          )}
+          <div className="mt-1.5 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="text-[10px] font-semibold text-teal-700 hover:underline"
+              onClick={() =>
+                setSelected(
+                  ["BTC", "ETH", "SOL", "ONDO", "TX"].filter((t) => allTickers.includes(t)).slice(0, 8)
+                )
+              }
+            >
+              Quick: majors + ONDO/TX
+            </button>
+            <button
+              type="button"
+              className="text-[10px] font-semibold text-gray-500 hover:underline"
+              onClick={() => setSelected([])}
+            >
+              Clear
+            </button>
+          </div>
         </div>
 
         {watchError && <AlertBanner variant="error" message={watchError} />}
@@ -215,9 +330,7 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
           </div>
         ) : !watchMd ? (
           <p className="text-xs text-slate-500">
-            No watchlist news cached yet. Click{" "}
-            <span className="font-semibold">Scan watchlist news</span> to pull Tavily results for
-            your coins (needs TAVILY_API_KEY; Groq optional for a cleaner summary).
+            Select coins, choose Web or Social, then <span className="font-semibold">Scan selected</span>.
           </p>
         ) : (
           <WatchlistBody text={watchMd} />
@@ -234,7 +347,6 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
         )}
       </div>
 
-      {/* Existing cron / RSS signals */}
       <div>
         <h3 className="mb-2 text-sm font-semibold text-gray-800">Price &amp; RSS signals</h3>
         {error && <AlertBanner variant="error" message={`Failed to load signals: ${error}`} />}
@@ -246,19 +358,14 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
                 key={i}
                 className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm animate-pulse"
               >
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="h-5 w-16 rounded-full bg-gray-200" />
-                  <div className="h-4 w-48 max-w-[60%] rounded bg-gray-200" />
-                </div>
-                <div className="h-3 w-full rounded bg-gray-100 mb-1.5" />
-                <div className="h-3 w-3/4 rounded bg-gray-100" />
+                <div className="h-4 w-48 rounded bg-gray-200 mb-2" />
+                <div className="h-3 w-full rounded bg-gray-100" />
               </li>
             ))}
           </ul>
         ) : articleItems.length === 0 ? (
           <p className="text-sm text-gray-500">
-            No article signals yet — price % moves show on the coin filter chips above. Articles
-            appear after cron picks up RSS matches.
+            No article signals yet — price % moves show on the coin filter chips above.
           </p>
         ) : (
           <ul className="space-y-3">
@@ -272,8 +379,8 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
                       <div className="absolute inset-0 flex items-center" aria-hidden="true">
                         <div className="w-full border-t-2 border-gray-300" />
                       </div>
-                      <div className="relative flex items-center gap-2 rounded-full border border-gray-200 bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-600 shadow-sm">
-                        <span>Run #{item.cronLogId}</span>
+                      <div className="relative rounded-full border border-gray-200 bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-600">
+                        Run #{item.cronLogId}
                       </div>
                     </div>
                   )}
