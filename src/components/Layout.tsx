@@ -14,7 +14,6 @@ const PUBLIC_NAV_LINKS = [
 const PROTECTED_NAV_LINKS = [
   { href: "/trade", label: "Buy / Sell" },
   { href: "/manage", label: "Manage Coins" },
-    { href: "/catalysts", label: "Catalysts" }
 ];
 
 

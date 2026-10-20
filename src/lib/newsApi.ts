@@ -10,7 +10,7 @@
  *
  * 2. `fetchAllRssArticles` + `matchRssArticlesForCoin` — always runs, no
  *    setup required, no API key. Pulls from free public RSS feeds of
- *    established crypto news outlets (Cointelegraph, CryptoSlate, NewsBTC
+ *    established crypto news outlets (CryptoSlate, NewsBTC
  *    — see RSS_FEEDS below), matches articles mentioning the coin by
  *    name/symbol, and classifies sentiment with a plain keyword heuristic
  *    (see classifySentiment) since RSS doesn't carry sentiment data the
@@ -127,7 +127,7 @@ export function generateSignalForCoin(params: {
 
 /** Free, public, keyless RSS feeds from established crypto news outlets. */
 const RSS_FEEDS: { url: string; source: string }[] = [
-  { url: "https://cointelegraph.com/rss", source: "Cointelegraph" },
+  // Cointelegraph omitted — feed/site often fails to load for this app
   { url: "https://cryptoslate.com/feed", source: "CryptoSlate" },
   { url: "https://www.newsbtc.com/feed", source: "NewsBTC" },
 ];

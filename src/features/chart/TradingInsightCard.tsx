@@ -259,6 +259,7 @@ export function formatEntryReviewPrompt(
     lines.push(`   - Also state a rough hold horizon if useful (e.g. 3–7 days, 1–2 weeks) — must still include at least one concrete date.`);
     lines.push(`   - If uncertain, say so and give a short default review date (e.g. +3 or +7 Manila days), not an open-ended hold.`);
     lines.push(`7. News: verified only, or "none verified"`);
+    lines.push(`8. Then output the **Final journal note** block exactly as specified below.`);
   } else {
     lines.push(`## Answer format (no position)`);
     lines.push(`1. Verdict: **READY TO STAGE** | **WAIT FOR PULLBACK** | **SKIP**`);
@@ -271,10 +272,47 @@ export function formatEntryReviewPrompt(
     lines.push(`   - If SKIP: optional — when this setup might be worth looking at again (date or "not in the next 1–2 weeks").`);
     lines.push(`   - Always include at least one concrete calendar date, not only "a few days."`);
     lines.push(`6. News: verified items only, or "none verified"`);
+    lines.push(`7. Then output the **Final journal note** block exactly as specified below.`);
   }
+
+  lines.push(``);
+  lines.push(`## Final journal note (REQUIRED — pure markdown, copy-paste ready)`);
+  lines.push(`End your answer with ONLY this block (use real newlines, no HTML). Fill every field; use "n/a" if not applicable.`);
+  lines.push(``);
+  lines.push('```markdown');
+  if (isAllocated) {
+    lines.push(`## ${pair} · hold/exit note · ${todayManila} (Manila)`);
+    lines.push(``);
+    lines.push(`- **Verdict:** HOLD | WAIT | TRIM | SELL`);
+    lines.push(`- **Price now:** …`);
+    lines.push(`- **Break-even / avg cost:** …`);
+    lines.push(`- **Sell / trim if price hits:** …`);
+    lines.push(`- **Invalidation (thesis broken if):** …`);
+    lines.push(`- **Timeframe — valid until:** YYYY-MM-DD`);
+    lines.push(`- **Review again by:** YYYY-MM-DD`);
+    lines.push(`- **News (verified only):** …`);
+    lines.push(`- **Why (1–3 short lines):**`);
+    lines.push(`  - …`);
+  } else {
+    lines.push(`## ${pair} · entry note · ${todayManila} (Manila)`);
+    lines.push(``);
+    lines.push(`- **Verdict:** READY TO STAGE | WAIT FOR PULLBACK | SKIP`);
+    lines.push(`- **Price now:** …`);
+    lines.push(`- **Ladder levels:**`);
+    lines.push(`  - … (pct)`);
+    lines.push(`- **Invalidation:** …`);
+    lines.push(`- **Timeframe — valid until / review by:** YYYY-MM-DD`);
+    lines.push(`- **News (verified only):** …`);
+    lines.push(`- **Why (1–3 short lines):**`);
+    lines.push(`  - …`);
+  }
+  lines.push('```');
+  lines.push(``);
+  lines.push(`The fenced markdown block above is what the trader saves as a note for later re-checks.`);
 
   return lines.join("\n");
 }
+
 
 
 
@@ -360,11 +398,11 @@ export function formatEntryReviewPromptForGoogle(
 
   if (isAllocated) {
     parts.push(
-      `Answer: 1) HOLD | WAIT A FEW MORE DAYS | TRIM | SELL  2) why (tech + verified news only)  3) if trim/sell: urgency  4) if hold/wait: flip-to-sell trigger  5) Timeframe REQUIRED: valid until and/or review by YYYY-MM-DD (today Manila is ${todayManila}; give concrete dates, not only "a few days")  6) news or none verified. Do not invent news.`
+      `Answer: 1) HOLD | WAIT | TRIM | SELL  2) why  3) sell/trim trigger price  4) invalidation  5) Timeframe: valid until + review by YYYY-MM-DD (today Manila ${todayManila})  6) news  7) End with a markdown journal note block (verdict, levels, timeframe, news). Neutral stance. Do not invent news.`
     );
   } else {
     parts.push(
-      `Answer: 1) READY TO STAGE | WAIT FOR PULLBACK | SKIP  2) why (tech + verified news only)  3) ladder levels + invalidation  4) spot risk  5) Timeframe REQUIRED: valid until / wait until / review by YYYY-MM-DD (today Manila is ${todayManila})  6) news or none verified. Do not invent news.`
+      `Answer: 1) READY TO STAGE | WAIT FOR PULLBACK | SKIP  2) why  3) ladder + invalidation  4) Timeframe: valid until / review by YYYY-MM-DD (today Manila ${todayManila})  5) news  6) End with markdown journal note (verdict, ladder, invalidation, timeframe, news). Neutral. Do not invent news.`
     );
   }
 
@@ -435,6 +473,7 @@ export default function TradingInsightCard({
     setAgentCopied(true);
     setTimeout(() => setAgentCopied(false), 2000);
   };
+
 
   /**
    * Open Google with the review text.

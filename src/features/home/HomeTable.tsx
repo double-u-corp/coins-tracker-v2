@@ -4,6 +4,7 @@ import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
 import { useHomeLogic } from "./useHomeLogic";
 import NewRecordModal from "./NewRecordModal";
+import HomeMacroWatch from "./HomeMacroWatch";
 import NewsSection from "./NewsSection";
 import PriceUpdateModal from "./PriceUpdateModal";
 import type { CoinSummary } from "@/validators/recordSchema";
@@ -546,6 +547,8 @@ export default function HomeTable() {
       )}
 
       <p className="mt-2 text-xs text-gray-500">Target prices are set from the Manage Coins page.</p>
+
+      <HomeMacroWatch />
 
       <NewsSection />
     </div>
