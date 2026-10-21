@@ -136,6 +136,7 @@ export default function HomeTable() {
     allCoins,
     targetAlerts,
     reviewSchedule,
+    monitorCards,
     selectedCoins,
     setSelectedCoins,
     portfolio,
@@ -291,7 +292,7 @@ export default function HomeTable() {
       <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-gray-900">Coin Prices</h1>
-          {canUpdatePrice && (
+          {/* {canUpdatePrice && (
             <button
               type="button"
               onClick={triggerCronManually}
@@ -301,7 +302,7 @@ export default function HomeTable() {
             >
               <span>{cronTriggering ? "⏳ Running..." : "⚡ Run Cron"}</span>
             </button>
-          )}
+          )} */}
         </div>
       </div>
 
@@ -310,95 +311,149 @@ export default function HomeTable() {
         message={error ? `Failed to load data: ${error}` : `Last cron run: ${formatDateTime(lastCronRun)} | Next run: ${nextCronLabel}`}
       />
 
-      {/* Unified Target Alerts & Scanner Section */}
+      {/* Unified monitor: one card per coin (high + low + review date) */}
       <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex items-center justify-between flex-wrap gap-2">
           <h2 className="text-sm font-bold uppercase tracking-wider text-gray-700 flex items-center gap-2">
-            🎯 Target Monitor &amp; Scanner
+            🎯 Target &amp; review monitor
             {loading && (
               <span className="h-3 w-16 animate-pulse rounded bg-violet-100" aria-hidden />
             )}
           </h2>
-          <span className="text-xs text-gray-400">Reached &amp; Within 5% of Limit</span>
+          <span className="text-xs text-gray-400">
+            Targets near/hit · agent review-by dates
+          </span>
         </div>
 
         {loading ? (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true" aria-label="Loading targets">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true">
             {Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="rounded-lg border border-gray-100 bg-gray-50/80 p-3 animate-pulse">
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <div className="h-4 w-24 rounded bg-gray-200" />
-                  <div className="h-5 w-14 rounded-full bg-gray-200" />
-                </div>
-                <div className="h-3 w-full rounded bg-gray-200 mb-1.5" />
+                <div className="h-4 w-28 rounded bg-gray-200 mb-2" />
+                <div className="h-3 w-full rounded bg-gray-200 mb-1" />
                 <div className="h-3 w-2/3 rounded bg-gray-200" />
               </div>
             ))}
           </div>
-        ) : targetAlerts.length === 0 ? (
-          <p className="text-xs text-gray-500 py-1">No target prices have been reached or are currently within 5% proximity.</p>
+        ) : !monitorCards || monitorCards.length === 0 ? (
+          <p className="text-xs text-gray-500 py-1">
+            No target proximity alerts and no review dates set. Set targets / review-by on Manage.
+          </p>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {targetAlerts.map((coin) => {
-              const isReached = coin.alertType === "reached";
-              const isHigh = coin.targetType === "high";
+            {monitorCards.map((card) => {
+              const hit =
+                card.high?.alertType === "reached" || card.low?.alertType === "reached";
+              const reviewU = card.review?.urgency;
+              const border =
+                hit || reviewU === "overdue"
+                  ? "border-rose-200 bg-rose-50/40"
+                  : reviewU === "today"
+                    ? "border-amber-200 bg-amber-50/50"
+                    : "border-gray-200 bg-white hover:shadow-md";
+
+              const reviewLabel = card.review
+                ? card.review.urgency === "overdue"
+                  ? `${Math.abs(card.review.daysUntil)}d overdue`
+                  : card.review.urgency === "today"
+                    ? "Review today"
+                    : card.review.daysUntil === 1
+                      ? "Tomorrow"
+                      : `In ${card.review.daysUntil}d`
+                : null;
 
               return (
                 <div
-                  key={coin.cardKey}
-                  className={`rounded-lg border p-3 transition-all hover:shadow-md ${
-                    isReached
-                      ? "border-amber-300 bg-amber-50/60 shadow-sm"
-                      : isHigh
-                      ? "border-green-200 bg-green-50/40"
-                      : "border-red-200 bg-red-50/40"
-                  }`}
+                  key={card.symbol}
+                  className={`rounded-lg border p-3 transition-all ${border}`}
                 >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-bold text-gray-900 text-sm">{coin.symbol}</span>
-                    <span
-                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-extrabold tracking-wide uppercase ${
-                        isReached
-                          ? "bg-amber-600 text-white shadow-xs"
-                          : isHigh
-                          ? "bg-green-100 text-green-800 border border-green-300"
-                          : "bg-red-100 text-red-800 border border-red-300"
-                      }`}
-                    >
-                      {isReached && <span className="animate-pulse">🎯</span>}
-                      {isReached ? "Target Reached" : isHigh ? "Tgt High" : "Tgt Low"}
-                    </span>
-                  </div>
-
-                  <div className="text-xs space-y-1 mb-2">
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Current Price:</span>
-                      <span className="font-semibold text-gray-900">{formatPhp(coin.currentPrice)}</span>
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="min-w-0">
+                      <div className="text-sm font-bold text-gray-900 truncate">
+                        {card.name}{" "}
+                        <span className="font-mono text-[10px] font-semibold text-gray-500">
+                          {card.symbol}
+                        </span>
+                      </div>
+                      {card.currentPrice != null && (
+                        <div className="text-[11px] text-gray-600 mt-0.5">
+                          Price{" "}
+                          <span className="font-semibold text-gray-900">
+                            {formatPhp(card.currentPrice)}
+                          </span>
+                        </div>
+                      )}
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Target ({coin.targetType.toUpperCase()}):</span>
-                      <span className="font-semibold text-gray-900">{formatPhp(coin.targetPrice)}</span>
-                    </div>
-                  </div>
-
-                  <div className="mt-2 flex items-center justify-between border-t border-gray-200/80 pt-2 text-xs">
-                    <span
-                      className={`font-semibold ${
-                        isReached
-                          ? "text-amber-800"
-                          : isHigh
-                          ? "text-green-700"
-                          : "text-red-700"
-                      }`}
-                    >
-                      {coin.status}
-                    </span>
                     <Link
-                      href={`/chart?symbol=${coin.symbol}`}
-                      className="text-xs font-bold text-brand-600 hover:text-brand-800 underline"
+                      href={`/chart?symbol=${encodeURIComponent(card.symbol)}`}
+                      className="shrink-0 text-[11px] font-bold text-brand-600 hover:underline"
                     >
-                      View Chart →
+                      Spot →
                     </Link>
+                  </div>
+
+                  <div className="space-y-1.5 text-[11px]">
+                    {card.high && (
+                      <div className="flex justify-between gap-2 rounded-md bg-emerald-50/80 border border-emerald-100 px-2 py-1">
+                        <span className="text-emerald-800 font-semibold">
+                          High{" "}
+                          {card.high.alertType === "reached"
+                            ? "HIT"
+                            : card.high.distance <= 5
+                              ? "near"
+                              : "target"}
+                        </span>
+                        <span className="font-mono text-gray-900">
+                          {formatPhp(card.high.targetPrice)}
+                          {card.high.alertType !== "reached" && (
+                            <span className="text-gray-500">
+                              {" "}
+                              · {card.high.distance.toFixed(1)}% away
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    )}
+                    {card.low && (
+                      <div className="flex justify-between gap-2 rounded-md bg-rose-50/80 border border-rose-100 px-2 py-1">
+                        <span className="text-rose-800 font-semibold">
+                          Low{" "}
+                          {card.low.alertType === "reached"
+                            ? "HIT"
+                            : card.low.distance <= 5
+                              ? "near"
+                              : "target"}
+                        </span>
+                        <span className="font-mono text-gray-900">
+                          {formatPhp(card.low.targetPrice)}
+                          {card.low.alertType !== "reached" && (
+                            <span className="text-gray-500">
+                              {" "}
+                              · {card.low.distance.toFixed(1)}% away
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    )}
+                    {card.review && (
+                      <div
+                        className={`flex justify-between gap-2 rounded-md border px-2 py-1 ${
+                          card.review.urgency === "overdue"
+                            ? "bg-rose-100 border-rose-200"
+                            : card.review.urgency === "today"
+                              ? "bg-amber-100 border-amber-200"
+                              : "bg-indigo-50 border-indigo-100"
+                        }`}
+                      >
+                        <span className="font-semibold text-indigo-950">
+                          Review by {card.review.reviewUntil}
+                        </span>
+                        <span className="font-bold text-indigo-900">{reviewLabel}</span>
+                      </div>
+                    )}
+                    {!card.high && !card.low && !card.review && (
+                      <span className="text-gray-400">No flags</span>
+                    )}
                   </div>
                 </div>
               );
@@ -406,76 +461,6 @@ export default function HomeTable() {
           </div>
         )}
       </div>
-
-
-      {/* Agent review dates — set on Manage from agent "valid until / review by" */}
-      {!loading && reviewSchedule && reviewSchedule.length > 0 && (
-        <div className="mb-6 rounded-lg border border-indigo-100 bg-white p-4 shadow-sm">
-          <div className="mb-3 flex items-center justify-between flex-wrap gap-2">
-            <h2 className="text-sm font-bold uppercase tracking-wider text-indigo-900">
-              📅 Review schedule
-            </h2>
-            <span className="text-[11px] text-gray-500">
-              Agent valid-until / review-by · set on Manage
-            </span>
-          </div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {reviewSchedule.map((row) => {
-              const style =
-                row.urgency === "overdue"
-                  ? "border-rose-300 bg-rose-50"
-                  : row.urgency === "today"
-                    ? "border-amber-300 bg-amber-50"
-                    : row.urgency === "soon"
-                      ? "border-indigo-200 bg-indigo-50/70"
-                      : "border-gray-200 bg-gray-50";
-              const badge =
-                row.urgency === "overdue"
-                  ? "bg-rose-600 text-white"
-                  : row.urgency === "today"
-                    ? "bg-amber-500 text-white"
-                    : row.urgency === "soon"
-                      ? "bg-indigo-600 text-white"
-                      : "bg-gray-200 text-gray-700";
-              const label =
-                row.urgency === "overdue"
-                  ? `${Math.abs(row.daysUntil)}d overdue`
-                  : row.urgency === "today"
-                    ? "Today"
-                    : row.daysUntil === 1
-                      ? "Tomorrow"
-                      : `In ${row.daysUntil}d`;
-              return (
-                <div
-                  key={row.symbol}
-                  className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 ${style}`}
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-sm font-bold text-gray-900 truncate">{row.name}</span>
-                      <span className="text-[10px] font-mono text-gray-500">{row.symbol}</span>
-                    </div>
-                    <div className="text-[11px] text-gray-600 mt-0.5">
-                      Review by <span className="font-semibold font-mono">{row.reviewUntil}</span>
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-end gap-1 shrink-0">
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${badge}`}>
-                      {label}
-                    </span>
-                    <Link
-                      href={`/chart?symbol=${encodeURIComponent(row.symbol)}`}
-                      className="text-[10px] font-semibold text-purple-700 hover:underline"
-                    >
-                      Spot →
-                    </Link>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* Mobile chip filter */}
       {!loading && allCoins.length > 0 && (

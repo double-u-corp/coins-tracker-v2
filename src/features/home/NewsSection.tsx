@@ -3,7 +3,6 @@ import AlertBanner from "@/components/AlertBanner";
 import { useNewsLogic } from "./useNewsLogic";
 import { isPriceMoveSignalHeadline } from "./priceMoveSignals";
 
-/** Strip fences and turn markdown links into anchors — readable + clickable. */
 function stripFences(raw: string): string {
   let s = (raw || "").trim();
   s = s.replace(/^```(?:markdown|md)?\s*/i, "");
@@ -18,9 +17,7 @@ function linkifyLine(line: string): React.ReactNode[] {
   let m: RegExpExecArray | null;
   let key = 0;
   while ((m = re.exec(line)) !== null) {
-    if (m.index > last) {
-      nodes.push(boldify(line.slice(last, m.index), key++));
-    }
+    if (m.index > last) nodes.push(boldify(line.slice(last, m.index), key++));
     if (m[1] && m[2]) {
       nodes.push(
         <a
@@ -114,6 +111,10 @@ const SENTIMENT_STYLES: Record<string, string> = {
   neutral: "bg-gray-100 text-gray-700",
 };
 
+type RangeKey = "since_last" | "1" | "3" | "7";
+
+type Outlet = { id: string; host: string; label: string };
+
 function formatDateTime(iso: string): string {
   try {
     return new Date(iso).toLocaleString(undefined, {
@@ -125,21 +126,42 @@ function formatDateTime(iso: string): string {
   }
 }
 
-type Channel = "web" | "social";
-
-/** Market Signals: selectable watchlist Tavily/AI news + cron RSS signals */
+/** Market Signals: core-outlet news (Tavily) + cron RSS */
 export default function NewsSection({ refreshSignal }: NewsSectionProps) {
   const { items, loading, loadingMore, error, hasMore, loadMore } = useNewsLogic(refreshSignal);
 
-  const [allTickers, setAllTickers] = useState<string[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [channel, setChannel] = useState<Channel>("web");
   const [watchMd, setWatchMd] = useState("");
   const [watchUpdated, setWatchUpdated] = useState<number | null>(null);
+  const [lastScrapedAt, setLastScrapedAt] = useState<number | null>(null);
+  const [alreadyScrapedToday, setAlreadyScrapedToday] = useState(false);
+  const [range, setRange] = useState<RangeKey>("since_last");
+  const [outlets, setOutlets] = useState<Outlet[]>([]);
   const [watchLoading, setWatchLoading] = useState(true);
   const [watchRefreshing, setWatchRefreshing] = useState(false);
   const [watchError, setWatchError] = useState<string | null>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [infoMsg, setInfoMsg] = useState<string | null>(null);
+  const [hitCounts, setHitCounts] = useState<Record<string, number>>({});
+
+  const applyPayload = (data: {
+    markdown?: string;
+    updatedAt?: number | null;
+    lastScrapedAt?: number | null;
+    range?: RangeKey;
+    outlets?: Outlet[];
+    alreadyScrapedToday?: boolean;
+    message?: string;
+    skipped?: boolean;
+    outletHitCounts?: Record<string, number>;
+  }) => {
+    setWatchMd(data.markdown || "");
+    setWatchUpdated(data.updatedAt ?? null);
+    setLastScrapedAt(data.lastScrapedAt ?? null);
+    setAlreadyScrapedToday(Boolean(data.alreadyScrapedToday));
+    if (data.range) setRange(data.range);
+    if (Array.isArray(data.outlets)) setOutlets(data.outlets);
+    if (data.message) setInfoMsg(data.message);
+    if (data.outletHitCounts) setHitCounts(data.outletHitCounts);
+  };
 
   const loadWatchlist = useCallback(async () => {
     setWatchLoading(true);
@@ -148,64 +170,41 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
       const res = await fetch("/api/watchlist-news");
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
-      setWatchMd(data.markdown || "");
-      setWatchUpdated(data.updatedAt ?? null);
-      const tickers: string[] = Array.isArray(data.tickers) ? data.tickers : [];
-      setAllTickers(tickers);
-      if (Array.isArray(data.lastSymbols) && data.lastSymbols.length > 0) {
-        setSelected(data.lastSymbols);
-      } else if (tickers.length && selected.length === 0) {
-        const defaults = ["SOL", "ONDO", "TX"].filter((t) => tickers.includes(t));
-        setSelected(defaults.length ? defaults : tickers.slice(0, 3));
-      }
-      if (data.lastChannel === "social" || data.lastChannel === "web") {
-        setChannel(data.lastChannel);
-      }
+      applyPayload(data);
+      setInfoMsg(null);
     } catch (err) {
       setWatchError((err as Error).message);
     } finally {
       setWatchLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only hydrate selection once from cache
   }, []);
 
   useEffect(() => {
     void loadWatchlist();
   }, [loadWatchlist]);
 
-  const toggleTicker = (t: string) => {
-    setSelected((prev) => {
-      if (prev.includes(t)) return prev.filter((x) => x !== t);
-      if (prev.length >= 8) return prev; // hard cap matches API
-      return [...prev, t];
-    });
-  };
-
-  const refreshWatchlist = useCallback(async () => {
-    if (selected.length === 0) {
-      setWatchError("Select at least one coin");
-      return;
-    }
-    setWatchRefreshing(true);
-    setWatchError(null);
-    try {
-      const res = await fetch("/api/watchlist-news", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbols: selected, channel }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `Refresh failed (${res.status})`);
-      setWatchMd(data.markdown || "");
-      setWatchUpdated(data.updatedAt ?? null);
-      if (Array.isArray(data.tickers)) setAllTickers(data.tickers);
-      if (Array.isArray(data.lastSymbols)) setSelected(data.lastSymbols);
-    } catch (err) {
-      setWatchError((err as Error).message);
-    } finally {
-      setWatchRefreshing(false);
-    }
-  }, [selected, channel]);
+  const scan = useCallback(
+    async (force: boolean) => {
+      setWatchRefreshing(true);
+      setWatchError(null);
+      setInfoMsg(null);
+      try {
+        const res = await fetch("/api/watchlist-news", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ range, force }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `Scan failed (${res.status})`);
+        applyPayload(data);
+      } catch (err) {
+        setWatchError((err as Error).message);
+      } finally {
+        setWatchRefreshing(false);
+      }
+    },
+    [range]
+  );
 
   const articleItems = items.filter((item) => !isPriceMoveSignalHeadline(item.headline));
 
@@ -218,119 +217,140 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
       <div className="rounded-lg border border-teal-100 bg-white p-4 shadow-sm">
         <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
           <div>
-            <h3 className="text-sm font-bold text-teal-900">Watchlist news (Tavily / AI)</h3>
-            <p className="text-[11px] text-slate-500">
-              Pick coins · up to 8 · ~10 results · names disambiguated (e.g. TRUMP = coin, not
-              president). Neutral — not a buy signal.
+            <h3 className="text-sm font-bold text-teal-900">Core outlet news (Tavily / AI)</h3>
+            <p className="text-[11px] text-slate-500 max-w-xl">
+              Default sites only — not per-coin search. One scan per Manila day is enough; we skip
+              re-scrape unless you force. Neutral summary — not a buy signal.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => void refreshWatchlist()}
-            disabled={watchRefreshing || selected.length === 0}
-            className="rounded-md border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-800 hover:bg-teal-100 disabled:opacity-50"
-          >
-            {watchRefreshing ? "Scanning…" : "↻ Scan selected"}
-          </button>
-        </div>
-
-        {/* Channel */}
-        <div className="mb-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setChannel("web")}
-            className={`rounded-md border px-2.5 py-1 text-[11px] font-semibold ${
-              channel === "web"
-                ? "border-teal-600 bg-teal-600 text-white"
-                : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            🌐 Web (news)
-          </button>
-          <button
-            type="button"
-            onClick={() => setChannel("social")}
-            className={`rounded-md border px-2.5 py-1 text-[11px] font-semibold ${
-              channel === "social"
-                ? "border-sky-600 bg-sky-600 text-white"
-                : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            💬 Social (X / LinkedIn / Reddit)
-          </button>
-        </div>
-
-        {/* Coin multi-select */}
-        <div className="mb-3">
-          <button
-            type="button"
-            onClick={() => setPickerOpen((o) => !o)}
-            className="w-full sm:w-auto rounded-md border border-gray-300 bg-gray-50 px-3 py-1.5 text-xs font-semibold text-gray-800 hover:bg-gray-100"
-          >
-            {pickerOpen ? "Hide coins ▲" : "Select coins ▼"}{" "}
-            <span className="font-normal text-gray-500">
-              ({selected.length}/8)
-              {selected.length > 0 ? `: ${selected.join(", ")}` : ""}
-            </span>
-          </button>
-          {pickerOpen && (
-            <div className="mt-2 max-h-40 overflow-y-auto rounded-md border border-gray-200 bg-white p-2 flex flex-wrap gap-1.5">
-              {allTickers.map((t) => {
-                const on = selected.includes(t);
-                return (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => toggleTicker(t)}
-                    className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
-                      on
-                        ? "border-teal-600 bg-teal-50 text-teal-900"
-                        : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
-                    }`}
-                  >
-                    {on ? "✓ " : ""}
-                    {t}
-                  </button>
-                );
-              })}
-              {allTickers.length === 0 && (
-                <span className="text-xs text-gray-400">Loading coin list…</span>
-              )}
-            </div>
-          )}
-          <div className="mt-1.5 flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              className="text-[10px] font-semibold text-teal-700 hover:underline"
-              onClick={() =>
-                setSelected(
-                  ["BTC", "ETH", "SOL", "ONDO", "TX"].filter((t) => allTickers.includes(t)).slice(0, 8)
-                )
-              }
+              onClick={() => void scan(false)}
+              disabled={watchRefreshing}
+              className="rounded-md border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-800 hover:bg-teal-100 disabled:opacity-50"
             >
-              Quick: majors + ONDO/TX
+              {watchRefreshing
+                ? "Scanning…"
+                : alreadyScrapedToday
+                  ? "↻ Use cache / scan"
+                  : "↻ Scan outlets"}
             </button>
             <button
               type="button"
-              className="text-[10px] font-semibold text-gray-500 hover:underline"
-              onClick={() => setSelected([])}
+              onClick={() => void scan(true)}
+              disabled={watchRefreshing}
+              title="Ignore same-day skip and pull fresh"
+              className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             >
-              Clear
+              Force scan
             </button>
           </div>
         </div>
 
+        {/* Outlets */}
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {(outlets.length
+            ? outlets
+            : [
+                { id: "coindesk", host: "coindesk.com", label: "CoinDesk" },
+                { id: "theblock", host: "theblock.co", label: "The Block" },
+                { id: "cointelegraph", host: "cointelegraph.com", label: "Cointelegraph" },
+                { id: "decrypt", host: "decrypt.co", label: "Decrypt" },
+                { id: "blockworks", host: "blockworks.co", label: "Blockworks" },
+              ]
+          ).map((o) => {
+            const n = hitCounts[o.label];
+            return (
+              <span
+                key={o.id}
+                className="rounded-full border border-teal-100 bg-teal-50/80 px-2 py-0.5 text-[10px] font-semibold text-teal-900"
+                title={o.host}
+              >
+                {o.label}
+                {typeof n === "number" ? ` · ${n}` : ""}
+              </span>
+            );
+          })}
+          <a
+            href="https://cryptoslate.com/top-news/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100 hover:underline"
+            title="Open CryptoSlate top news (not auto-scraped)"
+          >
+            CryptoSlate top-news ↗
+          </a>
+        </div>
+
+        {/* Date range */}
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-semibold text-gray-600">Window:</span>
+          {(
+            [
+              ["since_last", "Since last scrape"],
+              ["1", "1 day"],
+              ["3", "3 days"],
+              ["7", "7 days"],
+            ] as [RangeKey, string][]
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setRange(key)}
+              className={`rounded-md border px-2.5 py-1 text-[11px] font-semibold ${
+                range === key
+                  ? "border-teal-600 bg-teal-600 text-white"
+                  : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {lastScrapedAt && (
+          <p className="mb-2 text-[11px] text-slate-500">
+            Last scrape:{" "}
+            <span className="font-semibold text-slate-700">
+              {new Date(lastScrapedAt).toLocaleString(undefined, {
+                dateStyle: "medium",
+                timeStyle: "short",
+              })}
+            </span>
+            {alreadyScrapedToday && (
+              <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900">
+                Already scraped today
+              </span>
+            )}
+          </p>
+        )}
+
+        {infoMsg && (
+          <p className="mb-2 text-[11px] text-teal-800 bg-teal-50 border border-teal-100 rounded-md px-2 py-1.5">
+            {infoMsg}
+          </p>
+        )}
         {watchError && <AlertBanner variant="error" message={watchError} />}
 
-        {watchLoading ? (
-          <div className="space-y-2 animate-pulse" aria-busy="true">
-            <div className="h-4 w-2/3 rounded bg-slate-100" />
-            <div className="h-3 w-full rounded bg-slate-100" />
-            <div className="h-3 w-5/6 rounded bg-slate-100" />
+        {(watchLoading || watchRefreshing) ? (
+          <div className="space-y-3" aria-busy="true" aria-label="Loading outlet news">
+            <div className="flex items-center gap-2 text-xs font-semibold text-teal-800">
+              <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-teal-600 border-t-transparent" />
+              {watchRefreshing ? "Scanning outlets…" : "Loading…"}
+            </div>
+            <div className="space-y-2 animate-pulse">
+              <div className="h-4 w-2/3 rounded bg-slate-100" />
+              <div className="h-3 w-full rounded bg-slate-100" />
+              <div className="h-3 w-5/6 rounded bg-slate-100" />
+              <div className="h-3 w-4/5 rounded bg-slate-100" />
+              <div className="h-8 w-full rounded-md bg-slate-50 border border-slate-100" />
+              <div className="h-8 w-full rounded-md bg-slate-50 border border-slate-100" />
+            </div>
           </div>
         ) : !watchMd ? (
           <p className="text-xs text-slate-500">
-            Select coins, choose Web or Social, then <span className="font-semibold">Scan selected</span>.
+            No outlet news yet. Pick a window and <span className="font-semibold">Scan outlets</span>.
           </p>
         ) : (
           <WatchlistBody text={watchMd} />
@@ -352,7 +372,7 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
         {error && <AlertBanner variant="error" message={`Failed to load signals: ${error}`} />}
 
         {loading ? (
-          <ul className="space-y-3" aria-busy="true" aria-label="Loading news">
+          <ul className="space-y-3" aria-busy="true">
             {Array.from({ length: 3 }).map((_, i) => (
               <li
                 key={i}

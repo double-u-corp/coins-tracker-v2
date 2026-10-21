@@ -3,123 +3,100 @@ import prisma from "@/lib/prisma";
 
 const PROMPT_ID = "watchlist-market-signals";
 const CATEGORY = "WatchlistNews";
-const MAX_RESULTS = 10;
-const MAX_TICKERS = 8;
+const MAX_RESULTS = 12;
+/** Per-outlet cap so one site (e.g. Decrypt) cannot fill the whole list. */
+const PER_OUTLET = 2;
 
-type SearchChannel = "web" | "social";
+/** Core high-signal outlets. */
+export const CORE_OUTLETS = [
+  { id: "coindesk", host: "coindesk.com", label: "CoinDesk" },
+  { id: "theblock", host: "theblock.co", label: "The Block" },
+  { id: "cointelegraph", host: "cointelegraph.com", label: "Cointelegraph" },
+  { id: "decrypt", host: "decrypt.co", label: "Decrypt" },
+  { id: "blockworks", host: "blockworks.co", label: "Blockworks" },
+  // CryptoSlate: not scraped — UI links to https://cryptoslate.com/top-news/
+] as const;
+
+type RangeKey = "since_last" | "1" | "3" | "7";
+
+type Meta = {
+  range?: RangeKey;
+  scrapedAt?: string;
+  windowStart?: string;
+  outletHosts?: string[];
+  seenUrls?: string[];
+  outletHitCounts?: Record<string, number>;
+};
 
 type CacheBody = {
   markdown: string;
   updatedAt: number | null;
-  /** All monitored base tickers (for multi-select UI). */
-  tickers: string[];
-  /** Last search selection. */
-  lastSymbols?: string[];
-  lastChannel?: SearchChannel;
+  lastScrapedAt: number | null;
+  range: RangeKey;
+  outlets: { id: string; host: string; label: string }[];
+  alreadyScrapedToday: boolean;
+  skipped?: boolean;
+  message?: string;
+  outletHitCounts?: Record<string, number>;
 };
 
 type ErrorBody = { error: string };
 
-function baseTicker(symbol: string): string {
-  const s = (symbol || "").trim().toUpperCase();
-  if (s.endsWith("PHP") && s.length > 3) return s.slice(0, -3);
-  return s;
-}
-
-/** Same disambiguation spirit as Catalysts — crypto meaning, not presidents/indexes. */
-function formatTokenForSearch(token: string): string {
-  const base = baseTicker(token);
-  switch (base) {
-    case "TX":
-      return "TX (txEcosystem / Coreum Sologenic crypto token)";
-    case "POL":
-      return "POL (Polygon formerly MATIC crypto)";
-    case "VIRTUAL":
-      return "VIRTUAL (Virtuals Protocol AI agent token on Base crypto — not the English word virtual)";
-    case "SPX":
-      return "SPX (SPX6900 meme coin crypto — not the S&P 500 index)";
-    case "TRUMP":
-      return "TRUMP (official Trump meme coin on Solana crypto token — not political news about the president alone)";
-    case "HYPE":
-      return "HYPE (Hyperliquid token crypto)";
-    case "RON":
-      return "RON (Ronin Axie Infinity token crypto)";
-    case "GRAM":
-      return "GRAM (Telegram TON related crypto token — not unit of mass)";
-    case "UNI":
-      return "UNI (Uniswap token crypto)";
-    case "LINK":
-      return "LINK (Chainlink crypto)";
-    case "ENA":
-      return "ENA (Ethena crypto)";
-    case "XAUT":
-      return "XAUT (Tether Gold crypto)";
-    case "ONDO":
-      return "ONDO (Ondo Finance RWA crypto)";
-    case "SKY":
-      return "SKY (Sky protocol MakerDAO related crypto)";
-    case "SOL":
-      return "SOL (Solana blockchain crypto)";
-    case "SUI":
-      return "SUI (Sui blockchain crypto)";
-    case "AAVE":
-      return "AAVE (Aave DeFi crypto)";
-    case "BCH":
-      return "BCH (Bitcoin Cash crypto)";
-    case "XLM":
-      return "XLM (Stellar crypto)";
-    case "ADA":
-      return "ADA (Cardano crypto)";
-    case "XRP":
-      return "XRP (Ripple crypto)";
-    case "BNB":
-      return "BNB (BNB Chain crypto)";
-    case "BTC":
-      return "BTC (Bitcoin crypto)";
-    case "ETH":
-      return "ETH (Ethereum crypto)";
-    default:
-      return `${base} (crypto token)`;
-  }
-}
-
-const SEARCH_DISAMBIGUATORS: Record<string, string> = {
-  TX: "txEcosystem Coreum Sologenic crypto",
-  SPX: "SPX6900 meme coin crypto",
-  TRUMP: "TRUMP token Solana meme coin crypto -president -election",
-  UNI: "Uniswap UNI token crypto",
-  GRAM: "Telegram GRAM TON crypto token",
-  SOL: "Solana SOL blockchain crypto",
-  HYPE: "Hyperliquid HYPE token crypto",
-  VIRTUAL: "Virtuals Protocol VIRTUAL AI agent Base crypto",
-  RON: "Ronin Axie RON crypto",
-  POL: "Polygon POL MATIC crypto",
-  SKY: "Sky protocol MakerDAO SKY crypto",
-  LINK: "Chainlink LINK crypto",
-  ONDO: "Ondo Finance ONDO RWA crypto",
-  XAUT: "Tether Gold XAUT crypto",
-  ENA: "Ethena ENA crypto",
-  SUI: "Sui SUI blockchain crypto",
-  AAVE: "Aave AAVE DeFi crypto",
-  BCH: "Bitcoin Cash BCH crypto",
+type TavilyHit = {
+  title: string;
+  content: string;
+  url: string;
+  host: string;
+  label: string;
 };
 
-function buildSearchQuery(tickers: string[], channel: SearchChannel): string {
-  const parts = tickers.map((t) => {
-    const base = baseTicker(t);
-    const dis = SEARCH_DISAMBIGUATORS[base] || `${base} crypto token`;
-    return dis;
-  });
-  const core = parts.join(" OR ");
-  if (channel === "social") {
-    // Tavily still hits the open web; we bias query toward social/discussion sources
-    return `(${core}) (site:x.com OR site:twitter.com OR site:linkedin.com OR site:reddit.com) crypto news discussion last week`;
-  }
-  // Pure web / news-style (Google-like via Tavily)
-  return `(${core}) crypto news last 7 days -presale -giveaway`;
+function manilaDayKey(d = new Date()): string {
+  return new Date(d.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
-async function fetchTavily(query: string, channel: SearchChannel): Promise<string> {
+function parseMeta(raw: string | undefined | null): { meta: Meta; body: string } {
+  if (!raw) return { meta: {}, body: "" };
+  if (raw.startsWith("<!--meta:")) {
+    try {
+      const end = raw.indexOf("-->");
+      const meta = JSON.parse(raw.slice(9, end)) as Meta;
+      const body = raw.slice(end + 3).replace(/^\n/, "");
+      return { meta, body };
+    } catch {
+      return { meta: {}, body: raw };
+    }
+  }
+  return { meta: {}, body: raw };
+}
+
+function rangeToDays(range: RangeKey, lastScrapedAt: number | null): number {
+  if (range === "1") return 1;
+  if (range === "3") return 3;
+  if (range === "7") return 7;
+  if (lastScrapedAt) {
+    const hours = (Date.now() - lastScrapedAt) / 3_600_000;
+    const days = Math.ceil(hours / 24);
+    return Math.min(7, Math.max(1, days));
+  }
+  return 2;
+}
+
+function hostFromUrl(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * One Tavily call restricted to a single outlet via include_domains.
+ * Avoids the old single OR site: query that often returned only Decrypt.
+ */
+async function fetchOutlet(
+  outlet: (typeof CORE_OUTLETS)[number],
+  days: number
+): Promise<TavilyHit[]> {
   const tavilyApiKey = process.env.TAVILY_API_KEY;
   if (!tavilyApiKey) throw new Error("TAVILY_API_KEY is missing.");
 
@@ -128,62 +105,119 @@ async function fetchTavily(query: string, channel: SearchChannel): Promise<strin
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       api_key: tavilyApiKey,
-      query,
-      topic: channel === "social" ? "general" : "news",
+      query: `crypto OR bitcoin OR ethereum OR regulation OR ETF OR exchange news`,
+      topic: "news",
       search_depth: "basic",
-      days: channel === "social" ? 7 : 5,
-      include_answer: true,
-      max_results: MAX_RESULTS,
+      days,
+      include_answer: false,
+      max_results: PER_OUTLET,
+      include_domains: [outlet.host],
     }),
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Tavily error: ${errorText}`);
+    // Soft-fail one outlet so others still return
+    console.error(`Tavily ${outlet.host}:`, await response.text());
+    return [];
   }
 
   const data = await response.json();
-  const results = (data.results || []).slice(0, MAX_RESULTS);
-  const directAnswer = data.answer ? `Direct Summary: ${data.answer}\n\n` : "";
-  const snippets = results
+  const results = (data.results || []) as {
+    title?: string;
+    content?: string;
+    url?: string;
+  }[];
+
+  return results
+    .filter((r) => r.url && r.title)
+    .slice(0, PER_OUTLET)
+    .map((r) => ({
+      title: r.title || "",
+      content: r.content || "",
+      url: r.url!,
+      host: hostFromUrl(r.url!) || outlet.host,
+      label: outlet.label,
+    }));
+}
+
+/** Parallel per-outlet fetch, then merge (max ~12). */
+async function fetchAllOutlets(days: number): Promise<{
+  context: string;
+  urls: string[];
+  hitCounts: Record<string, number>;
+}> {
+  const batches = await Promise.all(
+    CORE_OUTLETS.map((o) => fetchOutlet(o, days).catch(() => [] as TavilyHit[]))
+  );
+
+  const hits: TavilyHit[] = [];
+  const seen = new Set<string>();
+  const hitCounts: Record<string, number> = {};
+
+  for (const batch of batches) {
+    for (const h of batch) {
+      const key = h.url.split("?")[0];
+      if (seen.has(key)) continue;
+      seen.add(key);
+      hits.push(h);
+      hitCounts[h.label] = (hitCounts[h.label] || 0) + 1;
+    }
+  }
+
+  const limited = hits.slice(0, MAX_RESULTS);
+  const snippets = limited
     .map(
-      (item: { title?: string; content?: string; url?: string }, i: number) =>
-        `${i + 1}. ${item.title}: ${item.content} (${item.url})`
+      (h, i) =>
+        `${i + 1}. [${h.label}] ${h.title}: ${h.content} (${h.url})`
     )
     .join("\n");
 
-  return `${directAnswer}Results (max ${MAX_RESULTS}):\n${snippets || "(no results)"}`;
+  const coverage = CORE_OUTLETS.map(
+    (o) => `${o.label}: ${hitCounts[o.label] || 0}`
+  ).join(", ");
+
+  return {
+    context:
+      `Outlet coverage this pull: ${coverage}\n\n` +
+      `Results (max ${MAX_RESULTS}, ~${PER_OUTLET}/outlet):\n${snippets || "(no results)"}`,
+    urls: limited.map((h) => h.url),
+    hitCounts,
+  };
 }
 
 async function summarizeWithGroq(
-  tickers: string[],
-  channel: SearchChannel,
-  searchContext: string
+  searchContext: string,
+  days: number,
+  previousUrls: string[],
+  hitCounts: Record<string, number>
 ): Promise<string> {
-  const labels = tickers.map(formatTokenForSearch).join("; ");
-  const channelNote =
-    channel === "social"
-      ? "Prefer posts/discussion from X/Twitter, LinkedIn, Reddit when present in context."
-      : "Prefer mainstream web/news articles (not social chatter) when present in context.";
+  const outletList = CORE_OUTLETS.map((o) => o.label).join(", ");
+  const coverage = CORE_OUTLETS.map(
+    (o) => `${o.label}=${hitCounts[o.label] || 0}`
+  ).join(", ");
+  const dedupeHint =
+    previousUrls.length > 0
+      ? `Prefer NEW items not in: ${previousUrls.slice(0, 12).join(" ")}.`
+      : "Prefer the most recent actionable items.";
 
   const prompt =
-    `Summarize NEWS for these crypto assets only: ${labels}.\n` +
-    `Channel focus: ${channel === "social" ? "social media" : "web/news"}. ${channelNote}\n` +
-    `Rules: NEUTRAL — do not force bullish. Only SEARCH CONTEXT. No invented numbers/dates.\n` +
-    `TRUMP = meme coin token, not political campaign coverage unless the token is named.\n` +
-    `SPX = SPX6900 coin, not S&P 500. VIRTUAL = Virtuals Protocol token.\n` +
+    `Summarize crypto NEWS. Context is pre-fetched from: ${outletList}.\n` +
+    `Hits this pull: ${coverage}. Window ~${days} day(s).\n` +
+    `Rules: NEUTRAL. Only SEARCH CONTEXT. No invented numbers/dates.\n` +
+    `Try to mention MORE THAN ONE outlet when multiple are in context — do not collapse everything to a single site.\n` +
+    `Focus: regulation, ETFs, institutional, exchanges, hacks, major protocol. Filter pure hype/presale.\n` +
+    `${dedupeHint}\n` +
     `Format:\n` +
-    `1) First line: **Sentiment:** 🟢 BULLISH | 🔴 BEARISH | ⚪ NEUTRAL — one sentence\n` +
-    `2) At most ${MAX_RESULTS} bullets total: **TICKER** — fact [Source](url)\n` +
-    `3) Skip tickers with nothing in context.\n` +
-    `4) End with Sources: unique URLs\n` +
-    `5) Plain markdown only — no code fences.`;
+    `1) **Sentiment:** 🟢 BULLISH | 🔴 BEARISH | ⚪ NEUTRAL — one sentence\n` +
+    `2) Up to ${MAX_RESULTS} bullets: **OutletName** — fact [Source](url)\n` +
+    `3) Sources: unique URLs\n` +
+    `4) Plain markdown — no code fences.`;
 
   const groqApiKey = process.env.GROQ_API_KEY;
   if (!groqApiKey) {
     return (
-      `**Sentiment:** ⚪ NEUTRAL — Tavily raw results (Groq not configured)\n\n` +
-      `Selected: ${tickers.join(", ")} · channel: ${channel}\n\n${searchContext}`
+      `**Sentiment:** ⚪ NEUTRAL — Tavily raw (Groq not configured)\n\n` +
+      `Coverage: ${coverage}\n\n${searchContext}`
     );
   }
 
@@ -199,7 +233,7 @@ async function summarizeWithGroq(
         {
           role: "system",
           content:
-            "Extract facts from SEARCH CONTEXT only. Never fabricate. Cap bullets at 10. Neutral stance.",
+            "Extract facts from SEARCH CONTEXT only. Never fabricate. Cap at 12 bullets. Neutral. Cover multiple outlets when present.",
         },
         {
           role: "user",
@@ -207,7 +241,7 @@ async function summarizeWithGroq(
         },
       ],
       temperature: 0.1,
-      max_tokens: 1200,
+      max_tokens: 1400,
       reasoning_effort: "none",
     }),
   });
@@ -216,13 +250,13 @@ async function summarizeWithGroq(
     const errorData = await response.json().catch(() => ({}));
     throw new Error(
       (errorData as { error?: { message?: string } }).error?.message ||
-        "Failed to summarize watchlist news"
+        "Failed to summarize outlet news"
     );
   }
 
   const data = await response.json();
   const content = data.choices?.[0]?.message?.content;
-  if (!content?.trim()) throw new Error("Empty AI summary for watchlist news");
+  if (!content?.trim()) throw new Error("Empty AI summary");
   return content.trim();
 }
 
@@ -230,34 +264,28 @@ export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse<CacheBody | ErrorBody>
 ) {
+  const outlets = CORE_OUTLETS.map(({ id, host, label }) => ({ id, host, label }));
+
   if (req.method === "GET") {
     try {
       const log = await prisma.catalystLog.findUnique({ where: { promptId: PROMPT_ID } });
-      const coins = await prisma.coin.findMany({
-        select: { symbol: true },
-        orderBy: { symbol: "asc" },
-      });
-      const tickers = coins.map((c) => baseTicker(c.symbol));
-      let lastSymbols: string[] | undefined;
-      let lastChannel: SearchChannel | undefined;
-      // Optional meta stored as JSON prefix comment — parse if present
-      if (log?.response?.startsWith("<!--meta:")) {
-        try {
-          const end = log.response.indexOf("-->");
-          const meta = JSON.parse(log.response.slice(9, end));
-          lastSymbols = meta.symbols;
-          lastChannel = meta.channel;
-        } catch {
-          /* ignore */
-        }
-      }
-      const markdown = log?.response?.replace(/^<!--meta:.*?-->\n?/s, "") || "";
+      const { meta, body } = parseMeta(log?.response);
+      const lastScrapedAt = meta.scrapedAt
+        ? Date.parse(meta.scrapedAt)
+        : log
+          ? new Date(log.updatedAt).getTime()
+          : null;
+      const alreadyScrapedToday =
+        lastScrapedAt != null && manilaDayKey(new Date(lastScrapedAt)) === manilaDayKey();
+
       return res.status(200).json({
-        markdown,
+        markdown: body,
         updatedAt: log ? new Date(log.updatedAt).getTime() : null,
-        tickers,
-        lastSymbols,
-        lastChannel,
+        lastScrapedAt: Number.isFinite(lastScrapedAt) ? lastScrapedAt : null,
+        range: meta.range || "since_last",
+        outlets,
+        alreadyScrapedToday,
+        outletHitCounts: meta.outletHitCounts,
       });
     } catch (err) {
       return res.status(500).json({ error: (err as Error).message });
@@ -270,38 +298,55 @@ export default async function handler(
   }
 
   try {
-    const body = (req.body || {}) as {
-      symbols?: string[];
-      channel?: SearchChannel;
+    const body = (req.body || {}) as { range?: RangeKey; force?: boolean };
+    const range: RangeKey =
+      body.range === "1" || body.range === "3" || body.range === "7" || body.range === "since_last"
+        ? body.range
+        : "since_last";
+    const force = Boolean(body.force);
+
+    const log = await prisma.catalystLog.findUnique({ where: { promptId: PROMPT_ID } });
+    const { meta, body: cachedBody } = parseMeta(log?.response);
+    const lastScrapedAt = meta.scrapedAt
+      ? Date.parse(meta.scrapedAt)
+      : log
+        ? new Date(log.updatedAt).getTime()
+        : null;
+    const alreadyScrapedToday =
+      lastScrapedAt != null && manilaDayKey(new Date(lastScrapedAt)) === manilaDayKey();
+
+    if (!force && alreadyScrapedToday && cachedBody) {
+      return res.status(200).json({
+        markdown: cachedBody,
+        updatedAt: log ? new Date(log.updatedAt).getTime() : null,
+        lastScrapedAt: lastScrapedAt,
+        range: meta.range || range,
+        outlets,
+        alreadyScrapedToday: true,
+        skipped: true,
+        message:
+          "Already scraped today (Manila). Showing cache. Use Force scan for a fresh pull across all outlets.",
+        outletHitCounts: meta.outletHitCounts,
+      });
+    }
+
+    const days = rangeToDays(range, lastScrapedAt);
+    const { context, urls, hitCounts } = await fetchAllOutlets(days);
+    const markdown = await summarizeWithGroq(context, days, meta.seenUrls || [], hitCounts);
+
+    const coverageMsg = CORE_OUTLETS.map(
+      (o) => `${o.label}:${hitCounts[o.label] || 0}`
+    ).join(" · ");
+
+    const newMeta: Meta = {
+      range,
+      scrapedAt: new Date().toISOString(),
+      windowStart: new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10),
+      outletHosts: CORE_OUTLETS.map((o) => o.host),
+      seenUrls: [...new Set([...(meta.seenUrls || []).slice(-30), ...urls])].slice(-50),
+      outletHitCounts: hitCounts,
     };
-    const channel: SearchChannel = body.channel === "social" ? "social" : "web";
-
-    const coins = await prisma.coin.findMany({
-      select: { symbol: true, name: true },
-      orderBy: { symbol: "asc" },
-    });
-    if (coins.length === 0) {
-      return res.status(400).json({ error: "No monitored coins" });
-    }
-
-    const allTickers = [...new Set(coins.map((c) => baseTicker(c.symbol)))];
-    let selected = (body.symbols || [])
-      .map(baseTicker)
-      .filter((t) => allTickers.includes(t));
-    if (selected.length === 0) {
-      // Default: a few liquid names if user selected none
-      selected = allTickers.filter((t) =>
-        ["BTC", "ETH", "SOL", "ONDO", "TX"].includes(t)
-      );
-      if (selected.length === 0) selected = allTickers.slice(0, 5);
-    }
-    selected = selected.slice(0, MAX_TICKERS);
-
-    const query = buildSearchQuery(selected, channel);
-    const searchContext = await fetchTavily(query, channel);
-    let markdown = await summarizeWithGroq(selected, channel, searchContext);
-    const meta = `<!--meta:${JSON.stringify({ symbols: selected, channel })}-->\n`;
-    const stored = meta + markdown;
+    const stored = `<!--meta:${JSON.stringify(newMeta)}-->\n${markdown}`;
 
     await prisma.catalystLog.upsert({
       where: { promptId: PROMPT_ID },
@@ -312,9 +357,13 @@ export default async function handler(
     return res.status(200).json({
       markdown,
       updatedAt: Date.now(),
-      tickers: allTickers,
-      lastSymbols: selected,
-      lastChannel: channel,
+      lastScrapedAt: Date.now(),
+      range,
+      outlets,
+      alreadyScrapedToday: true,
+      skipped: false,
+      message: `Pulled ~${days}d · ${urls.length} links · ${coverageMsg}`,
+      outletHitCounts: hitCounts,
     });
   } catch (err) {
     return res.status(500).json({ error: (err as Error).message });

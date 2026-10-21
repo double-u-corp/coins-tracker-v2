@@ -33,6 +33,16 @@ export interface ReviewScheduleCoin {
   urgency: "overdue" | "today" | "soon" | "later";
 }
 
+/** One Home card per coin: high + low + review date combined. */
+export interface MonitorCoinCard {
+  symbol: string;
+  name: string;
+  currentPrice: number | null;
+  high: TargetAlertCoin | null;
+  low: TargetAlertCoin | null;
+  review: ReviewScheduleCoin | null;
+}
+
 interface PriceUpdateCoin {
   symbol: string;
   name: string;
@@ -299,6 +309,99 @@ export function useHomeLogic() {
     return rows.sort((a, b) => a.daysUntil - b.daysUntil || a.symbol.localeCompare(b.symbol));
   }, [state.coins]);
 
+  const monitorCards = useMemo<MonitorCoinCard[]>(() => {
+    const bySym = new Map<string, MonitorCoinCard>();
+    const coinBySym = new Map(state.coins.map((c) => [c.symbol, c]));
+
+    const ensure = (symbol: string, name: string, currentPrice: number | null) => {
+      let row = bySym.get(symbol);
+      if (!row) {
+        row = { symbol, name, currentPrice, high: null, low: null, review: null };
+        bySym.set(symbol, row);
+      } else if (currentPrice != null && row.currentPrice == null) {
+        row.currentPrice = currentPrice;
+      }
+      return row;
+    };
+
+    /** Attach target levels even when outside the 5% band (for review-date cards). */
+    const fillTargetsFromCoin = (row: MonitorCoinCard) => {
+      const coin = coinBySym.get(row.symbol);
+      if (!coin) return;
+      const current = coin.currentPrice != null ? Number(coin.currentPrice) : null;
+
+      if (!row.high && coin.targetHigh != null && !isNaN(Number(coin.targetHigh))) {
+        const th = Number(coin.targetHigh);
+        const isReached = current != null && (coin.targetHighReached || current >= th);
+        const distPct =
+          current != null && th > 0 ? Math.max(0, ((th - current) / th) * 100) : 0;
+        row.high = {
+          cardKey: `${row.symbol}-high-watch`,
+          symbol: row.symbol,
+          name: row.name,
+          targetType: "high",
+          alertType: isReached ? "reached" : "nearing",
+          targetPrice: th,
+          currentPrice: current ?? 0,
+          distance: distPct,
+          status: isReached
+            ? "Target High Reached!"
+            : distPct <= 5
+              ? `Within ${distPct.toFixed(1)}% of High`
+              : `High target · ${distPct.toFixed(1)}% away`,
+        };
+      }
+
+      if (!row.low && coin.targetLow != null && !isNaN(Number(coin.targetLow))) {
+        const tl = Number(coin.targetLow);
+        const isReached = current != null && (coin.targetLowReached || current <= tl);
+        const distPct =
+          current != null && tl > 0 ? Math.max(0, ((current - tl) / tl) * 100) : 0;
+        row.low = {
+          cardKey: `${row.symbol}-low-watch`,
+          symbol: row.symbol,
+          name: row.name,
+          targetType: "low",
+          alertType: isReached ? "reached" : "nearing",
+          targetPrice: tl,
+          currentPrice: current ?? 0,
+          distance: distPct,
+          status: isReached
+            ? "Target Low Reached!"
+            : distPct <= 5
+              ? `Within ${distPct.toFixed(1)}% of Low`
+              : `Low target · ${distPct.toFixed(1)}% away`,
+        };
+      }
+    };
+
+    for (const a of targetAlerts) {
+      const row = ensure(a.symbol, a.name, a.currentPrice);
+      if (a.targetType === "high") row.high = a;
+      else row.low = a;
+    }
+    for (const r of reviewSchedule) {
+      const row = ensure(r.symbol, r.name, r.currentPrice);
+      row.review = r;
+      // Always show high/low levels on review cards, even if far from 5% band
+      fillTargetsFromCoin(row);
+    }
+
+    const rank = (c: MonitorCoinCard) => {
+      let s = 0;
+      if (c.high?.alertType === "reached" || c.low?.alertType === "reached") s -= 100;
+      if (c.review?.urgency === "overdue") s -= 50;
+      if (c.review?.urgency === "today") s -= 40;
+      if (c.high || c.low) s -= 10;
+      if (c.review) s -= 5;
+      return s;
+    };
+
+    return [...bySym.values()].sort(
+      (a, b) => rank(a) - rank(b) || a.symbol.localeCompare(b.symbol)
+    );
+  }, [targetAlerts, reviewSchedule, state.coins]);
+
   const loadRecentManualRecords = useCallback(async (symbol: string) => {
     setRecentManualLoading(true);
     setRecentManualError(null);
@@ -409,6 +512,7 @@ export function useHomeLogic() {
     coins: filteredCoins,
     targetAlerts,
     reviewSchedule,
+    monitorCards,
     selectedCoins,
     setSelectedCoins,
     portfolio,
