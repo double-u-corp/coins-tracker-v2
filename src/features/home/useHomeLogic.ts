@@ -22,6 +22,17 @@ export interface TargetAlertCoin {
   status: string;
 }
 
+/** Coins with an agent "review by / valid until" date set on Manage. */
+export interface ReviewScheduleCoin {
+  symbol: string;
+  name: string;
+  reviewUntil: string; // YYYY-MM-DD
+  currentPrice: number | null;
+  /** negative = overdue days, 0 = today, positive = days left */
+  daysUntil: number;
+  urgency: "overdue" | "today" | "soon" | "later";
+}
+
 interface PriceUpdateCoin {
   symbol: string;
   name: string;
@@ -259,6 +270,35 @@ export function useHomeLogic() {
     });
   }, [state.coins]);
 
+  const reviewSchedule = useMemo<ReviewScheduleCoin[]>(() => {
+    const today = new Date();
+    const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+
+    const rows: ReviewScheduleCoin[] = [];
+    for (const coin of state.coins) {
+      const raw = coin.reviewUntil;
+      if (!raw) continue;
+      const reviewUntil = String(raw).slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(reviewUntil)) continue;
+      const [y, m, d] = reviewUntil.split("-").map(Number);
+      const reviewUtc = Date.UTC(y, m - 1, d);
+      const daysUntil = Math.round((reviewUtc - todayUtc) / 86_400_000);
+      let urgency: ReviewScheduleCoin["urgency"] = "later";
+      if (daysUntil < 0) urgency = "overdue";
+      else if (daysUntil === 0) urgency = "today";
+      else if (daysUntil <= 3) urgency = "soon";
+      rows.push({
+        symbol: coin.symbol,
+        name: coin.name,
+        reviewUntil,
+        currentPrice: coin.currentPrice,
+        daysUntil,
+        urgency,
+      });
+    }
+    return rows.sort((a, b) => a.daysUntil - b.daysUntil || a.symbol.localeCompare(b.symbol));
+  }, [state.coins]);
+
   const loadRecentManualRecords = useCallback(async (symbol: string) => {
     setRecentManualLoading(true);
     setRecentManualError(null);
@@ -368,6 +408,7 @@ export function useHomeLogic() {
     allCoins: state.coins,
     coins: filteredCoins,
     targetAlerts,
+    reviewSchedule,
     selectedCoins,
     setSelectedCoins,
     portfolio,

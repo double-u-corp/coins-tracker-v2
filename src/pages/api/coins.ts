@@ -76,6 +76,9 @@ async function handleSummary(res: NextApiResponse<SummaryResponse>) {
     const currentPrice = latest?.price ?? null;
     const targetHigh = coin.priceTarget?.targetHigh ?? null;
     const targetLow = coin.priceTarget?.targetLow ?? null;
+    const reviewUntil = coin.priceTarget?.reviewUntil
+      ? coin.priceTarget.reviewUntil.toISOString().slice(0, 10)
+      : null;
 
     let priceDirection: "up" | "down" | "flat" | null = null;
     if (latest && previous) {
@@ -93,6 +96,7 @@ async function handleSummary(res: NextApiResponse<SummaryResponse>) {
       recordedLow: latest?.low ?? null,
       targetHigh,
       targetLow,
+      reviewUntil,
       targetHighReached: targetHigh !== null && currentPrice !== null && currentPrice >= targetHigh,
       targetLowReached: targetLow !== null && currentPrice !== null && currentPrice <= targetLow,
       priceDirection,

@@ -67,6 +67,8 @@ model PriceTarget {
   coin       Coin     @relation(fields: [coinId], references: [id])
   targetHigh Float?
   targetLow  Float?
+  /// Agent review / "valid until" date (date-only, Manila plan tracking)
+  reviewUntil DateTime?
   updatedAt  DateTime @updatedAt
 }
 

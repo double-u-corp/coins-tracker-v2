@@ -26,14 +26,19 @@ function MonitoredCoinCard({
   // Local Display State
   const [savedHigh, setSavedHigh] = useState<number | null>(coin.targetHigh);
   const [savedLow, setSavedLow] = useState<number | null>(coin.targetLow);
+  const [savedReview, setSavedReview] = useState<string | null>(
+    coin.reviewUntil ? String(coin.reviewUntil).slice(0, 10) : null
+  );
 
   // Buffer Edit State
   const [inputHigh, setInputHigh] = useState<string>(savedHigh?.toString() ?? "");
   const [inputLow, setInputLow] = useState<string>(savedLow?.toString() ?? "");
+  const [inputReview, setInputReview] = useState<string>(savedReview ?? "");
 
   const handleCancel = () => {
     setInputHigh(savedHigh?.toString() ?? "");
     setInputLow(savedLow?.toString() ?? "");
+    setInputReview(savedReview ?? "");
     setIsEditing(false);
   };
 
@@ -42,10 +47,10 @@ function MonitoredCoinCard({
     const l = parseFloat(inputLow);
     const validHigh = isNaN(h) ? null : h;
     const validLow = isNaN(l) ? null : l;
+    const validReview = inputReview.trim() ? inputReview.trim().slice(0, 10) : null;
 
     setIsSaving(true);
     try {
-      // Direct API call bypassing the parent's global loadMonitored refresh
       const res = await fetch("/api/targets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -53,6 +58,7 @@ function MonitoredCoinCard({
           symbol: coin.symbol,
           targetHigh: validHigh,
           targetLow: validLow,
+          reviewUntil: validReview,
         }),
       });
 
@@ -60,6 +66,7 @@ function MonitoredCoinCard({
 
       setSavedHigh(validHigh);
       setSavedLow(validLow);
+      setSavedReview(validReview);
       setIsEditing(false);
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 2500);
@@ -183,6 +190,37 @@ function MonitoredCoinCard({
               </span>
             )}
           </div>
+        </div>
+
+        {/* Agent review / valid-until date */}
+        <div className="flex flex-col text-xs font-medium gap-1 pt-1 border-t border-gray-100 mt-1">
+          <span className="text-indigo-800 font-bold">Review by / valid until</span>
+          <p className="text-[10px] text-gray-500 font-normal">
+            From agent note (e.g. valid until / review again by). Shown on Home Target Monitor.
+          </p>
+          {isEditing ? (
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={inputReview}
+                onChange={(e) => setInputReview(e.target.value)}
+                className="w-full rounded-md border border-gray-300 px-2 py-1 text-xs shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
+              {inputReview && (
+                <button
+                  type="button"
+                  onClick={() => setInputReview("")}
+                  className="shrink-0 text-[10px] font-semibold text-gray-500 hover:text-red-600"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          ) : (
+            <span className="font-mono text-sm text-gray-900 font-bold">
+              {savedReview ? savedReview : "—"}
+            </span>
+          )}
         </div>
       </div>
       

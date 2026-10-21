@@ -22,6 +22,8 @@ export const coinSummarySchema = z.object({
   recordedLow: z.number().nullable(),
   targetHigh: z.number().nullable(),
   targetLow: z.number().nullable(),
+  /** ISO date YYYY-MM-DD or full ISO string; null if unset */
+  reviewUntil: z.string().nullable().optional(),
   targetHighReached: z.boolean(),
   targetLowReached: z.boolean(),
   // Direction vs. the previous stored Record, i.e. did this run's price go

@@ -135,6 +135,7 @@ export default function HomeTable() {
     coins,
     allCoins,
     targetAlerts,
+    reviewSchedule,
     selectedCoins,
     setSelectedCoins,
     portfolio,
@@ -405,6 +406,76 @@ export default function HomeTable() {
           </div>
         )}
       </div>
+
+
+      {/* Agent review dates — set on Manage from agent "valid until / review by" */}
+      {!loading && reviewSchedule && reviewSchedule.length > 0 && (
+        <div className="mb-6 rounded-lg border border-indigo-100 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between flex-wrap gap-2">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-indigo-900">
+              📅 Review schedule
+            </h2>
+            <span className="text-[11px] text-gray-500">
+              Agent valid-until / review-by · set on Manage
+            </span>
+          </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {reviewSchedule.map((row) => {
+              const style =
+                row.urgency === "overdue"
+                  ? "border-rose-300 bg-rose-50"
+                  : row.urgency === "today"
+                    ? "border-amber-300 bg-amber-50"
+                    : row.urgency === "soon"
+                      ? "border-indigo-200 bg-indigo-50/70"
+                      : "border-gray-200 bg-gray-50";
+              const badge =
+                row.urgency === "overdue"
+                  ? "bg-rose-600 text-white"
+                  : row.urgency === "today"
+                    ? "bg-amber-500 text-white"
+                    : row.urgency === "soon"
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-200 text-gray-700";
+              const label =
+                row.urgency === "overdue"
+                  ? `${Math.abs(row.daysUntil)}d overdue`
+                  : row.urgency === "today"
+                    ? "Today"
+                    : row.daysUntil === 1
+                      ? "Tomorrow"
+                      : `In ${row.daysUntil}d`;
+              return (
+                <div
+                  key={row.symbol}
+                  className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 ${style}`}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-sm font-bold text-gray-900 truncate">{row.name}</span>
+                      <span className="text-[10px] font-mono text-gray-500">{row.symbol}</span>
+                    </div>
+                    <div className="text-[11px] text-gray-600 mt-0.5">
+                      Review by <span className="font-semibold font-mono">{row.reviewUntil}</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${badge}`}>
+                      {label}
+                    </span>
+                    <Link
+                      href={`/chart?symbol=${encodeURIComponent(row.symbol)}`}
+                      className="text-[10px] font-semibold text-purple-700 hover:underline"
+                    >
+                      Spot →
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Mobile chip filter */}
       {!loading && allCoins.length > 0 && (
