@@ -37,11 +37,11 @@ function formatDateTime(iso: string): string {
 }
 
 const FALLBACK_OUTLETS: Outlet[] = [
-  { id: "coindesk", host: "coindesk.com", label: "CoinDesk" },
   { id: "theblock", host: "theblock.co", label: "The Block" },
   { id: "cointelegraph", host: "cointelegraph.com", label: "Cointelegraph" },
   { id: "decrypt", host: "decrypt.co", label: "Decrypt" },
-  { id: "blockworks", host: "blockworks.co", label: "Blockworks" },
+  { id: "bitcoinmagazine", host: "bitcoinmagazine.com", label: "Bitcoin Magazine" },
+  { id: "dlnews", host: "dlnews.com", label: "DL News" },
 ];
 
 /** Market Signals: outlet news table + cron RSS */
@@ -226,52 +226,55 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
                     Headline
                   </th>
                   <th className="px-3 py-2 font-bold text-slate-600 uppercase tracking-wide whitespace-nowrap">
-                    News date
-                  </th>
-                  <th className="px-3 py-2 font-bold text-slate-600 uppercase tracking-wide whitespace-nowrap">
-                    Scanned
+                    Date
                   </th>
                   <th className="px-3 py-2 font-bold text-slate-600 uppercase tracking-wide w-10">
-                   {" "}
+                    {" "}
                   </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {rows.map((row) => (
-                  <tr key={row.id} className="hover:bg-slate-50/80">
-                    <td className="px-3 py-2 align-top">
-                      <span className="font-semibold text-teal-900">{row.label}</span>
-                      <div className="text-[10px] text-slate-400 font-mono">{row.domain}</div>
-                    </td>
-                    <td className="px-3 py-2 align-top max-w-[28rem]">
-                      <a
-                        href={row.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-medium text-slate-900 underline decoration-dotted hover:text-teal-800"
-                      >
-                        {row.title}
-                      </a>
-                    </td>
-                    <td className="px-3 py-2 align-top whitespace-nowrap font-mono text-slate-700">
-                      {row.newsDate}
-                    </td>
-                    <td className="px-3 py-2 align-top whitespace-nowrap text-slate-500">
-                      {row.scannedAt.slice(0, 10)}
-                    </td>
-                    <td className="px-2 py-2 align-top">
-                      <button
-                        type="button"
-                        onClick={() => void deleteRow(row)}
-                        disabled={deletingId === row.id}
-                        title="Delete this row"
-                        className="rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[11px] font-bold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
-                      >
-                        {deletingId === row.id ? "…" : "✕"}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {rows.map((row) => {
+                  const scannedDay = row.scannedAt.slice(0, 10);
+                  const same = row.newsDate === scannedDay;
+                  return (
+                    <tr key={row.id} className="hover:bg-slate-50/80">
+                      <td className="px-3 py-2 align-top">
+                        <span className="font-semibold text-teal-900">{row.label}</span>
+                        <div className="text-[10px] text-slate-400 font-mono">{row.domain}</div>
+                      </td>
+                      <td className="px-3 py-2 align-top max-w-[28rem]">
+                        <a
+                          href={row.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium text-slate-900 underline decoration-dotted hover:text-teal-800"
+                        >
+                          {row.title}
+                        </a>
+                      </td>
+                      <td className="px-3 py-2 align-top whitespace-nowrap text-slate-700">
+                        <div className="font-mono text-xs">{row.newsDate}</div>
+                        {!same && (
+                          <div className="text-[10px] text-slate-400">
+                            scanned {scannedDay}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-2 py-2 align-top">
+                        <button
+                          type="button"
+                          onClick={() => void deleteRow(row)}
+                          disabled={deletingId === row.id}
+                          title="Delete this row"
+                          className="rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[11px] font-bold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                        >
+                          {deletingId === row.id ? "…" : "✕"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

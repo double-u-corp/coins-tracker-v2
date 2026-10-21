@@ -9,11 +9,12 @@ const PER_OUTLET = 3;
 const RETAIN_DAYS = 14;
 
 export const CORE_OUTLETS = [
-  { id: "coindesk", host: "coindesk.com", label: "CoinDesk" },
   { id: "theblock", host: "theblock.co", label: "The Block" },
   { id: "cointelegraph", host: "cointelegraph.com", label: "Cointelegraph" },
   { id: "decrypt", host: "decrypt.co", label: "Decrypt" },
-  { id: "blockworks", host: "blockworks.co", label: "Blockworks" },
+  // Replaced CoinDesk + Blockworks (unreachable on user network)
+  { id: "bitcoinmagazine", host: "bitcoinmagazine.com", label: "Bitcoin Magazine" },
+  { id: "dlnews", host: "dlnews.com", label: "DL News" },
 ] as const;
 
 export type OutletNewsRow = {
