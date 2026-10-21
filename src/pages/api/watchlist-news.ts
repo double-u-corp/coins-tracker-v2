@@ -1,84 +1,51 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import prisma from "@/lib/prisma";
+import { createHash } from "crypto";
 
 const PROMPT_ID = "watchlist-market-signals";
 const CATEGORY = "WatchlistNews";
-const MAX_RESULTS = 12;
-/** Per-outlet cap so one site (e.g. Decrypt) cannot fill the whole list. */
-const PER_OUTLET = 2;
+const PER_OUTLET = 3;
+/** Keep rows this many days; older can still be deleted manually sooner. */
+const RETAIN_DAYS = 14;
 
-/** Core high-signal outlets. */
 export const CORE_OUTLETS = [
   { id: "coindesk", host: "coindesk.com", label: "CoinDesk" },
   { id: "theblock", host: "theblock.co", label: "The Block" },
   { id: "cointelegraph", host: "cointelegraph.com", label: "Cointelegraph" },
   { id: "decrypt", host: "decrypt.co", label: "Decrypt" },
   { id: "blockworks", host: "blockworks.co", label: "Blockworks" },
-  // CryptoSlate: not scraped — UI links to https://cryptoslate.com/top-news/
 ] as const;
 
-type RangeKey = "since_last" | "1" | "3" | "7";
-
-type Meta = {
-  range?: RangeKey;
-  scrapedAt?: string;
-  windowStart?: string;
-  outletHosts?: string[];
-  seenUrls?: string[];
-  outletHitCounts?: Record<string, number>;
+export type OutletNewsRow = {
+  id: string;
+  url: string;
+  title: string;
+  domain: string;
+  label: string;
+  /** When we first saved this URL */
+  scannedAt: string;
+  /** Best-effort article date YYYY-MM-DD (from URL or scan day) */
+  newsDate: string;
 };
 
-type CacheBody = {
-  markdown: string;
-  updatedAt: number | null;
+type Store = {
+  version: 2;
+  items: OutletNewsRow[];
+  lastScrapedAt?: string;
+};
+
+type OkBody = {
+  items: OutletNewsRow[];
   lastScrapedAt: number | null;
-  range: RangeKey;
   outlets: { id: string; host: string; label: string }[];
-  alreadyScrapedToday: boolean;
-  skipped?: boolean;
+  added?: number;
   message?: string;
-  outletHitCounts?: Record<string, number>;
 };
 
 type ErrorBody = { error: string };
 
-type TavilyHit = {
-  title: string;
-  content: string;
-  url: string;
-  host: string;
-  label: string;
-};
-
-function manilaDayKey(d = new Date()): string {
-  return new Date(d.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
-
-function parseMeta(raw: string | undefined | null): { meta: Meta; body: string } {
-  if (!raw) return { meta: {}, body: "" };
-  if (raw.startsWith("<!--meta:")) {
-    try {
-      const end = raw.indexOf("-->");
-      const meta = JSON.parse(raw.slice(9, end)) as Meta;
-      const body = raw.slice(end + 3).replace(/^\n/, "");
-      return { meta, body };
-    } catch {
-      return { meta: {}, body: raw };
-    }
-  }
-  return { meta: {}, body: raw };
-}
-
-function rangeToDays(range: RangeKey, lastScrapedAt: number | null): number {
-  if (range === "1") return 1;
-  if (range === "3") return 3;
-  if (range === "7") return 7;
-  if (lastScrapedAt) {
-    const hours = (Date.now() - lastScrapedAt) / 3_600_000;
-    const days = Math.ceil(hours / 24);
-    return Math.min(7, Math.max(1, days));
-  }
-  return 2;
+function urlId(url: string): string {
+  return createHash("sha1").update(url.split("?")[0]).digest("hex").slice(0, 16);
 }
 
 function hostFromUrl(url: string): string {
@@ -89,17 +56,77 @@ function hostFromUrl(url: string): string {
   }
 }
 
-/**
- * One Tavily call restricted to a single outlet via include_domains.
- * Avoids the old single OR site: query that often returned only Decrypt.
- */
+/** Pull YYYY-MM-DD from common news URL paths. */
+function newsDateFromUrl(url: string, fallback: string): string {
+  const m = url.match(/\/(20\d{2})[\/\-](\d{1,2})[\/\-](\d{1,2})(?:\/|$)/);
+  if (m) {
+    const y = m[1];
+    const mo = m[2].padStart(2, "0");
+    const d = m[3].padStart(2, "0");
+    return `${y}-${mo}-${d}`;
+  }
+  return fallback;
+}
+
+function manilaYmd(d = new Date()): string {
+  return new Date(d.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function isTodayOrYesterday(newsDate: string, todayManila: string): boolean {
+  const t = new Date(`${todayManila}T12:00:00.000Z`).getTime();
+  const n = new Date(`${newsDate}T12:00:00.000Z`).getTime();
+  if (!Number.isFinite(n)) return true; // keep if unknown → treat as scan day
+  const diffDays = Math.round((t - n) / 86_400_000);
+  return diffDays >= 0 && diffDays <= 1;
+}
+
+function parseStore(raw: string | null | undefined): Store {
+  if (!raw) return { version: 2, items: [] };
+  // New structured store
+  if (raw.startsWith("<!--meta:")) {
+    try {
+      const end = raw.indexOf("-->");
+      const meta = JSON.parse(raw.slice(9, end));
+      if (meta.version === 2 && Array.isArray(meta.items)) {
+        return {
+          version: 2,
+          items: meta.items,
+          lastScrapedAt: meta.lastScrapedAt,
+        };
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+  // Legacy markdown blob — start clean table
+  try {
+    const j = JSON.parse(raw);
+    if (j.version === 2 && Array.isArray(j.items)) return j as Store;
+  } catch {
+    /* ignore */
+  }
+  return { version: 2, items: [] };
+}
+
+function serializeStore(store: Store): string {
+  return `<!--meta:${JSON.stringify(store)}-->\n`;
+}
+
+function pruneOld(items: OutletNewsRow[]): OutletNewsRow[] {
+  const cutoff = Date.now() - RETAIN_DAYS * 86_400_000;
+  return items.filter((it) => {
+    const t = Date.parse(it.scannedAt);
+    return !Number.isFinite(t) || t >= cutoff;
+  });
+}
+
 async function fetchOutlet(
-  outlet: (typeof CORE_OUTLETS)[number],
-  days: number
-): Promise<TavilyHit[]> {
+  outlet: (typeof CORE_OUTLETS)[number]
+): Promise<Omit<OutletNewsRow, "id" | "scannedAt" | "newsDate">[]> {
   const tavilyApiKey = process.env.TAVILY_API_KEY;
   if (!tavilyApiKey) throw new Error("TAVILY_API_KEY is missing.");
 
+  // Fixed ~2 day window: today + yesterday only (Tavily days=2)
   const response = await fetch("https://api.tavily.com/search", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -108,7 +135,7 @@ async function fetchOutlet(
       query: `crypto OR bitcoin OR ethereum OR regulation OR ETF OR exchange news`,
       topic: "news",
       search_depth: "basic",
-      days,
+      days: 2,
       include_answer: false,
       max_results: PER_OUTLET,
       include_domains: [outlet.host],
@@ -116,7 +143,6 @@ async function fetchOutlet(
   });
 
   if (!response.ok) {
-    // Soft-fail one outlet so others still return
     console.error(`Tavily ${outlet.host}:`, await response.text());
     return [];
   }
@@ -132,160 +158,75 @@ async function fetchOutlet(
     .filter((r) => r.url && r.title)
     .slice(0, PER_OUTLET)
     .map((r) => ({
-      title: r.title || "",
-      content: r.content || "",
-      url: r.url!,
-      host: hostFromUrl(r.url!) || outlet.host,
+      url: r.url!.split("#")[0],
+      title: (r.title || "").trim(),
+      domain: hostFromUrl(r.url!) || outlet.host,
       label: outlet.label,
     }));
 }
 
-/** Parallel per-outlet fetch, then merge (max ~12). */
-async function fetchAllOutlets(days: number): Promise<{
-  context: string;
-  urls: string[];
-  hitCounts: Record<string, number>;
-}> {
-  const batches = await Promise.all(
-    CORE_OUTLETS.map((o) => fetchOutlet(o, days).catch(() => [] as TavilyHit[]))
-  );
-
-  const hits: TavilyHit[] = [];
-  const seen = new Set<string>();
-  const hitCounts: Record<string, number> = {};
-
-  for (const batch of batches) {
-    for (const h of batch) {
-      const key = h.url.split("?")[0];
-      if (seen.has(key)) continue;
-      seen.add(key);
-      hits.push(h);
-      hitCounts[h.label] = (hitCounts[h.label] || 0) + 1;
-    }
-  }
-
-  const limited = hits.slice(0, MAX_RESULTS);
-  const snippets = limited
-    .map(
-      (h, i) =>
-        `${i + 1}. [${h.label}] ${h.title}: ${h.content} (${h.url})`
-    )
-    .join("\n");
-
-  const coverage = CORE_OUTLETS.map(
-    (o) => `${o.label}: ${hitCounts[o.label] || 0}`
-  ).join(", ");
-
-  return {
-    context:
-      `Outlet coverage this pull: ${coverage}\n\n` +
-      `Results (max ${MAX_RESULTS}, ~${PER_OUTLET}/outlet):\n${snippets || "(no results)"}`,
-    urls: limited.map((h) => h.url),
-    hitCounts,
-  };
-}
-
-async function summarizeWithGroq(
-  searchContext: string,
-  days: number,
-  previousUrls: string[],
-  hitCounts: Record<string, number>
-): Promise<string> {
-  const outletList = CORE_OUTLETS.map((o) => o.label).join(", ");
-  const coverage = CORE_OUTLETS.map(
-    (o) => `${o.label}=${hitCounts[o.label] || 0}`
-  ).join(", ");
-  const dedupeHint =
-    previousUrls.length > 0
-      ? `Prefer NEW items not in: ${previousUrls.slice(0, 12).join(" ")}.`
-      : "Prefer the most recent actionable items.";
-
-  const prompt =
-    `Summarize crypto NEWS. Context is pre-fetched from: ${outletList}.\n` +
-    `Hits this pull: ${coverage}. Window ~${days} day(s).\n` +
-    `Rules: NEUTRAL. Only SEARCH CONTEXT. No invented numbers/dates.\n` +
-    `Try to mention MORE THAN ONE outlet when multiple are in context — do not collapse everything to a single site.\n` +
-    `Focus: regulation, ETFs, institutional, exchanges, hacks, major protocol. Filter pure hype/presale.\n` +
-    `${dedupeHint}\n` +
-    `Format:\n` +
-    `1) **Sentiment:** 🟢 BULLISH | 🔴 BEARISH | ⚪ NEUTRAL — one sentence\n` +
-    `2) Up to ${MAX_RESULTS} bullets: **OutletName** — fact [Source](url)\n` +
-    `3) Sources: unique URLs\n` +
-    `4) Plain markdown — no code fences.`;
-
-  const groqApiKey = process.env.GROQ_API_KEY;
-  if (!groqApiKey) {
-    return (
-      `**Sentiment:** ⚪ NEUTRAL — Tavily raw (Groq not configured)\n\n` +
-      `Coverage: ${coverage}\n\n${searchContext}`
-    );
-  }
-
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${groqApiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: process.env.GROQ_MODEL_MARKDOWN || "qwen/qwen3.8-27b",
-      messages: [
-        {
-          role: "system",
-          content:
-            "Extract facts from SEARCH CONTEXT only. Never fabricate. Cap at 12 bullets. Neutral. Cover multiple outlets when present.",
-        },
-        {
-          role: "user",
-          content: `SEARCH CONTEXT:\n${searchContext}\n\nUSER QUERY:\n${prompt}`,
-        },
-      ],
-      temperature: 0.1,
-      max_tokens: 1400,
-      reasoning_effort: "none",
-    }),
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(
-      (errorData as { error?: { message?: string } }).error?.message ||
-        "Failed to summarize outlet news"
-    );
-  }
-
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content;
-  if (!content?.trim()) throw new Error("Empty AI summary");
-  return content.trim();
-}
-
 export default async function handler(
   req: NextApiRequest,
-  res: NextApiResponse<CacheBody | ErrorBody>
+  res: NextApiResponse<OkBody | ErrorBody>
 ) {
   const outlets = CORE_OUTLETS.map(({ id, host, label }) => ({ id, host, label }));
 
   if (req.method === "GET") {
     try {
       const log = await prisma.catalystLog.findUnique({ where: { promptId: PROMPT_ID } });
-      const { meta, body } = parseMeta(log?.response);
-      const lastScrapedAt = meta.scrapedAt
-        ? Date.parse(meta.scrapedAt)
-        : log
-          ? new Date(log.updatedAt).getTime()
-          : null;
-      const alreadyScrapedToday =
-        lastScrapedAt != null && manilaDayKey(new Date(lastScrapedAt)) === manilaDayKey();
+      const store = parseStore(log?.response);
+      const items = pruneOld(store.items).sort(
+        (a, b) => Date.parse(b.scannedAt) - Date.parse(a.scannedAt) || b.newsDate.localeCompare(a.newsDate)
+      );
+      return res.status(200).json({
+        items,
+        lastScrapedAt: store.lastScrapedAt ? Date.parse(store.lastScrapedAt) : null,
+        outlets,
+      });
+    } catch (err) {
+      return res.status(500).json({ error: (err as Error).message });
+    }
+  }
+
+  // Delete one row by id or url
+  if (req.method === "DELETE") {
+    try {
+      const id = typeof req.query.id === "string" ? req.query.id : null;
+      const url = typeof req.query.url === "string" ? req.query.url : null;
+      if (!id && !url) {
+        return res.status(400).json({ error: "id or url required" });
+      }
+
+      const log = await prisma.catalystLog.findUnique({ where: { promptId: PROMPT_ID } });
+      const store = parseStore(log?.response);
+      const before = store.items.length;
+      store.items = store.items.filter((it) => {
+        if (id && it.id === id) return false;
+        if (url && it.url.split("?")[0] === url.split("?")[0]) return false;
+        return true;
+      });
+
+      if (store.items.length === before) {
+        return res.status(404).json({ error: "Row not found" });
+      }
+
+      await prisma.catalystLog.upsert({
+        where: { promptId: PROMPT_ID },
+        create: {
+          promptId: PROMPT_ID,
+          category: CATEGORY,
+          response: serializeStore(store),
+        },
+        update: { category: CATEGORY, response: serializeStore(store) },
+      });
 
       return res.status(200).json({
-        markdown: body,
-        updatedAt: log ? new Date(log.updatedAt).getTime() : null,
-        lastScrapedAt: Number.isFinite(lastScrapedAt) ? lastScrapedAt : null,
-        range: meta.range || "since_last",
+        items: store.items.sort(
+          (a, b) => Date.parse(b.scannedAt) - Date.parse(a.scannedAt)
+        ),
+        lastScrapedAt: store.lastScrapedAt ? Date.parse(store.lastScrapedAt) : null,
         outlets,
-        alreadyScrapedToday,
-        outletHitCounts: meta.outletHitCounts,
+        message: "Deleted",
       });
     } catch (err) {
       return res.status(500).json({ error: (err as Error).message });
@@ -293,77 +234,82 @@ export default async function handler(
   }
 
   if (req.method !== "POST") {
-    res.setHeader("Allow", "GET, POST");
+    res.setHeader("Allow", "GET, POST, DELETE");
     return res.status(405).json({ error: "Method not allowed" });
   }
 
+  // Scan: today/yesterday only, skip URLs already stored
   try {
-    const body = (req.body || {}) as { range?: RangeKey; force?: boolean };
-    const range: RangeKey =
-      body.range === "1" || body.range === "3" || body.range === "7" || body.range === "since_last"
-        ? body.range
-        : "since_last";
-    const force = Boolean(body.force);
-
-    const log = await prisma.catalystLog.findUnique({ where: { promptId: PROMPT_ID } });
-    const { meta, body: cachedBody } = parseMeta(log?.response);
-    const lastScrapedAt = meta.scrapedAt
-      ? Date.parse(meta.scrapedAt)
-      : log
-        ? new Date(log.updatedAt).getTime()
-        : null;
-    const alreadyScrapedToday =
-      lastScrapedAt != null && manilaDayKey(new Date(lastScrapedAt)) === manilaDayKey();
-
-    if (!force && alreadyScrapedToday && cachedBody) {
-      return res.status(200).json({
-        markdown: cachedBody,
-        updatedAt: log ? new Date(log.updatedAt).getTime() : null,
-        lastScrapedAt: lastScrapedAt,
-        range: meta.range || range,
-        outlets,
-        alreadyScrapedToday: true,
-        skipped: true,
-        message:
-          "Already scraped today (Manila). Showing cache. Use Force scan for a fresh pull across all outlets.",
-        outletHitCounts: meta.outletHitCounts,
-      });
+    if (!process.env.TAVILY_API_KEY) {
+      return res.status(500).json({ error: "TAVILY_API_KEY is missing." });
     }
 
-    const days = rangeToDays(range, lastScrapedAt);
-    const { context, urls, hitCounts } = await fetchAllOutlets(days);
-    const markdown = await summarizeWithGroq(context, days, meta.seenUrls || [], hitCounts);
+    const log = await prisma.catalystLog.findUnique({ where: { promptId: PROMPT_ID } });
+    const store = parseStore(log?.response);
+    store.items = pruneOld(store.items);
 
-    const coverageMsg = CORE_OUTLETS.map(
-      (o) => `${o.label}:${hitCounts[o.label] || 0}`
-    ).join(" · ");
+    const existingUrls = new Set(
+      store.items.map((it) => it.url.split("?")[0].toLowerCase())
+    );
 
-    const newMeta: Meta = {
-      range,
-      scrapedAt: new Date().toISOString(),
-      windowStart: new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10),
-      outletHosts: CORE_OUTLETS.map((o) => o.host),
-      seenUrls: [...new Set([...(meta.seenUrls || []).slice(-30), ...urls])].slice(-50),
-      outletHitCounts: hitCounts,
-    };
-    const stored = `<!--meta:${JSON.stringify(newMeta)}-->\n${markdown}`;
+    const today = manilaYmd();
+    const scannedAt = new Date().toISOString();
+    const batches = await Promise.all(
+      CORE_OUTLETS.map((o) => fetchOutlet(o).catch(() => []))
+    );
+
+    let added = 0;
+    for (const batch of batches) {
+      for (const raw of batch) {
+        const canonical = raw.url.split("?")[0];
+        const key = canonical.toLowerCase();
+        if (existingUrls.has(key)) continue;
+
+        const newsDate = newsDateFromUrl(canonical, today);
+        // Only keep articles dated today or yesterday (Manila calendar)
+        if (!isTodayOrYesterday(newsDate, today)) continue;
+
+        const row: OutletNewsRow = {
+          id: urlId(canonical),
+          url: canonical,
+          title: raw.title,
+          domain: raw.domain,
+          label: raw.label,
+          scannedAt,
+          newsDate,
+        };
+        store.items.push(row);
+        existingUrls.add(key);
+        added += 1;
+      }
+    }
+
+    store.lastScrapedAt = scannedAt;
+    store.version = 2;
 
     await prisma.catalystLog.upsert({
       where: { promptId: PROMPT_ID },
-      create: { promptId: PROMPT_ID, category: CATEGORY, response: stored },
-      update: { category: CATEGORY, response: stored },
+      create: {
+        promptId: PROMPT_ID,
+        category: CATEGORY,
+        response: serializeStore(store),
+      },
+      update: { category: CATEGORY, response: serializeStore(store) },
     });
 
+    const items = store.items.sort(
+      (a, b) => Date.parse(b.scannedAt) - Date.parse(a.scannedAt) || b.newsDate.localeCompare(a.newsDate)
+    );
+
     return res.status(200).json({
-      markdown,
-      updatedAt: Date.now(),
-      lastScrapedAt: Date.now(),
-      range,
+      items,
+      lastScrapedAt: Date.parse(scannedAt),
       outlets,
-      alreadyScrapedToday: true,
-      skipped: false,
-      message: `Pulled ~${days}d · ${urls.length} links · ${coverageMsg}`,
-      outletHitCounts: hitCounts,
+      added,
+      message:
+        added > 0
+          ? `Added ${added} new link(s). Duplicates skipped. Window: today & yesterday.`
+          : "No new links (all URLs already saved or outside today/yesterday).",
     });
   } catch (err) {
     return res.status(500).json({ error: (err as Error).message });
