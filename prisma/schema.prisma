@@ -16,6 +16,7 @@ model Coin {
   priceTarget    PriceTarget?
   journalEntries JournalEntry[]
   newsItems      NewsItem[]
+  longScanHits   LongScanHit[]
 }
 
 model Record {
@@ -132,4 +133,35 @@ model CatalystLog {
   response  String   @db.Text
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// Daily Watchlist Scan snapshot — only LONG / STRONG LONG setups.
+// Filled by cron ~14:10 Manila; manual delete + 30-day auto retention.
+model LongScanHit {
+  id            Int      @id @default(autoincrement())
+  coinId        Int
+  coin          Coin     @relation(fields: [coinId], references: [id], onDelete: Cascade)
+  symbol        String
+  name          String
+  scannedAt     DateTime @default(now())
+  bias          String   // LONG | STRONG LONG
+  score         Int
+  maxScore      Int
+  confidence    Float
+  currentPrice  Float
+  support       Float?
+  resistance    Float?
+  isExtended    Boolean  @default(false)
+  /// JSON: [{ price, basis, allocationPct }]
+  ladderJson    String
+  invalidation  Float?
+  invalidationNote String?
+  target        Float?
+  targetNote    String?
+  macroTrend    String?
+  /// Short human summary of scoring signals
+  signalsNote   String?
+
+  @@index([scannedAt])
+  @@index([symbol, scannedAt])
 }
