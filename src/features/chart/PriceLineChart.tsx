@@ -37,6 +37,8 @@ export interface PriceLineChartProps {
    * e.g. [{ hours: [14, 20], color: "#f59e0b", name: "PM session" }]
    */
   sessionMarkers?: { hours: number[]; color: string; name: string }[];
+  /** Live / latest price — shown as a distinct dot on the last bar (Spot). */
+  currentPrice?: number | null;
 }
 
 type ActivePoint = {
@@ -147,6 +149,7 @@ export default function PriceLineChart({
   highlightHotSlots = false,
   hotSlotHours = [23, 2],
   sessionMarkers = [],
+  currentPrice = null,
 }: PriceLineChartProps) {
   const [showSma20, setShowSma20] = useState<boolean>(true);
   const [showSma50, setShowSma50] = useState<boolean>(true);
@@ -198,11 +201,16 @@ export default function PriceLineChart({
         const hit = manilaH != null && m.hours.includes(manilaH);
         sessionFields[`sessionPrice${mi}`] = hit ? px : null;
       });
+      const isLast = index === points.length - 1;
+      const live =
+        currentPrice != null && Number.isFinite(currentPrice) ? Number(currentPrice) : null;
       return {
         ...p,
         price: px,
         hotPrice: isHotSlot ? px : null,
         isHotSlot,
+        // Distinct marker for live price on the latest bar only
+        currentDot: isLast && live != null ? live : null,
         ...sessionFields,
         sma20: sma20Series[index] ?? undefined,
         sma50: sma50Series[index] ?? undefined,
@@ -213,7 +221,7 @@ export default function PriceLineChart({
     });
 
     return { chartData: data, fallbackLevels: levels, liveEquilibrium: equilibrium };
-  }, [points, highlightHotSlots, hotSlotHours, sessionMarkers]);
+  }, [points, highlightHotSlots, hotSlotHours, sessionMarkers, currentPrice]);
 
   const support = externalSupport ?? fallbackLevels.support;
   const resistance = externalResistance ?? fallbackLevels.resistance;
@@ -290,6 +298,12 @@ export default function PriceLineChart({
         {!!intradayPoints?.length && (
           <IndicatorPill active={showSwing} onClick={() => setShowSwing(!showSwing)} color="teal" label="Swing" />
         )}
+        {currentPrice != null && Number.isFinite(currentPrice) && (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-900">
+            <span className="h-2.5 w-2.5 rounded-full bg-sky-500 ring-2 ring-white shadow" />
+            Now {formatPhp(Number(currentPrice))}
+          </span>
+        )}
       </div>
 
       <div className="h-64 sm:h-96 w-full -ml-2 sm:ml-0">
@@ -341,6 +355,18 @@ export default function PriceLineChart({
 
             {showHigh && (
               <Line type="monotone" dataKey={priceLineName === "Price" ? "price" : "high"} stroke="#22c55e" strokeWidth={1.5} dot={false} name={priceLineName} connectNulls />
+            )}
+            {currentPrice != null && Number.isFinite(currentPrice) && (
+              <Line
+                type="monotone"
+                dataKey="currentDot"
+                stroke="none"
+                dot={{ r: 7, fill: "#0ea5e9", stroke: "#fff", strokeWidth: 2 }}
+                activeDot={{ r: 8, fill: "#0284c7", stroke: "#fff", strokeWidth: 2 }}
+                name="Current price"
+                connectNulls={false}
+                isAnimationActive={false}
+              />
             )}
             {highlightHotSlots && (
               <Line

@@ -571,6 +571,7 @@ export default function ChartView() {
                 showHigh={showHigh}
                 showLow={showLow}
                 showKeyLevels={showKeyLevels}
+                currentPrice={currentPrice > 0 ? currentPrice : null}
                 showBreakEven={!!activePortfolio && activePortfolio.holdings > 0 && activePortfolio.spent > 0}
                 breakEvenPrice={
                   activePortfolio && activePortfolio.holdings > 0 && activePortfolio.spent > 0
