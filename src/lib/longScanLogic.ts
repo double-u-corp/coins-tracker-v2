@@ -110,6 +110,8 @@ export async function runLongScanSnapshot(): Promise<LongScanRunResult> {
   const hits: LongScanRunResult["hits"] = [];
   let saved = 0;
   let cursor = 0;
+  /** One timestamp for the whole run so a 14:10 and 17:10 pass never merge/override. */
+  const runAt = new Date();
 
   async function worker() {
     while (cursor < coins.length) {
@@ -151,6 +153,7 @@ export async function runLongScanSnapshot(): Promise<LongScanRunResult> {
             coinId: coin.id,
             symbol: coin.symbol,
             name: coin.name,
+            scannedAt: runAt,
             bias: confluence.bias,
             score: confluence.score,
             maxScore: confluence.maxPossibleScore,

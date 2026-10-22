@@ -101,25 +101,24 @@ export default function LongScanView() {
     }
   };
 
+  /** Group by exact scan run time so 14:10 and 17:10 stay separate. */
   const groups = hits.reduce<Record<string, Hit[]>>((acc, h) => {
-    const day = new Date(h.scannedAt).toLocaleDateString("en-CA", {
-      timeZone: "Asia/Manila",
-    });
-    (acc[day] ||= []).push(h);
+    const key = h.scannedAt;
+    (acc[key] ||= []).push(h);
     return acc;
   }, {});
-  const days = Object.keys(groups).sort((a, b) => b.localeCompare(a));
+  const runKeys = Object.keys(groups).sort((a, b) => b.localeCompare(a));
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Daily LONG scan</h1>
+          <h1 className="text-xl font-bold text-gray-900">LONG scan log</h1>
           <p className="text-sm text-gray-500 max-w-xl">
-            Auto-runs ~14:10 Manila · same filter as Spot{" "}
-            <span className="font-semibold">Scan all coins</span> (buy-low LONGs near
-            support / lower third — not extended mid-range). Price, ladder, stop &amp;
-            target. 30-day retention · delete anytime.
+            Same filter as Spot <span className="font-semibold">Scan all coins</span> (buy-low
+            LONGs near support / lower third — not extended). Each run{" "}
+            <span className="font-semibold">appends</span> — morning and afternoon both keep their
+            own rows (no overwrite). 30-day auto-prune · delete any card anytime.
           </p>
         </div>
         <button
@@ -147,123 +146,144 @@ export default function LongScanView() {
         </div>
       ) : hits.length === 0 ? (
         <p className="text-sm text-gray-500">
-          No saved LONGs yet. Wait for the 14:10 cron or run a scan now.
+          No saved LONGs yet. Run a scan now (or wait for a scheduled run).
         </p>
       ) : (
         <div className="space-y-8">
-          {days.map((day) => (
-            <section key={day}>
-              <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-gray-600">
-                {day} · {groups[day].length} hit{groups[day].length === 1 ? "" : "s"}
-              </h2>
-              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                {groups[day].map((h) => (
-                  <article
-                    key={h.id}
-                    className={`rounded-xl border bg-white p-4 shadow-sm ${
-                      h.isExtended ? "border-amber-200" : "border-emerald-100"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-base font-bold text-gray-900">{h.name}</span>
-                          <span className="font-mono text-[10px] text-gray-500">{h.symbol}</span>
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                              h.bias === "STRONG LONG"
-                                ? "bg-emerald-600 text-white"
-                                : "bg-emerald-100 text-emerald-900"
-                            }`}
-                          >
-                            {h.bias}
-                          </span>
-                          {h.isExtended && (
-                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900">
-                              Extended — wait pullback
+          {runKeys.map((runKey) => {
+            const runHits = groups[runKey];
+            const when = formatWhen(runKey);
+            return (
+              <section key={runKey}>
+                <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border-2 border-indigo-200 bg-indigo-50 px-3 py-2.5 shadow-sm">
+                  <span className="text-xl" aria-hidden>
+                    🕒
+                  </span>
+                  <div>
+                    <h2 className="text-base font-extrabold text-indigo-950 tracking-tight">
+                      {when}
+                    </h2>
+                    <p className="text-[11px] font-semibold text-indigo-700">
+                      Scan run · {runHits.length} LONG hit{runHits.length === 1 ? "" : "s"} ·
+                      Manila time
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  {runHits.map((h) => (
+                    <article
+                      key={h.id}
+                      className={`rounded-xl border bg-white p-4 shadow-sm ${
+                        h.isExtended ? "border-amber-200" : "border-emerald-100"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-base font-bold text-gray-900">{h.name}</span>
+                            <span className="font-mono text-[10px] text-gray-500">{h.symbol}</span>
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                h.bias === "STRONG LONG"
+                                  ? "bg-emerald-600 text-white"
+                                  : "bg-emerald-100 text-emerald-900"
+                              }`}
+                            >
+                              {h.bias}
                             </span>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-gray-500 mt-0.5">
-                          {formatWhen(h.scannedAt)} · score {h.score >= 0 ? "+" : ""}
-                          {h.score}/±{h.maxScore} · {(h.confidence * 100).toFixed(0)}% data
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <Link
-                          href={`/chart?symbol=${encodeURIComponent(h.symbol)}`}
-                          className="text-[11px] font-bold text-brand-600 hover:underline"
-                        >
-                          Spot →
-                        </Link>
-                        <button
-                          type="button"
-                          onClick={() => void remove(h.id)}
-                          disabled={deletingId === h.id}
-                          className="rounded border border-gray-200 px-1.5 py-0.5 text-[11px] font-bold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
-                          title="Delete"
-                        >
-                          {deletingId === h.id ? "…" : "✕"}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="text-sm font-semibold text-gray-900 mb-2">
-                      Price {formatPhp(h.currentPrice)}
-                      {h.support != null && (
-                        <span className="text-xs font-normal text-gray-500">
-                          {" "}
-                          · S {formatPhp(h.support)}
-                        </span>
-                      )}
-                      {h.resistance != null && (
-                        <span className="text-xs font-normal text-gray-500">
-                          {" "}
-                          · R {formatPhp(h.resistance)}
-                        </span>
-                      )}
-                    </div>
-
-                    {h.ladder.length > 0 && (
-                      <div className="mb-2">
-                        <p className="text-[11px] font-bold uppercase text-gray-500 mb-1">
-                          Entry ladder
-                        </p>
-                        <ul className="space-y-0.5 text-xs text-gray-800">
-                          {h.ladder.map((lvl, i) => (
-                            <li key={i} className="flex justify-between gap-2 font-mono">
-                              <span>
-                                ~{formatPhp(lvl.price)}{" "}
-                                <span className="text-gray-500 font-sans">({lvl.basis})</span>
+                            {h.isExtended && (
+                              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900">
+                                Extended — wait pullback
                               </span>
-                              <span className="text-gray-600">{lvl.allocationPct}%</span>
-                            </li>
-                          ))}
-                        </ul>
+                            )}
+                          </div>
+                          <p className="mt-1.5 inline-flex items-center rounded-md bg-slate-900 px-2 py-1 text-[11px] font-bold text-white">
+                            {formatWhen(h.scannedAt)}
+                          </p>
+                          <p className="text-[11px] text-gray-500 mt-1">
+                            score {h.score >= 0 ? "+" : ""}
+                            {h.score}/±{h.maxScore} · {(h.confidence * 100).toFixed(0)}% data
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Link
+                            href={`/chart?symbol=${encodeURIComponent(h.symbol)}`}
+                            className="text-[11px] font-bold text-brand-600 hover:underline"
+                          >
+                            Spot →
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={() => void remove(h.id)}
+                            disabled={deletingId === h.id}
+                            className="rounded border border-gray-200 px-1.5 py-0.5 text-[11px] font-bold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                            title="Delete"
+                          >
+                            {deletingId === h.id ? "…" : "✕"}
+                          </button>
+                        </div>
                       </div>
-                    )}
 
-                    {h.invalidation != null && (
-                      <p className="text-xs text-rose-800 mb-1">
-                        <span className="font-bold">Stop / invalidation:</span> ~{formatPhp(h.invalidation)}
-                      </p>
-                    )}
-                    {h.target != null && (
-                      <p className="text-xs text-emerald-800 mb-1">
-                        <span className="font-bold">Target:</span> ~{formatPhp(h.target)}
-                      </p>
-                    )}
-                    {h.macroTrend && (
-                      <p className="text-[11px] text-gray-500">Macro: {h.macroTrend}</p>
-                    )}
-                    {h.signalsNote && (
-                      <p className="mt-1 text-[10px] text-gray-400 line-clamp-2">{h.signalsNote}</p>
-                    )}
-                  </article>
-                ))}
-              </div>
-            </section>
-          ))}
+                      <div className="text-sm font-semibold text-gray-900 mb-2">
+                        Price {formatPhp(h.currentPrice)}
+                        {h.support != null && (
+                          <span className="text-xs font-normal text-gray-500">
+                            {" "}
+                            · S {formatPhp(h.support)}
+                          </span>
+                        )}
+                        {h.resistance != null && (
+                          <span className="text-xs font-normal text-gray-500">
+                            {" "}
+                            · R {formatPhp(h.resistance)}
+                          </span>
+                        )}
+                      </div>
+
+                      {h.ladder.length > 0 && (
+                        <div className="mb-2">
+                          <p className="text-[11px] font-bold uppercase text-gray-500 mb-1">
+                            Entry ladder
+                          </p>
+                          <ul className="space-y-0.5 text-xs text-gray-800">
+                            {h.ladder.map((lvl, i) => (
+                              <li key={i} className="flex justify-between gap-2 font-mono">
+                                <span>
+                                  ~{formatPhp(lvl.price)}{" "}
+                                  <span className="text-gray-500 font-sans">({lvl.basis})</span>
+                                </span>
+                                <span className="text-gray-600">{lvl.allocationPct}%</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {h.invalidation != null && (
+                        <p className="text-xs text-rose-800 mb-1">
+                          <span className="font-bold">Stop / invalidation:</span> ~
+                          {formatPhp(h.invalidation)}
+                        </p>
+                      )}
+                      {h.target != null && (
+                        <p className="text-xs text-emerald-800 mb-1">
+                          <span className="font-bold">Target:</span> ~{formatPhp(h.target)}
+                        </p>
+                      )}
+                      {h.macroTrend && (
+                        <p className="text-[11px] text-gray-500">Macro: {h.macroTrend}</p>
+                      )}
+                      {h.signalsNote && (
+                        <p className="mt-1 text-[10px] text-gray-400 line-clamp-2">
+                          {h.signalsNote}
+                        </p>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              </section>
+            );
+          })}
         </div>
       )}
     </div>
