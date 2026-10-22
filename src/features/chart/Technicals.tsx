@@ -1051,31 +1051,33 @@ export function computeConfluenceSignal(
     signals.push({ name: `Position in ${rangeLabel}`, weight: s, detail, available: points.length >= 5 });
   }
 
-  // --- Swing structure (higher-highs/higher-lows vs lower-highs/lower-lows) ---
-  // Prefer intraday resolution when available — daily bars take 3+ days to
-  // confirm a swing, intraday bars confirm within hours. Falls back to
-  // daily points otherwise (identical to prior behavior).
-  const swingSeries = overrides?.intradayPoints && overrides.intradayPoints.length > 0 ? overrides.intradayPoints : points;
-  const usedIntradaySwings = !!(overrides?.intradayPoints && overrides.intradayPoints.length > 0);
+  // --- Swing structure: CONTEXT only (not in Spot score) ---
+  // Structure HH/HL vs LH/LL lives on the /structure page and still feeds
+  // the entry ladder. Scoring it here double-counted structure and fought
+  // daily SMA/RSI (e.g. LH+LL −1 vs price > 20 SMA +1 → false NEUTRAL).
+  const swingSeries =
+    overrides?.intradayPoints && overrides.intradayPoints.length > 0
+      ? overrides.intradayPoints
+      : points;
+  const usedIntradaySwings = !!(
+    overrides?.intradayPoints && overrides.intradayPoints.length > 0
+  );
   const swingPoints = detectSwingPoints(swingSeries, 3);
   const swingStructure = getSwingStructure(swingPoints);
-  maxPossible += 1;
-  // Classic structure: HH+HL = +1, LH+LL = −1. Buy-low selection is location-based
-  // (isWatchlistBuyLowHit / isLongExtended), not inverted structure scoring.
-  if (swingStructure.available) {
-    score += swingStructure.direction;
-    signals.push({
-      name: "Swing Structure",
-      weight: swingStructure.direction,
-      detail: swingStructure.detail,
-      available: true,
-    });
-  } else {
-    signals.push({ name: "Swing Structure", weight: 0, detail: swingStructure.detail, available: false });
-  }
+  signals.push({
+    name: "Swing Structure",
+    weight: 0,
+    detail: swingStructure.available
+      ? `${swingStructure.detail} — context only (see Structure page; not in Spot score)`
+      : `${swingStructure.detail} — context only (see Structure page)`,
+    available: swingStructure.available,
+  });
 
-  const availableCount = signals.filter((s) => s.available).length;
-  const confidence = signals.length > 0 ? availableCount / signals.length : 0;
+  // Confidence ignores context-only rows (Swing Structure weight always 0).
+  const scoringSignals = signals.filter((s) => s.name !== "Swing Structure");
+  const availableCount = scoringSignals.filter((s) => s.available).length;
+  const confidence =
+    scoringSignals.length > 0 ? availableCount / scoringSignals.length : 0;
 
   // Hard minimum: require at least 20 days of real history before ANY
   // directional call, regardless of which individual indicators happen to
@@ -1108,7 +1110,12 @@ export function computeConfluenceSignal(
   if (bias !== "INSUFFICIENT DATA" && bias !== "NEUTRAL") {
     const direction = bias.includes("LONG") ? 1 : -1;
     const nonMacroConfirms = signals.some(
-      (s) => s.name !== "50 SMA vs 200 SMA (Macro Trend)" && s.available && Math.sign(s.weight) === direction
+      (s) =>
+        s.name !== "50 SMA vs 200 SMA (Macro Trend)" &&
+        s.name !== "Swing Structure" &&
+        s.available &&
+        s.weight !== 0 &&
+        Math.sign(s.weight) === direction
     );
     if (!nonMacroConfirms) {
       bias = "NEUTRAL";
@@ -1223,7 +1230,7 @@ export function computeConfluenceSignal(
         note:
           mode === "leverage"
             ? "No confirmed directional edge right now on either side — these are the nearest support levels worth watching for a long if price dips into them. There's no confirmed short setup here either; sizing down or waiting for a clearer signal is reasonable."
-            : "Technicals are mixed right now — these are levels worth watching for a pullback entry, not a signal to buy immediately.",
+            : "Spot bias is NEUTRAL (mixed daily signals) — not an entry signal. Ladder levels are watch-zones for a pullback only if you already want the coin; prefer waiting for LONG confluence or a clearer dip into support.",
       };
       exitSuggestion = null;
     }
