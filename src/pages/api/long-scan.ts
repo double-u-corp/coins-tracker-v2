@@ -36,6 +36,13 @@ async function runScanHandler(req: NextApiRequest, res: NextApiResponse) {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  // Price cron style: GET + Bearer CRON_SECRET runs the job.
+  // (Postman POST works; many schedulers only fire GET and looked "successful"
+  // while only listing runs — nothing new was saved.)
+  if (req.method === "GET" && isCronAuthorized(req)) {
+    return runScanHandler(req, res);
+  }
+
   if (req.method === "GET" && (req.query.run === "1" || req.query.run === "true")) {
     return runScanHandler(req, res);
   }
