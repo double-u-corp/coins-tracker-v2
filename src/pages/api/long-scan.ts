@@ -7,7 +7,6 @@ import {
   deleteLongScanHit,
 } from "@/lib/longScanLogic";
 
-/** Per-chunk should finish under ~30s; full scan uses several chunk calls. */
 export const config = {
   maxDuration: 60,
 };
@@ -21,10 +20,17 @@ function isCronAuthorized(req: NextApiRequest): boolean {
 }
 
 function parseScanOptions(req: NextApiRequest) {
-  const chunks = Math.max(1, Math.min(12, Number(req.query.chunks) || 1));
-  const chunk = Math.max(0, Math.min(chunks - 1, Number(req.query.chunk) || 0));
-  const runId = typeof req.query.runId === "string" ? req.query.runId : undefined;
-  const fast = req.query.fast === "1" || req.query.fast === "true";
+  const q = req.query;
+  const b = typeof req.body === "object" && req.body ? req.body : {};
+  const chunksRaw = q.chunks ?? b.chunks;
+  const chunkRaw = q.chunk ?? b.chunk;
+  const runIdRaw = q.runId ?? b.runId;
+  const fastRaw = q.fast ?? b.fast;
+
+  const chunks = Math.max(1, Math.min(12, Number(chunksRaw) || 1));
+  const chunk = Math.max(0, Math.min(chunks - 1, Number(chunkRaw) || 0));
+  const runId = typeof runIdRaw === "string" && runIdRaw ? runIdRaw : undefined;
+  const fast = fastRaw === "1" || fastRaw === "true" || fastRaw === true;
   return { chunk, chunks, runId, fast };
 }
 
@@ -34,8 +40,18 @@ async function runScanHandler(req: NextApiRequest, res: NextApiResponse) {
   }
 
   try {
-    const result = await runLongScanSnapshot(parseScanOptions(req));
-    return res.status(200).json(result);
+    const opts = parseScanOptions(req);
+    const result = await runLongScanSnapshot(opts);
+    // Verify the log is readable after write
+    const runs = await listLongScanRuns();
+    const found = runs.find((r) => r.id === result.runId);
+    return res.status(200).json({
+      ...result,
+      logged: Boolean(found),
+      runsOnLog: runs.length,
+      thisRunHits: found?.hits?.length ?? 0,
+      thisRunMessage: found?.message ?? null,
+    });
   } catch (err) {
     const message = (err as Error).message || String(err);
     console.error("[long-scan]", message);
@@ -44,7 +60,6 @@ async function runScanHandler(req: NextApiRequest, res: NextApiResponse) {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // Cron: GET + Bearer runs scan (supports ?chunk=&chunks=)
   if (req.method === "GET" && isCronAuthorized(req)) {
     return runScanHandler(req, res);
   }
@@ -56,7 +71,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method === "GET") {
     try {
       const runs = await listLongScanRuns();
-      return res.status(200).json({ runs });
+      return res.status(200).json({ runs, count: runs.length });
     } catch (err) {
       return res.status(500).json({ error: (err as Error).message });
     }

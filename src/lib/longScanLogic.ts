@@ -314,7 +314,7 @@ export async function runLongScanSnapshot(
   const runId =
     options.runId ||
     (chunks > 1
-      ? `run_${runAt.toISOString().slice(0, 13)}` // same hour → same multi-chunk run
+      ? `run_${new Date(runAt.getTime() + 8 * 3600 * 1000).toISOString().slice(0, 13)}` // Manila hour
       : `run_${runAt.getTime()}`);
 
   // Seed / refresh run row
