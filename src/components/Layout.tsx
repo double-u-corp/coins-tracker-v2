@@ -47,6 +47,10 @@ export default function Layout({ children }: { children: ReactNode }) {
                   <li key={link.href}>
                     <Link
                       href={link.href}
+                      onClick={(e) => {
+                        // Avoid Next.js "hard navigate to the same URL" crash
+                        if (isActive) e.preventDefault();
+                      }}
                       className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
                         isActive ? "bg-brand-600 text-white" : "text-gray-600 hover:bg-gray-100"
                       }`}
@@ -98,6 +102,10 @@ export default function Layout({ children }: { children: ReactNode }) {
                   <li key={link.href}>
                     <Link
                       href={link.href}
+                      onClick={(e) => {
+                        if (isActive) e.preventDefault();
+                        setMenuOpen(false);
+                      }}
                       className={`block rounded-md px-3 py-2 text-sm font-medium transition-colors ${
                         isActive ? "bg-brand-600 text-white" : "text-gray-600 hover:bg-gray-100"
                       }`}

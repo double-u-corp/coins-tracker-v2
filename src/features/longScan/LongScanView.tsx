@@ -36,8 +36,8 @@ type Run = {
   message: string | null;
 };
 
-/** Manila hours (:10) for scheduled runs — every 3h from 15:10. */
-const MANILA_RUN_HOURS = [0, 3, 6, 9, 12, 15, 18, 21];
+/** Manila hours (:10) every 3h — 02:10, 05:10, 08:10, 11:10, 14:10, 17:10, 20:10, 23:10. */
+const MANILA_RUN_HOURS = [2, 5, 8, 11, 14, 17, 20, 23];
 
 function formatWhen(iso: string) {
   try {
@@ -203,7 +203,7 @@ export default function LongScanView() {
         <div>
           <h1 className="text-xl font-bold text-gray-900">LONG scan log</h1>
           <p className="text-sm text-gray-600 mt-1">
-            Schedule: every 3 hours at :10 Manila (15:10, 18:10, 21:10, …). Next:{" "}
+            Schedule: every 3 hours at :10 Manila (14:10, 17:10, 20:10, …). Next:{" "}
             <span className="font-bold text-indigo-800">{formatWhen(nextRun.toISOString())}</span>
           </p>
         </div>
