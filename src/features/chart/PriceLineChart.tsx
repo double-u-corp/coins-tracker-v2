@@ -361,8 +361,18 @@ export default function PriceLineChart({
                 type="monotone"
                 dataKey="currentDot"
                 stroke="none"
-                dot={{ r: 7, fill: "#0ea5e9", stroke: "#fff", strokeWidth: 2 }}
-                activeDot={{ r: 8, fill: "#0284c7", stroke: "#fff", strokeWidth: 2 }}
+                dot={{
+                  r: isMobile ? 3.5 : 5,
+                  fill: "#0ea5e9",
+                  stroke: "#fff",
+                  strokeWidth: isMobile ? 1.5 : 2,
+                }}
+                activeDot={{
+                  r: isMobile ? 4 : 6,
+                  fill: "#0284c7",
+                  stroke: "#fff",
+                  strokeWidth: 1.5,
+                }}
                 name="Current price"
                 connectNulls={false}
                 isAnimationActive={false}

@@ -20,6 +20,8 @@ export type LongScanRunResult = {
   pruned: number;
   errors: string[];
   hits: { symbol: string; bias: string; price: number; extended: boolean }[];
+  scannedAt: string;
+  runId?: number;
 };
 
 async function loadDailyPoints(coinId: number): Promise<ChartPoint[]> {
@@ -96,8 +98,9 @@ function signalsNote(c: ConfluenceResult): string {
 
 /**
  * Full-watchlist confluence scan (server).
- * Saves LONG / STRONG LONG that pass isWatchlistBuyLowHit (same filter as
- * /chart "Scan all coins" default — not every LONG on the book).
+ * Saves LONG / STRONG LONG that are NOT extended (not already run up the range).
+ * Mid/upper-range LONGs (e.g. 66% of 30d range) stay on Spot insight only.
+ * Buy-low near floor is tagged; other non-extended LONGs are "watch".
  * Prunes rows older than 30 days.
  */
 export async function runLongScanSnapshot(): Promise<LongScanRunResult> {
@@ -138,15 +141,19 @@ export async function runLongScanSnapshot(): Promise<LongScanRunResult> {
           intradayPoints: intraday ?? undefined,
         });
 
-        // Match /chart "Scan all coins" default list: buy-low hits only
-        // (LONG/STRONG LONG near support / lower third, not extended).
-        // Raw LONG mid-range or extended coins are hidden on chart unless
-        // "Show all coins" — do not save those here either.
+        // Spot insight can still show LONG for mid-range / extended coins.
+        // Long-scan only keeps actionable LONGs: not extended (XDC @ 66% range out).
         if (!confluence.bias.includes("LONG")) continue;
-        if (!isWatchlistBuyLowHit(confluence)) continue;
 
         const extended = isLongExtended(confluence);
+        if (extended) continue;
+
+        const buyLow = isWatchlistBuyLowHit(confluence);
         const ladder: LadderLevel[] = confluence.entrySuggestion?.ladder ?? [];
+
+        // Prefix signalsNote with tier so UI can show without schema migration
+        const tier = buyLow ? "BUY_LOW" : "LONG_WATCH";
+        const note = `[${tier}] ${signalsNote(confluence)}`.slice(0, 500);
 
         await prisma.longScanHit.create({
           data: {
@@ -161,14 +168,14 @@ export async function runLongScanSnapshot(): Promise<LongScanRunResult> {
             currentPrice: confluence.currentPrice,
             support: confluence.support,
             resistance: confluence.resistance,
-            isExtended: extended,
+            isExtended: false,
             ladderJson: JSON.stringify(ladder),
             invalidation: confluence.invalidationLevel,
             invalidationNote: confluence.invalidationNote,
             target: confluence.exitSuggestion?.price ?? null,
             targetNote: confluence.exitSuggestion?.note ?? null,
             macroTrend: confluence.macroTrend,
-            signalsNote: signalsNote(confluence),
+            signalsNote: note,
           },
         });
 
@@ -194,6 +201,22 @@ export async function runLongScanSnapshot(): Promise<LongScanRunResult> {
   const pruned = (
     await prisma.longScanHit.deleteMany({ where: { scannedAt: { lt: cutoff } } })
   ).count;
+  await prisma.longScanRun.deleteMany({ where: { scannedAt: { lt: cutoff } } });
+
+  const msg =
+    saved > 0
+      ? `Saved ${saved} LONG hit(s).`
+      : "No non-extended LONG setups this run.";
+
+  const run = await prisma.longScanRun.create({
+    data: {
+      scannedAt: runAt,
+      scanned: coins.length,
+      saved,
+      pruned,
+      message: errors.length ? `${msg} Errors: ${errors.length}` : msg,
+    },
+  });
 
   return {
     scanned: coins.length,
@@ -201,5 +224,7 @@ export async function runLongScanSnapshot(): Promise<LongScanRunResult> {
     pruned,
     errors,
     hits,
+    scannedAt: runAt.toISOString(),
+    runId: run.id,
   };
 }
