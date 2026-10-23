@@ -15,7 +15,7 @@ import {
 const RETENTION_DAYS = 30;
 const SCAN_YEARS = 1;
 const INTRADAY_HOURS = 336;
-const CONCURRENCY = 4;
+const CONCURRENCY = 6;
 const LOG_PROMPT_ID = "long-scan-log";
 const LOG_CATEGORY = "LongScan";
 const MAX_LOG_RUNS = 40;
@@ -60,6 +60,10 @@ export type LongScanRunResult = {
   hits: { symbol: string; bias: string; price: number; extended: boolean }[];
   scannedAt: string;
   runId?: string;
+  chunk?: number;
+  chunks?: number;
+  done?: boolean;
+  totalSaved?: number;
 };
 
 /**
@@ -261,11 +265,45 @@ export async function deleteLongScanHit(runId: string, symbol: string): Promise<
  * Full-watchlist confluence scan (server).
  * Always appends a run to CatalystLog (visible on /long-scan even with 0 hits).
  */
-export async function runLongScanSnapshot(): Promise<LongScanRunResult> {
-  const coins = await prisma.coin.findMany({
+
+export type RunScanOptions = {
+  /** 0-based chunk index */
+  chunk?: number;
+  /** Total chunks (e.g. 4 → ~8 coins each for 33 coins) */
+  chunks?: number;
+  /** Shared id so multiple chunk calls append to one run */
+  runId?: string;
+  /** Skip 3h series for speed (daily only) */
+  fast?: boolean;
+};
+
+/**
+ * Full or chunked watchlist scan.
+ * Use chunks when host/cron timeout is ~30s — e.g. chunks=4 sequential calls.
+ */
+export async function runLongScanSnapshot(
+  options: RunScanOptions = {}
+): Promise<LongScanRunResult> {
+  const chunks = Math.max(1, Math.min(12, options.chunks ?? 1));
+  const chunk = Math.max(0, Math.min(chunks - 1, options.chunk ?? 0));
+  const fast = Boolean(options.fast);
+
+  const allCoins = await prisma.coin.findMany({
     orderBy: { symbol: "asc" },
-    select: { id: true, symbol: true, name: true },
+    select: {
+      id: true,
+      symbol: true,
+      name: true,
+      records: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: { price: true },
+      },
+    },
   });
+
+  const size = Math.ceil(allCoins.length / chunks) || 1;
+  const slice = allCoins.slice(chunk * size, chunk * size + size);
 
   const errors: string[] = [];
   const hitPayloads: LongScanHitPayload[] = [];
@@ -273,35 +311,35 @@ export async function runLongScanSnapshot(): Promise<LongScanRunResult> {
   let saved = 0;
   let cursor = 0;
   const runAt = new Date();
-  const runId = `run_${runAt.getTime()}`;
+  const runId =
+    options.runId ||
+    (chunks > 1
+      ? `run_${runAt.toISOString().slice(0, 13)}` // same hour → same multi-chunk run
+      : `run_${runAt.getTime()}`);
 
-  // Immediate breadcrumb so a timeout still leaves a visible "Running…" row
+  // Seed / refresh run row
+  const existingRuns = await listLongScanRuns();
+  const prior = existingRuns.find((r) => r.id === runId);
+  const priorHits = prior?.hits ?? [];
+
   await appendRunToLog({
     id: runId,
-    scannedAt: runAt.toISOString(),
-    scanned: coins.length,
-    saved: 0,
+    scannedAt: prior?.scannedAt ?? runAt.toISOString(),
+    scanned: allCoins.length,
+    saved: priorHits.length,
     pruned: 0,
-    message: "Running…",
-    hits: [],
+    message: `Running chunk ${chunk + 1}/${chunks}…`,
+    hits: priorHits,
   });
 
   async function worker() {
-    while (cursor < coins.length) {
-      const coin = coins[cursor];
+    while (cursor < slice.length) {
+      const coin = slice[cursor];
       cursor += 1;
       try {
-        const [points, intraday] = await Promise.all([
-          loadDailyPoints(coin.id),
-          loadIntradayPoints(coin.id),
-        ]);
-
-        const lastRec = await prisma.record.findFirst({
-          where: { coinId: coin.id },
-          orderBy: { createdAt: "desc" },
-          select: { price: true },
-        });
-        const currentPrice = lastRec?.price;
+        const points = await loadDailyPoints(coin.id);
+        const intraday = fast ? null : await loadIntradayPoints(coin.id);
+        const currentPrice = coin.records[0]?.price;
 
         if (points.length < 5) continue;
 
@@ -323,7 +361,12 @@ export async function runLongScanSnapshot(): Promise<LongScanRunResult> {
         const crossHint = nearCross ? " · near support + 20 SMA cross" : "";
         const note = `[${tier}] ${signalsNote(confluence)}${crossHint}`.slice(0, 500);
 
-        const payload: LongScanHitPayload = {
+        // Dedupe symbol within this run
+        if (priorHits.some((h) => h.symbol === coin.symbol) || hitPayloads.some((h) => h.symbol === coin.symbol)) {
+          continue;
+        }
+
+        hitPayloads.push({
           symbol: coin.symbol,
           name: coin.name,
           bias: confluence.bias,
@@ -342,8 +385,7 @@ export async function runLongScanSnapshot(): Promise<LongScanRunResult> {
           macroTrend: confluence.macroTrend,
           signalsNote: note,
           tier,
-        };
-        hitPayloads.push(payload);
+        });
         saved += 1;
         hits.push({
           symbol: coin.symbol,
@@ -358,35 +400,42 @@ export async function runLongScanSnapshot(): Promise<LongScanRunResult> {
   }
 
   const workers = Array.from(
-    { length: Math.min(CONCURRENCY, Math.max(1, coins.length)) },
+    { length: Math.min(CONCURRENCY, Math.max(1, slice.length)) },
     () => worker()
   );
   await Promise.all(workers);
 
-  const msg =
-    saved > 0
-      ? `Saved ${saved} hit(s).`
-      : "No LONG / near-support·20SMA setups this run.";
+  const mergedHits = [...priorHits, ...hitPayloads];
+  const isLast = chunk >= chunks - 1;
+  const msg = isLast
+    ? mergedHits.length > 0
+      ? `Saved ${mergedHits.length} hit(s) (${chunks} chunks).`
+      : "No LONG / near-support·20SMA setups this run."
+    : `Chunk ${chunk + 1}/${chunks} done · ${mergedHits.length} hit(s) so far.`;
   const finalMessage = errors.length ? `${msg} Errors: ${errors.length}` : msg;
 
   await appendRunToLog({
     id: runId,
-    scannedAt: runAt.toISOString(),
-    scanned: coins.length,
-    saved,
+    scannedAt: prior?.scannedAt ?? runAt.toISOString(),
+    scanned: allCoins.length,
+    saved: mergedHits.length,
     pruned: 0,
     message: finalMessage,
-    hits: hitPayloads,
+    hits: mergedHits,
   });
 
   return {
     ok: true,
-    scanned: coins.length,
-    saved,
+    scanned: slice.length,
+    saved: hitPayloads.length,
     pruned: 0,
     errors,
     hits,
-    scannedAt: runAt.toISOString(),
+    scannedAt: prior?.scannedAt ?? runAt.toISOString(),
     runId,
+    chunk,
+    chunks,
+    done: isLast,
+    totalSaved: mergedHits.length,
   };
 }

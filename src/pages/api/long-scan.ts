@@ -7,7 +7,7 @@ import {
   deleteLongScanHit,
 } from "@/lib/longScanLogic";
 
-/** Full watchlist scan can exceed default serverless limit. */
+/** Per-chunk should finish under ~30s; full scan uses several chunk calls. */
 export const config = {
   maxDuration: 60,
 };
@@ -20,13 +20,21 @@ function isCronAuthorized(req: NextApiRequest): boolean {
   return false;
 }
 
+function parseScanOptions(req: NextApiRequest) {
+  const chunks = Math.max(1, Math.min(12, Number(req.query.chunks) || 1));
+  const chunk = Math.max(0, Math.min(chunks - 1, Number(req.query.chunk) || 0));
+  const runId = typeof req.query.runId === "string" ? req.query.runId : undefined;
+  const fast = req.query.fast === "1" || req.query.fast === "true";
+  return { chunk, chunks, runId, fast };
+}
+
 async function runScanHandler(req: NextApiRequest, res: NextApiResponse) {
   if (!isCronAuthorized(req) && !isAuthenticatedRequest(req)) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
   try {
-    const result = await runLongScanSnapshot();
+    const result = await runLongScanSnapshot(parseScanOptions(req));
     return res.status(200).json(result);
   } catch (err) {
     const message = (err as Error).message || String(err);
@@ -36,9 +44,7 @@ async function runScanHandler(req: NextApiRequest, res: NextApiResponse) {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // Price cron style: GET + Bearer CRON_SECRET runs the job.
-  // (Postman POST works; many schedulers only fire GET and looked "successful"
-  // while only listing runs — nothing new was saved.)
+  // Cron: GET + Bearer runs scan (supports ?chunk=&chunks=)
   if (req.method === "GET" && isCronAuthorized(req)) {
     return runScanHandler(req, res);
   }

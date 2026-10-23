@@ -123,13 +123,23 @@ export default function LongScanView() {
     setError(null);
     setInfo(null);
     try {
-      const res = await fetch("/api/long-scan", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `Run failed (${res.status})`);
+      // 4 chunks so each request stays under short host timeouts
+      const CHUNKS = 4;
+      let totalSaved = 0;
+      for (let c = 0; c < CHUNKS; c++) {
+        setInfo(`Scanning chunk ${c + 1}/${CHUNKS}…`);
+        const res = await fetch(
+          `/api/long-scan?chunks=${CHUNKS}&chunk=${c}&fast=1`,
+          { method: "POST" }
+        );
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `Run failed (${res.status})`);
+        totalSaved = data.totalSaved ?? totalSaved + (data.saved || 0);
+      }
       setInfo(
-        data.saved > 0
-          ? `Saved ${data.saved} · checked ${data.scanned}`
-          : `No hits · checked ${data.scanned} · next ~${formatWhen(nextScheduledRun().toISOString())}`
+        totalSaved > 0
+          ? `Done · ${totalSaved} hit(s) across ${CHUNKS} chunks`
+          : `Done · no hits · next ~${formatWhen(nextScheduledRun().toISOString())}`
       );
       await load();
     } catch (err) {
