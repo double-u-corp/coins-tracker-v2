@@ -5,6 +5,9 @@ import {
   computeConfluenceSignal,
   isLongExtended,
   isWatchlistBuyLowHit,
+  isNearSupportWorthCheck,
+  calculateSMAAt,
+  getEffectivePrice,
   type ConfluenceResult,
   type LadderLevel,
 } from "@/features/chart/Technicals";
@@ -13,6 +16,43 @@ const RETENTION_DAYS = 30;
 const SCAN_YEARS = 1;
 const INTRADAY_HOURS = 336;
 const CONCURRENCY = 4;
+
+/**
+ * Long-scan only (does not change Spot score): price near support AND
+ * near / just crossing the 20 SMA from below (buy-low + momentum setup).
+ */
+function isNearSupportAndNear20SmaCross(
+  points: ChartPoint[],
+  c: ConfluenceResult
+): boolean {
+  if (points.length < 21) return false;
+  if (c.bias.includes("SHORT")) return false;
+  if (!isNearSupportWorthCheck(c)) return false;
+
+  const sma20 = calculateSMAAt(points, 20, 0);
+  const prevSma20 = calculateSMAAt(points, 20, 1);
+  if (sma20 == null || prevSma20 == null || sma20 <= 0) return false;
+
+  const price = c.currentPrice;
+  const prevPrice = getEffectivePrice(points[points.length - 2]);
+  if (!Number.isFinite(price) || !Number.isFinite(prevPrice)) return false;
+
+  const distPct = Math.abs(price - sma20) / sma20;
+  // Within ~2% of the 20 SMA (or tighter with ATR if present)
+  const nearBand =
+    c.atr != null && c.atr > 0
+      ? Math.max(0.012, (0.75 * c.atr) / sma20)
+      : 0.02;
+  if (distPct > nearBand) return false;
+
+  // Approaching / at cross from below, or just crossed above
+  const wasBelow = prevPrice <= prevSma20 * 1.002;
+  const nowNearOrAbove = price >= sma20 * 0.985;
+  const rising = price >= prevPrice * 0.998;
+
+  return wasBelow && nowNearOrAbove && rising;
+}
+
 
 export type LongScanRunResult = {
   scanned: number;
@@ -141,19 +181,33 @@ export async function runLongScanSnapshot(): Promise<LongScanRunResult> {
           intradayPoints: intraday ?? undefined,
         });
 
-        // Spot insight can still show LONG for mid-range / extended coins.
-        // Long-scan only keeps actionable LONGs: not extended (XDC @ 66% range out).
-        if (!confluence.bias.includes("LONG")) continue;
-
+        // Long-scan filters only (Spot bias/score unchanged):
+        // 1) LONG/STRONG LONG and not extended
+        // 2) OR near support + near/just 20 SMA cross from below
         const extended = isLongExtended(confluence);
-        if (extended) continue;
-
+        const isLong = confluence.bias.includes("LONG");
         const buyLow = isWatchlistBuyLowHit(confluence);
+        const nearCross = isNearSupportAndNear20SmaCross(points, confluence);
+
+        if (isLong && extended && !nearCross) continue;
+        if (!isLong && !nearCross) continue;
+        if (isLong && !extended) {
+          // keep
+        } else if (nearCross) {
+          // keep even if NEUTRAL / not classic LONG
+        } else {
+          continue;
+        }
+
         const ladder: LadderLevel[] = confluence.entrySuggestion?.ladder ?? [];
 
-        // Prefix signalsNote with tier so UI can show without schema migration
-        const tier = buyLow ? "BUY_LOW" : "LONG_WATCH";
-        const note = `[${tier}] ${signalsNote(confluence)}`.slice(0, 500);
+        const tier = nearCross
+          ? "NEAR_CROSS"
+          : buyLow
+            ? "BUY_LOW"
+            : "LONG_WATCH";
+        const crossHint = nearCross ? " · near support + 20 SMA cross" : "";
+        const note = `[${tier}] ${signalsNote(confluence)}${crossHint}`.slice(0, 500);
 
         await prisma.longScanHit.create({
           data: {

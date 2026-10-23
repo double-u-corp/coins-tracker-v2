@@ -76,8 +76,9 @@ function nextScheduledRun(from = new Date()): Date {
   return new Date(from.getTime() + 3 * 60 * 60 * 1000);
 }
 
-function tierOf(h: Hit): "buy_low" | "watch" | "extended" {
+function tierOf(h: Hit): "buy_low" | "watch" | "extended" | "near_cross" {
   const n = h.signalsNote || "";
+  if (n.startsWith("[NEAR_CROSS]")) return "near_cross";
   if (n.startsWith("[BUY_LOW]")) return "buy_low";
   if (n.startsWith("[EXTENDED]") || h.isExtended) return "extended";
   if (n.startsWith("[LONG_WATCH]")) return "watch";
@@ -280,7 +281,7 @@ export default function LongScanView() {
 
                 {empty ? (
                   <p className="text-sm text-slate-500 pl-1 mb-1">
-                    No non-extended LONG setups this pass. Next scheduled:{" "}
+                    No LONG / near-support·20SMA setups this pass. Next scheduled:{" "}
                     <span className="font-semibold text-indigo-800">
                       {formatWhen(nextRun.toISOString())}
                     </span>
@@ -310,7 +311,11 @@ export default function LongScanView() {
                                 >
                                   {h.bias}
                                 </span>
-                                {tier === "buy_low" ? (
+                                {tier === "near_cross" ? (
+                                  <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold text-sky-900">
+                                    Near support · 20 SMA
+                                  </span>
+                                ) : tier === "buy_low" ? (
                                   <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-900">
                                     Buy-low
                                   </span>
