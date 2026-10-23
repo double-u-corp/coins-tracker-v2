@@ -16,6 +16,51 @@ const RETENTION_DAYS = 30;
 const SCAN_YEARS = 1;
 const INTRADAY_HOURS = 336;
 const CONCURRENCY = 4;
+const LOG_PROMPT_ID = "long-scan-log";
+const LOG_CATEGORY = "LongScan";
+const MAX_LOG_RUNS = 40;
+
+export type LongScanHitPayload = {
+  symbol: string;
+  name: string;
+  bias: string;
+  score: number;
+  maxScore: number;
+  confidence: number;
+  currentPrice: number;
+  support: number | null;
+  resistance: number | null;
+  isExtended: boolean;
+  ladder: LadderLevel[];
+  invalidation: number | null;
+  invalidationNote: string | null;
+  target: number | null;
+  targetNote: string | null;
+  macroTrend: string | null;
+  signalsNote: string | null;
+  tier: string;
+};
+
+export type LongScanRunPayload = {
+  id: string;
+  scannedAt: string;
+  scanned: number;
+  saved: number;
+  pruned: number;
+  message: string;
+  hits: LongScanHitPayload[];
+};
+
+export type LongScanRunResult = {
+  ok: boolean;
+  scanned: number;
+  saved: number;
+  pruned: number;
+  errors: string[];
+  hits: { symbol: string; bias: string; price: number; extended: boolean }[];
+  scannedAt: string;
+  runId?: string;
+};
 
 /**
  * Long-scan only (does not change Spot score): price near support AND
@@ -38,14 +83,10 @@ function isNearSupportAndNear20SmaCross(
   if (!Number.isFinite(price) || !Number.isFinite(prevPrice)) return false;
 
   const distPct = Math.abs(price - sma20) / sma20;
-  // Within ~2% of the 20 SMA (or tighter with ATR if present)
   const nearBand =
-    c.atr != null && c.atr > 0
-      ? Math.max(0.012, (0.75 * c.atr) / sma20)
-      : 0.02;
+    c.atr != null && c.atr > 0 ? Math.max(0.012, (0.75 * c.atr) / sma20) : 0.02;
   if (distPct > nearBand) return false;
 
-  // Approaching / at cross from below, or just crossed above
   const wasBelow = prevPrice <= prevSma20 * 1.002;
   const nowNearOrAbove = price >= sma20 * 0.985;
   const rising = price >= prevPrice * 0.998;
@@ -53,16 +94,13 @@ function isNearSupportAndNear20SmaCross(
   return wasBelow && nowNearOrAbove && rising;
 }
 
-
-export type LongScanRunResult = {
-  scanned: number;
-  saved: number;
-  pruned: number;
-  errors: string[];
-  hits: { symbol: string; bias: string; price: number; extended: boolean }[];
-  scannedAt: string;
-  runId?: number;
-};
+function signalsNote(c: ConfluenceResult): string {
+  return c.signals
+    .filter((s) => s.available && s.weight !== 0)
+    .map((s) => `${s.name}: ${s.detail} (${s.weight > 0 ? "+" : ""}${s.weight})`)
+    .join(" · ")
+    .slice(0, 500);
+}
 
 async function loadDailyPoints(coinId: number): Promise<ChartPoint[]> {
   const cutoff = new Date(Date.now() - SCAN_YEARS * 365 * 24 * 60 * 60 * 1000);
@@ -128,20 +166,100 @@ async function loadIntradayPoints(coinId: number): Promise<ChartPoint[] | null> 
   }));
 }
 
-function signalsNote(c: ConfluenceResult): string {
-  return c.signals
-    .filter((s) => s.available && s.weight !== 0)
-    .map((s) => `${s.name}: ${s.detail} (${s.weight > 0 ? "+" : ""}${s.weight})`)
-    .join(" · ")
-    .slice(0, 500);
+function parseLogStore(raw: string | null | undefined): LongScanRunPayload[] {
+  if (!raw) return [];
+  try {
+    if (raw.startsWith("<!--meta:")) {
+      const end = raw.indexOf("-->");
+      const meta = JSON.parse(raw.slice(9, end));
+      if (Array.isArray(meta.runs)) return meta.runs as LongScanRunPayload[];
+    }
+    const j = JSON.parse(raw);
+    if (Array.isArray(j.runs)) return j.runs as LongScanRunPayload[];
+  } catch {
+    /* ignore */
+  }
+  return [];
+}
+
+function serializeLogStore(runs: LongScanRunPayload[]): string {
+  return `<!--meta:${JSON.stringify({ version: 1, runs })}-->\n`;
+}
+
+/** Read all long-scan runs (CatalystLog — always available). */
+export async function listLongScanRuns(): Promise<LongScanRunPayload[]> {
+  const log = await prisma.catalystLog.findUnique({ where: { promptId: LOG_PROMPT_ID } });
+  const runs = parseLogStore(log?.response);
+  const cutoff = Date.now() - RETENTION_DAYS * 86_400_000;
+  return runs
+    .filter((r) => {
+      const t = Date.parse(r.scannedAt);
+      return !Number.isFinite(t) || t >= cutoff;
+    })
+    .sort((a, b) => b.scannedAt.localeCompare(a.scannedAt));
+}
+
+async function appendRunToLog(run: LongScanRunPayload): Promise<void> {
+  const existing = await listLongScanRuns();
+  const next = [run, ...existing.filter((r) => r.id !== run.id)].slice(0, MAX_LOG_RUNS);
+  await prisma.catalystLog.upsert({
+    where: { promptId: LOG_PROMPT_ID },
+    create: {
+      promptId: LOG_PROMPT_ID,
+      category: LOG_CATEGORY,
+      response: serializeLogStore(next),
+    },
+    update: {
+      category: LOG_CATEGORY,
+      response: serializeLogStore(next),
+    },
+  });
+}
+
+export async function deleteLongScanRun(runId: string): Promise<boolean> {
+  const existing = await listLongScanRuns();
+  const next = existing.filter((r) => r.id !== runId);
+  if (next.length === existing.length) return false;
+  await prisma.catalystLog.upsert({
+    where: { promptId: LOG_PROMPT_ID },
+    create: {
+      promptId: LOG_PROMPT_ID,
+      category: LOG_CATEGORY,
+      response: serializeLogStore(next),
+    },
+    update: { response: serializeLogStore(next) },
+  });
+  return true;
+}
+
+export async function deleteLongScanHit(runId: string, symbol: string): Promise<boolean> {
+  const existing = await listLongScanRuns();
+  let changed = false;
+  const next = existing.map((r) => {
+    if (r.id !== runId) return r;
+    const hits = r.hits.filter((h) => h.symbol !== symbol);
+    if (hits.length !== r.hits.length) {
+      changed = true;
+      return { ...r, hits, saved: hits.length };
+    }
+    return r;
+  });
+  if (!changed) return false;
+  await prisma.catalystLog.upsert({
+    where: { promptId: LOG_PROMPT_ID },
+    create: {
+      promptId: LOG_PROMPT_ID,
+      category: LOG_CATEGORY,
+      response: serializeLogStore(next),
+    },
+    update: { response: serializeLogStore(next) },
+  });
+  return true;
 }
 
 /**
  * Full-watchlist confluence scan (server).
- * Saves LONG / STRONG LONG that are NOT extended (not already run up the range).
- * Mid/upper-range LONGs (e.g. 66% of 30d range) stay on Spot insight only.
- * Buy-low near floor is tagged; other non-extended LONGs are "watch".
- * Prunes rows older than 30 days.
+ * Always appends a run to CatalystLog (visible on /long-scan even with 0 hits).
  */
 export async function runLongScanSnapshot(): Promise<LongScanRunResult> {
   const coins = await prisma.coin.findMany({
@@ -150,11 +268,23 @@ export async function runLongScanSnapshot(): Promise<LongScanRunResult> {
   });
 
   const errors: string[] = [];
+  const hitPayloads: LongScanHitPayload[] = [];
   const hits: LongScanRunResult["hits"] = [];
   let saved = 0;
   let cursor = 0;
-  /** One timestamp for the whole run so a 14:10 and 17:10 pass never merge/override. */
   const runAt = new Date();
+  const runId = `run_${runAt.getTime()}`;
+
+  // Immediate breadcrumb so a timeout still leaves a visible "Running…" row
+  await appendRunToLog({
+    id: runId,
+    scannedAt: runAt.toISOString(),
+    scanned: coins.length,
+    saved: 0,
+    pruned: 0,
+    message: "Running…",
+    hits: [],
+  });
 
   async function worker() {
     while (cursor < coins.length) {
@@ -166,7 +296,6 @@ export async function runLongScanSnapshot(): Promise<LongScanRunResult> {
           loadIntradayPoints(coin.id),
         ]);
 
-        // Latest price from last record if any
         const lastRec = await prisma.record.findFirst({
           where: { coinId: coin.id },
           orderBy: { createdAt: "desc" },
@@ -181,9 +310,6 @@ export async function runLongScanSnapshot(): Promise<LongScanRunResult> {
           intradayPoints: intraday ?? undefined,
         });
 
-        // Long-scan filters only (Spot bias/score unchanged):
-        // 1) LONG/STRONG LONG and not extended
-        // 2) OR near support + near/just 20 SMA cross from below
         const extended = isLongExtended(confluence);
         const isLong = confluence.bias.includes("LONG");
         const buyLow = isWatchlistBuyLowHit(confluence);
@@ -191,48 +317,33 @@ export async function runLongScanSnapshot(): Promise<LongScanRunResult> {
 
         if (isLong && extended && !nearCross) continue;
         if (!isLong && !nearCross) continue;
-        if (isLong && !extended) {
-          // keep
-        } else if (nearCross) {
-          // keep even if NEUTRAL / not classic LONG
-        } else {
-          continue;
-        }
 
         const ladder: LadderLevel[] = confluence.entrySuggestion?.ladder ?? [];
-
-        const tier = nearCross
-          ? "NEAR_CROSS"
-          : buyLow
-            ? "BUY_LOW"
-            : "LONG_WATCH";
+        const tier = nearCross ? "NEAR_CROSS" : buyLow ? "BUY_LOW" : "LONG_WATCH";
         const crossHint = nearCross ? " · near support + 20 SMA cross" : "";
         const note = `[${tier}] ${signalsNote(confluence)}${crossHint}`.slice(0, 500);
 
-        await prisma.longScanHit.create({
-          data: {
-            coinId: coin.id,
-            symbol: coin.symbol,
-            name: coin.name,
-            scannedAt: runAt,
-            bias: confluence.bias,
-            score: confluence.score,
-            maxScore: confluence.maxPossibleScore,
-            confidence: confluence.confidence,
-            currentPrice: confluence.currentPrice,
-            support: confluence.support,
-            resistance: confluence.resistance,
-            isExtended: false,
-            ladderJson: JSON.stringify(ladder),
-            invalidation: confluence.invalidationLevel,
-            invalidationNote: confluence.invalidationNote,
-            target: confluence.exitSuggestion?.price ?? null,
-            targetNote: confluence.exitSuggestion?.note ?? null,
-            macroTrend: confluence.macroTrend,
-            signalsNote: note,
-          },
-        });
-
+        const payload: LongScanHitPayload = {
+          symbol: coin.symbol,
+          name: coin.name,
+          bias: confluence.bias,
+          score: confluence.score,
+          maxScore: confluence.maxPossibleScore,
+          confidence: confluence.confidence,
+          currentPrice: confluence.currentPrice,
+          support: confluence.support,
+          resistance: confluence.resistance,
+          isExtended: false,
+          ladder,
+          invalidation: confluence.invalidationLevel,
+          invalidationNote: confluence.invalidationNote,
+          target: confluence.exitSuggestion?.price ?? null,
+          targetNote: confluence.exitSuggestion?.note ?? null,
+          macroTrend: confluence.macroTrend,
+          signalsNote: note,
+          tier,
+        };
+        hitPayloads.push(payload);
         saved += 1;
         hits.push({
           symbol: coin.symbol,
@@ -246,68 +357,33 @@ export async function runLongScanSnapshot(): Promise<LongScanRunResult> {
     }
   }
 
-  // Log the run immediately so a timeout/crash still leaves a row on /long-scan
-  let runId: number | undefined;
-  try {
-    const started = await prisma.longScanRun.create({
-      data: {
-        scannedAt: runAt,
-        scanned: coins.length,
-        saved: 0,
-        pruned: 0,
-        message: "Running…",
-      },
-    });
-    runId = started.id;
-  } catch (err) {
-    throw new Error(
-      `Cannot write LongScanRun (run db push?): ${(err as Error).message}`
-    );
-  }
-
   const workers = Array.from(
     { length: Math.min(CONCURRENCY, Math.max(1, coins.length)) },
     () => worker()
   );
   await Promise.all(workers);
 
-  const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000);
-  let pruned = 0;
-  try {
-    pruned = (
-      await prisma.longScanHit.deleteMany({ where: { scannedAt: { lt: cutoff } } })
-    ).count;
-    await prisma.longScanRun.deleteMany({
-      where: { scannedAt: { lt: cutoff }, id: { not: runId } },
-    });
-  } catch {
-    /* prune is best-effort */
-  }
-
   const msg =
     saved > 0
-      ? `Saved ${saved} LONG hit(s).`
+      ? `Saved ${saved} hit(s).`
       : "No LONG / near-support·20SMA setups this run.";
   const finalMessage = errors.length ? `${msg} Errors: ${errors.length}` : msg;
 
-  try {
-    await prisma.longScanRun.update({
-      where: { id: runId },
-      data: {
-        scanned: coins.length,
-        saved,
-        pruned,
-        message: finalMessage,
-      },
-    });
-  } catch {
-    /* ignore */
-  }
-
-  return {
+  await appendRunToLog({
+    id: runId,
+    scannedAt: runAt.toISOString(),
     scanned: coins.length,
     saved,
-    pruned,
+    pruned: 0,
+    message: finalMessage,
+    hits: hitPayloads,
+  });
+
+  return {
+    ok: true,
+    scanned: coins.length,
+    saved,
+    pruned: 0,
     errors,
     hits,
     scannedAt: runAt.toISOString(),
