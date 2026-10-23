@@ -246,31 +246,63 @@ export async function runLongScanSnapshot(): Promise<LongScanRunResult> {
     }
   }
 
-  const workers = Array.from({ length: Math.min(CONCURRENCY, Math.max(1, coins.length)) }, () =>
-    worker()
+  // Log the run immediately so a timeout/crash still leaves a row on /long-scan
+  let runId: number | undefined;
+  try {
+    const started = await prisma.longScanRun.create({
+      data: {
+        scannedAt: runAt,
+        scanned: coins.length,
+        saved: 0,
+        pruned: 0,
+        message: "Running…",
+      },
+    });
+    runId = started.id;
+  } catch (err) {
+    throw new Error(
+      `Cannot write LongScanRun (run db push?): ${(err as Error).message}`
+    );
+  }
+
+  const workers = Array.from(
+    { length: Math.min(CONCURRENCY, Math.max(1, coins.length)) },
+    () => worker()
   );
   await Promise.all(workers);
 
   const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000);
-  const pruned = (
-    await prisma.longScanHit.deleteMany({ where: { scannedAt: { lt: cutoff } } })
-  ).count;
-  await prisma.longScanRun.deleteMany({ where: { scannedAt: { lt: cutoff } } });
+  let pruned = 0;
+  try {
+    pruned = (
+      await prisma.longScanHit.deleteMany({ where: { scannedAt: { lt: cutoff } } })
+    ).count;
+    await prisma.longScanRun.deleteMany({
+      where: { scannedAt: { lt: cutoff }, id: { not: runId } },
+    });
+  } catch {
+    /* prune is best-effort */
+  }
 
   const msg =
     saved > 0
       ? `Saved ${saved} LONG hit(s).`
-      : "No non-extended LONG setups this run.";
+      : "No LONG / near-support·20SMA setups this run.";
+  const finalMessage = errors.length ? `${msg} Errors: ${errors.length}` : msg;
 
-  const run = await prisma.longScanRun.create({
-    data: {
-      scannedAt: runAt,
-      scanned: coins.length,
-      saved,
-      pruned,
-      message: errors.length ? `${msg} Errors: ${errors.length}` : msg,
-    },
-  });
+  try {
+    await prisma.longScanRun.update({
+      where: { id: runId },
+      data: {
+        scanned: coins.length,
+        saved,
+        pruned,
+        message: finalMessage,
+      },
+    });
+  } catch {
+    /* ignore */
+  }
 
   return {
     scanned: coins.length,
@@ -279,6 +311,6 @@ export async function runLongScanSnapshot(): Promise<LongScanRunResult> {
     errors,
     hits,
     scannedAt: runAt.toISOString(),
-    runId: run.id,
+    runId,
   };
 }

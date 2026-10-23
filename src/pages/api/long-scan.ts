@@ -3,6 +3,11 @@ import { isAuthenticatedRequest } from "@/lib/auth";
 import prisma from "@/lib/prisma";
 import { runLongScanSnapshot } from "@/lib/longScanLogic";
 
+/** Vercel serverless: full watchlist scan needs more than default 10s. */
+export const config = {
+  maxDuration: 60,
+};
+
 type LadderLevel = { price: number; basis: string; allocationPct: number };
 
 export type LongScanHitDto = {
@@ -77,7 +82,50 @@ function mapHit(h: {
   };
 }
 
+function isCronAuthorized(req: NextApiRequest): boolean {
+  const cronSecret = process.env.CRON_SECRET;
+  const authHeader = req.headers.authorization;
+  if (cronSecret && authHeader === `Bearer ${cronSecret}`) return true;
+  // Vercel Cron injects this on scheduled invocations
+  if (req.headers["x-vercel-cron"] === "1") return true;
+  return false;
+}
+
+async function runScanHandler(req: NextApiRequest, res: NextApiResponse) {
+  if (!isCronAuthorized(req) && !isAuthenticatedRequest(req)) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  try {
+    const result = await runLongScanSnapshot();
+    return res.status(200).json({ ok: true, ...result });
+  } catch (err) {
+    const message = (err as Error).message || String(err);
+    console.error("[long-scan]", message);
+    // Always try to leave a visible failure breadcrumb on the log page
+    try {
+      await prisma.longScanRun.create({
+        data: {
+          scannedAt: new Date(),
+          scanned: 0,
+          saved: 0,
+          pruned: 0,
+          message: `FAILED: ${message}`.slice(0, 500),
+        },
+      });
+    } catch (logErr) {
+      console.error("[long-scan] could not write failure run:", logErr);
+    }
+    return res.status(500).json({ ok: false, error: message });
+  }
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  // Cron may use GET (same as price /api/cron) or POST
+  if (req.method === "GET" && (req.query.run === "1" || req.query.run === "true")) {
+    return runScanHandler(req, res);
+  }
+
   if (req.method === "GET") {
     try {
       const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
@@ -103,7 +151,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         })),
       });
     } catch (err) {
-      return res.status(500).json({ error: (err as Error).message });
+      const message = (err as Error).message;
+      // Table missing → clear signal for deploy
+      if (/longScanRun|LongScanRun|does not exist/i.test(message)) {
+        return res.status(500).json({
+          error:
+            "LongScan tables missing — run: npx prisma db push && npx prisma generate",
+        });
+      }
+      return res.status(500).json({ error: message });
     }
   }
 
@@ -129,22 +185,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   if (req.method === "POST") {
-    // Cron secret OR logged-in user (manual run from the page)
-    const cronSecret = process.env.CRON_SECRET;
-    const authHeader = req.headers.authorization;
-    const isVercelCron = Boolean(cronSecret && authHeader === `Bearer ${cronSecret}`);
-    const hasUser = isAuthenticatedRequest(req);
-
-    if (!isVercelCron && !hasUser) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-
-    try {
-      const result = await runLongScanSnapshot();
-      return res.status(200).json(result);
-    } catch (err) {
-      return res.status(500).json({ error: (err as Error).message });
-    }
+    return runScanHandler(req, res);
   }
 
   res.setHeader("Allow", "GET, POST, DELETE");
