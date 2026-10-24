@@ -247,6 +247,15 @@ export default function ChartView() {
     return todayPollPrices.map((s) => ({ ...s, delta: deltaByHour.get(s.hour) ?? null }));
   }, [todayPollPrices]);
 
+  /** Min tile width (rem) so the longest price fits: the grid auto-fits columns, so big prices get fewer, wider tiles on small screens. */
+  const pollTileMinRem = useMemo(() => {
+    const longest = pollTiles.reduce(
+      (max, s) => (s.price != null ? Math.max(max, formatPhp(s.price).length) : max),
+      0
+    );
+    return Math.max(5.5, longest * 0.62 + 1.5);
+  }, [pollTiles]);
+
   const swingRanks = useMemo(() => {
     if (!allCoins || allCoins.length === 0) return new Map<string, number>();
 
@@ -650,7 +659,10 @@ export default function ChartView() {
                   <span className="text-[11px] text-gray-400">Manila time</span>
                 </div>
 
-                <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
+                <div
+                  className="grid gap-2"
+                  style={{ gridTemplateColumns: `repeat(auto-fit, minmax(${pollTileMinRem}rem, 1fr))` }}
+                >
                   {pollTiles.map((s) => {
                     const hasPrice = s.price != null;
                     const up = s.delta != null && s.delta > 0.005;
@@ -686,7 +698,7 @@ export default function ChartView() {
                         </div>
 
                         <div
-                          className={`mt-0.5 font-mono font-bold tabular-nums leading-tight ${
+                          className={`mt-0.5 max-w-full whitespace-nowrap font-mono font-bold tabular-nums leading-tight ${
                             s.isCurrent
                               ? "text-base text-emerald-800"
                               : hasPrice

@@ -160,6 +160,17 @@ export default function CalendarView() {
     });
   }, [recordsWithData, monthHighest, monthLowest, nowPrice, intradayPoints]);
 
+  /** Min poll-tile width (rem) so the longest price fits; columns auto-fit to the card width. */
+  const pollTileMinRem = useMemo(() => {
+    let longest = 0;
+    for (const d of dailyTiles) {
+      for (const p of d.polls) {
+        if (p.price != null) longest = Math.max(longest, formatPhp(p.price).length);
+      }
+    }
+    return Math.max(3.5, longest * 0.42 + 0.75);
+  }, [dailyTiles]);
+
   const coinCardsData = coinOptions.map((coin) => {
     const coinDays = (allCoinsData[coin.symbol] || []).filter(
       (d) => d.high != null && d.low != null
@@ -463,7 +474,10 @@ export default function CalendarView() {
                       <span>Polls</span>
                       <span className="font-medium normal-case tracking-normal">Manila</span>
                     </div>
-                    <div className="grid grid-cols-4 gap-1">
+                    <div
+                      className="grid gap-1"
+                      style={{ gridTemplateColumns: `repeat(auto-fit, minmax(${pollTileMinRem}rem, 1fr))` }}
+                    >
                       {polls.map((p) => {
                         const pUp = p.delta != null && p.delta > 0.005;
                         const pDown = p.delta != null && p.delta < -0.005;
@@ -487,7 +501,7 @@ export default function CalendarView() {
                               {p.label}
                             </div>
                             <div
-                              className={`truncate font-mono text-[11px] font-bold tabular-nums leading-tight ${
+                              className={`whitespace-nowrap font-mono text-[11px] font-bold tabular-nums leading-tight ${
                                 p.isCurrent
                                   ? "text-emerald-800"
                                   : p.price != null
