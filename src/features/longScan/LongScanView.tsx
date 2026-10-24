@@ -130,7 +130,7 @@ export default function LongScanView() {
     setInfo(null);
     try {
       // 4 chunks so each request stays under short host timeouts
-      const CHUNKS = 4;
+      const CHUNKS = 10;
       let totalSaved = 0;
       for (let c = 0; c < CHUNKS; c++) {
         setInfo(`Scanning chunk ${c + 1}/${CHUNKS}…`);

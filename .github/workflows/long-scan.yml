@@ -9,19 +9,20 @@ jobs:
   trigger-long-scan:
     runs-on: ubuntu-latest
     steps:
-      - name: Scan all chunks
+      - name: Scan all chunks (10 × ~3 coins)
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           APP_URL: ${{ secrets.APP_URL }}
         run: |
           set -e
           RUN_ID="run_gh_$(date -u +%Y%m%d%H)"
-          echo "Shared runId=$RUN_ID"
-          for C in 0 1 2 3; do
-            echo "=== chunk $C / 4 ==="
+          CHUNKS=10
+          echo "Shared runId=$RUN_ID chunks=$CHUNKS"
+          for C in $(seq 0 $((CHUNKS - 1))); do
+            echo "=== chunk $C / $CHUNKS ==="
             response=$(curl -sS -o response.txt -w "%{http_code}" --max-time 30 \
               -H "Authorization: Bearer ${CRON_SECRET}" \
-              "${APP_URL%/}/api/long-scan?chunks=4&chunk=${C}&fast=1&runId=${RUN_ID}")
+              "${APP_URL%/}/api/long-scan?chunks=${CHUNKS}&chunk=${C}&fast=1&runId=${RUN_ID}")
             echo "HTTP $response"
             cat response.txt
             echo ""
@@ -29,7 +30,6 @@ jobs:
               echo "Chunk $C failed"
               exit 1
             fi
-            # Must not be a bare list response
             if grep -q '"logged"' response.txt; then
               echo "logged ok"
             else
