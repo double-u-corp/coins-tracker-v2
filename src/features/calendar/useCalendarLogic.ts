@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
-import type { CoinSummary, DailyRecord } from "@/validators/recordSchema";
+import type { ChartPoint, CoinSummary, DailyRecord } from "@/validators/recordSchema";
 
 export interface CoinOption {
   symbol: string;
@@ -20,6 +20,10 @@ export function useCalendarLogic() {
   
   const [allCoinsData, setAllCoinsData] = useState<MultiCoinRecords>({});
   
+  // 3h poll series for the selected coin (same endpoint the Chart page uses).
+  // Best-effort: null on failure, the calendar just hides the poll tiles.
+  const [intradayPoints, setIntradayPoints] = useState<ChartPoint[] | null>(null);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -103,6 +107,29 @@ export function useCalendarLogic() {
     };
   }, [monthParam, coinOptions]);
 
+  // Intraday polls for the selected coin. `hours` reaches back from now to the
+  // start of the viewed month so past months are covered; the view filters by day.
+  useEffect(() => {
+    if (!selectedSymbol) {
+      setIntradayPoints(null);
+      return;
+    }
+    let cancelled = false;
+    const monthStart = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1);
+    const hours = Math.max(24, Math.ceil((Date.now() - monthStart.getTime()) / 3_600_000));
+    fetch(`/api/coins?type=chart&symbol=${selectedSymbol}&granularity=3h&hours=${hours}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { points: ChartPoint[] } | null) => {
+        if (!cancelled) setIntradayPoints(data?.points?.length ? data.points : null);
+      })
+      .catch(() => {
+        if (!cancelled) setIntradayPoints(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSymbol, monthCursor]);
+
   // Derive single coin daily records directly from allCoinsData
   const days = useMemo(() => {
     return selectedSymbol ? allCoinsData[selectedSymbol] || [] : [];
@@ -125,6 +152,7 @@ export function useCalendarLogic() {
     goToNextMonth,
     days,
     allCoinsData,
+    intradayPoints,
     loading,
     error,
   };

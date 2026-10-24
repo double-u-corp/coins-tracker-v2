@@ -155,6 +155,98 @@ export default function ChartView() {
     return (lastPoint.high + lastPoint.low) / 2;
   }, [selectedCoin, points]);
 
+  /** Today's 8 poll prints (Manila), starting 08:05 — "-" until that slot has data. */
+  const todayPollPrices = useMemo(() => {
+    // Display order: session day starts 08:05
+    const SLOT_HOURS = [8, 11, 14, 17, 20, 23, 2, 5] as const;
+    const SLOT_LABELS: Record<number, string> = {
+      8: "8:05",
+      11: "11:05",
+      14: "14:05",
+      17: "17:05",
+      20: "20:05",
+      23: "23:05",
+      2: "2:05",
+      5: "5:05",
+    };
+
+    const now = new Date();
+    const manilaNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+    const todayKey = manilaNow.toISOString().slice(0, 10); // YYYY-MM-DD in Manila wall via UTC+8 shift
+
+    type SlotRow = { hour: number; label: string; price: number | null; isCurrent: boolean };
+    const bestByHour = new Map<number, { price: number; dist: number; ts: number }>();
+
+    const series = intradayPoints && intradayPoints.length > 0 ? intradayPoints : points;
+    for (const pt of series) {
+      const raw = (pt as { period?: string }).period;
+      if (!raw) continue;
+      const tms = new Date(raw).getTime();
+      if (!Number.isFinite(tms)) continue;
+      const manila = new Date(tms + 8 * 60 * 60 * 1000);
+      const dayKey = manila.toISOString().slice(0, 10);
+      if (dayKey !== todayKey) continue;
+      const hour = manila.getUTCHours();
+      // Map to nearest scheduled slot hour
+      let slot = -1;
+      let best = 99;
+      for (const h of SLOT_HOURS) {
+        const d = Math.min(Math.abs(hour - h), 24 - Math.abs(hour - h));
+        if (d < best && d <= 1) {
+          best = d;
+          slot = h;
+        }
+      }
+      if (slot < 0) continue;
+      const price =
+        typeof (pt as { close?: number }).close === "number"
+          ? (pt as { close: number }).close
+          : typeof (pt as { high?: number }).high === "number"
+            ? (pt as { high: number }).high
+            : null;
+      if (price == null || !Number.isFinite(price)) continue;
+      const dist = best;
+      const prev = bestByHour.get(slot);
+      if (!prev || dist < prev.dist || (dist === prev.dist && tms >= prev.ts)) {
+        bestByHour.set(slot, { price, dist, ts: tms });
+      }
+    }
+
+    // Current slot = latest filled today, or nearest hour to now among filled
+    let currentHour: number | null = null;
+    let latestTs = -1;
+    for (const [h, v] of bestByHour) {
+      if (v.ts >= latestTs) {
+        latestTs = v.ts;
+        currentHour = h;
+      }
+    }
+
+    return SLOT_HOURS.map((hour) => {
+      const row = bestByHour.get(hour);
+      return {
+        hour,
+        label: SLOT_LABELS[hour],
+        price: row?.price ?? null,
+        isCurrent: currentHour === hour && row != null,
+      } satisfies SlotRow;
+    });
+  }, [intradayPoints, points]);
+
+  /** Poll tiles with % change vs the previous filled poll (session order). */
+  const pollTiles = useMemo(() => {
+    // Change is vs the previous poll in time order (2:05 → 23:05), even though
+    // tiles are displayed in session order starting 8:05.
+    const deltaByHour = new Map<number, number>();
+    let prev: number | null = null;
+    for (const s of [...todayPollPrices].sort((a, b) => a.hour - b.hour)) {
+      if (s.price == null) continue;
+      if (prev != null && prev > 0) deltaByHour.set(s.hour, ((s.price - prev) / prev) * 100);
+      prev = s.price;
+    }
+    return todayPollPrices.map((s) => ({ ...s, delta: deltaByHour.get(s.hour) ?? null }));
+  }, [todayPollPrices]);
+
   const swingRanks = useMemo(() => {
     if (!allCoins || allCoins.length === 0) return new Map<string, number>();
 
@@ -535,7 +627,7 @@ export default function ChartView() {
         <div className="flex flex-col gap-6">
           {chartError && <AlertBanner variant="error" message={`Failed to load chart: ${chartError}`} />}
 
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white border border-purple-100 rounded-lg p-5 shadow-sm">
+          <div className="flex flex-col gap-4 bg-white border border-purple-100 rounded-lg p-5 shadow-sm">
             <div className="flex flex-row items-center gap-3 flex-wrap sm:flex-nowrap">
               {coinRank !== null && (
                 <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-2.5 py-1 rounded-md whitespace-nowrap">
@@ -543,17 +635,80 @@ export default function ChartView() {
                   {coinRank === 1 && <span className="font-medium text-purple-600 hidden sm:inline">(Highest Swing)</span>}
                 </div>
               )}
-              
+
               <h2 className="text-xl font-bold text-gray-900 whitespace-nowrap">
                 {selectedCoin?.name || symbol} ({symbol?.endsWith('PHP') ? symbol : `${symbol}PHP`})
               </h2>
             </div>
 
             {currentPrice > 0 && (
-              <div className="text-left sm:text-right border-t sm:border-0 border-gray-100 pt-3 sm:pt-0 w-full sm:w-auto mt-2 sm:mt-0">
-                <div className="text-xs font-semibold uppercase text-gray-500">Current Price</div>
-                <div className="text-2xl font-bold text-gray-900 font-mono">
-                  {formatPhp(currentPrice)}
+              <div className="border-t border-gray-100 pt-4">
+                <div className="mb-2.5 flex items-center justify-between">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+                    Today&apos;s Polls
+                  </span>
+                  <span className="text-[11px] text-gray-400">Manila time</span>
+                </div>
+
+                <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
+                  {pollTiles.map((s) => {
+                    const hasPrice = s.price != null;
+                    const up = s.delta != null && s.delta > 0.005;
+                    const down = s.delta != null && s.delta < -0.005;
+                    return (
+                      <div
+                        key={s.hour}
+                        title={`${s.label} Manila`}
+                        className={`relative flex flex-col items-center justify-center rounded-lg px-2 py-2.5 text-center transition-colors ${
+                          s.isCurrent
+                            ? "border border-emerald-400 bg-gradient-to-b from-emerald-50 to-emerald-100/60 shadow-sm ring-2 ring-emerald-200"
+                            : hasPrice
+                              ? "border border-gray-200 bg-white hover:border-gray-300"
+                              : "border border-dashed border-gray-200 bg-gray-50/60"
+                        }`}
+                      >
+                        {s.isCurrent && (
+                          <span className="absolute -top-2 left-1/2 inline-flex -translate-x-1/2 items-center gap-1 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-white shadow-sm">
+                            <span className="relative flex h-1.5 w-1.5">
+                              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
+                              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
+                            </span>
+                            Now
+                          </span>
+                        )}
+
+                        <div
+                          className={`text-[10px] font-semibold tabular-nums tracking-wide ${
+                            s.isCurrent ? "text-emerald-700" : "text-gray-400"
+                          }`}
+                        >
+                          {s.label}
+                        </div>
+
+                        <div
+                          className={`mt-0.5 font-mono font-bold tabular-nums leading-tight ${
+                            s.isCurrent
+                              ? "text-base text-emerald-800"
+                              : hasPrice
+                                ? "text-sm text-gray-800"
+                                : "text-sm text-gray-300"
+                          }`}
+                        >
+                          {hasPrice ? formatPhp(s.price as number) : "—"}
+                        </div>
+
+                        <div
+                          className={`mt-0.5 h-3.5 text-[10px] font-semibold tabular-nums ${
+                            up ? "text-emerald-600" : down ? "text-red-500" : "text-gray-400"
+                          }`}
+                        >
+                          {s.delta != null
+                            ? `${up ? "▲" : down ? "▼" : "•"} ${Math.abs(s.delta).toFixed(2)}%`
+                            : ""}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

@@ -5,6 +5,53 @@ import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
 import { useCalendarLogic } from "./useCalendarLogic";
 
+const POLL_SLOT_HOURS = [8, 11, 14, 17, 20, 23, 2, 5] as const;
+const POLL_SLOT_LABELS: Record<number, string> = {
+  8: "8:05",
+  11: "11:05",
+  14: "14:05",
+  17: "17:05",
+  20: "20:05",
+  23: "23:05",
+  2: "2:05",
+  5: "5:05",
+};
+
+type PollHit = { price: number; dist: number; ts: number };
+
+/** Groups 3h points into Manila calendar days → nearest scheduled poll slot (same rules as Chart page). */
+function buildPollsByDay(points: unknown[] | null): Map<string, Map<number, PollHit>> {
+  const byDay = new Map<string, Map<number, PollHit>>();
+  if (!points) return byDay;
+  for (const pt of points as { period?: string; close?: number; high?: number }[]) {
+    if (!pt.period) continue;
+    const tms = new Date(pt.period).getTime();
+    if (!Number.isFinite(tms)) continue;
+    const manila = new Date(tms + 8 * 60 * 60 * 1000);
+    const dayKey = manila.toISOString().slice(0, 10);
+    const hour = manila.getUTCHours();
+    let slot = -1;
+    let best = 99;
+    for (const h of POLL_SLOT_HOURS) {
+      const d = Math.min(Math.abs(hour - h), 24 - Math.abs(hour - h));
+      if (d < best && d <= 1) {
+        best = d;
+        slot = h;
+      }
+    }
+    if (slot < 0) continue;
+    const price = typeof pt.close === "number" ? pt.close : typeof pt.high === "number" ? pt.high : null;
+    if (price == null || !Number.isFinite(price)) continue;
+    const day = byDay.get(dayKey) ?? new Map<number, PollHit>();
+    const prev = day.get(slot);
+    if (!prev || best < prev.dist || (best === prev.dist && tms >= prev.ts)) {
+      day.set(slot, { price, dist: best, ts: tms });
+    }
+    byDay.set(dayKey, day);
+  }
+  return byDay;
+}
+
 export default function CalendarView() {
   const {
     coinOptions,
@@ -15,6 +62,7 @@ export default function CalendarView() {
     goToNextMonth,
     days,
     allCoinsData,
+    intradayPoints,
     loading,
     error,
   } = useCalendarLogic();
@@ -48,6 +96,69 @@ export default function CalendarView() {
     monthHighest && monthLowest && monthLowest > 0
       ? ((monthHighest - monthLowest) / monthLowest) * 100
       : 0;
+
+  const nowPrice = coinOptions.find((c) => c.symbol === selectedSymbol)?.currentPrice ?? null;
+
+  /** Per-day breakdown: swing %, midpoint, change vs previous day, range-bar position. */
+  const dailyTiles = useMemo(() => {
+    const span =
+      monthHighest != null && monthLowest != null ? monthHighest - monthLowest : 0;
+    const pos = (v: number) =>
+      span > 0 && monthLowest != null
+        ? Math.min(100, Math.max(0, ((v - monthLowest) / span) * 100))
+        : 0;
+    const todayStr = new Date().toDateString();
+    const pollsByDay = buildPollsByDay(intradayPoints);
+
+    return recordsWithData.map((record, i) => {
+      const high = record.high as number;
+      const low = record.low as number;
+      const mid = (high + low) / 2;
+      const swing = low > 0 ? ((high - low) / low) * 100 : 0;
+      const prev = recordsWithData[i + 1]; // list is newest → oldest
+      const prevMid = prev ? ((prev.high as number) + (prev.low as number)) / 2 : null;
+      const delta = prevMid != null && prevMid > 0 ? ((mid - prevMid) / prevMid) * 100 : null;
+      const isToday = new Date(record.date).toDateString() === todayStr;
+      const barLeft = pos(low);
+      const barWidth = Math.max(3, pos(high) - barLeft);
+      const nowPos =
+        isToday && nowPrice != null && nowPrice > 0 ? pos(nowPrice) : null;
+
+      // Poll tiles for this day. Change is vs the previous poll in time order.
+      const hits = pollsByDay.get(String(record.date).slice(0, 10));
+      let latestHour: number | null = null;
+      let latestTs = -1;
+      const deltaByHour = new Map<number, number>();
+      if (hits) {
+        let prevPrice: number | null = null;
+        for (const h of [...POLL_SLOT_HOURS].sort((a, b) => a - b)) {
+          const hit = hits.get(h);
+          if (!hit) continue;
+          if (prevPrice != null && prevPrice > 0) {
+            deltaByHour.set(h, ((hit.price - prevPrice) / prevPrice) * 100);
+          }
+          prevPrice = hit.price;
+          if (hit.ts >= latestTs) {
+            latestTs = hit.ts;
+            latestHour = h;
+          }
+        }
+      }
+      const polls = POLL_SLOT_HOURS.map((hour) => {
+        const hit = hits?.get(hour);
+        return {
+          hour,
+          label: POLL_SLOT_LABELS[hour],
+          price: hit?.price ?? null,
+          delta: deltaByHour.get(hour) ?? null,
+          isCurrent: isToday && latestHour === hour && hit != null,
+        };
+      });
+      const hasPolls = polls.some((p) => p.price != null);
+
+      return { record, mid, swing, delta, isToday, barLeft, barWidth, nowPos, polls, hasPolls };
+    });
+  }, [recordsWithData, monthHighest, monthLowest, nowPrice, intradayPoints]);
 
   const coinCardsData = coinOptions.map((coin) => {
     const coinDays = (allCoinsData[coin.symbol] || []).filter(
@@ -278,8 +389,8 @@ export default function CalendarView() {
 
       {/* Daily grid */}
       {!loading && !error && selectedSymbol && recordsWithData.length > 0 && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {recordsWithData.map((record) => {
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {dailyTiles.map(({ record, mid, swing, delta, isToday, barLeft, barWidth, nowPos, polls, hasPolls }) => {
             const formattedDate = new Date(record.date).toLocaleDateString(undefined, {
               weekday: "short",
               month: "short",
@@ -287,22 +398,37 @@ export default function CalendarView() {
             });
             const isMonthHigh = record.high === monthHighest;
             const isMonthLow = record.low === monthLowest;
+            const up = delta != null && delta > 0.005;
+            const down = delta != null && delta < -0.005;
 
             return (
               <div
                 key={record.date}
-                className={`rounded-xl border bg-white p-3.5 shadow-sm transition ${
-                  isMonthHigh || isMonthLow
-                    ? "border-slate-400 shadow-md ring-1 ring-slate-200"
-                    : "border-slate-200 hover:border-slate-300"
+                className={`relative rounded-xl border bg-white p-3.5 shadow-sm transition ${
+                  isToday
+                    ? "border-emerald-400 bg-gradient-to-b from-emerald-50/60 to-white ring-2 ring-emerald-200"
+                    : isMonthHigh || isMonthLow
+                      ? "border-slate-400 shadow-md ring-1 ring-slate-200"
+                      : "border-slate-200 hover:border-slate-300"
                 }`}
               >
                 <div className="mb-2.5 flex items-center justify-between border-b border-slate-100 pb-2">
                   <span className="text-xs font-bold text-slate-900">{formattedDate}</span>
-                  <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">
-                    {selectedSymbol}
-                  </span>
+                  {isToday ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white">
+                      <span className="relative flex h-1.5 w-1.5">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
+                        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
+                      </span>
+                      Today
+                    </span>
+                  ) : (
+                    <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">
+                      {selectedSymbol}
+                    </span>
+                  )}
                 </div>
+
                 <div className="space-y-1.5 text-sm">
                   <div
                     className={`flex items-baseline justify-between rounded-lg px-2 py-1.5 ${
@@ -327,6 +453,111 @@ export default function CalendarView() {
                     <span className={`font-mono text-sm font-bold tabular-nums ${isMonthLow ? "text-rose-700" : "text-rose-600"}`}>
                       {formatPhp(record.low)}
                     </span>
+                  </div>
+                </div>
+
+                {/* 3h poll prints for the day */}
+                {hasPolls && (
+                  <div className="mt-2.5">
+                    <div className="mb-1 flex items-center justify-between text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                      <span>Polls</span>
+                      <span className="font-medium normal-case tracking-normal">Manila</span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1">
+                      {polls.map((p) => {
+                        const pUp = p.delta != null && p.delta > 0.005;
+                        const pDown = p.delta != null && p.delta < -0.005;
+                        return (
+                          <div
+                            key={p.hour}
+                            title={`${p.label} Manila`}
+                            className={`rounded-md px-1 py-1 text-center ${
+                              p.isCurrent
+                                ? "border border-emerald-400 bg-emerald-50 ring-1 ring-emerald-200"
+                                : p.price != null
+                                  ? "border border-slate-200 bg-white"
+                                  : "border border-dashed border-slate-200 bg-slate-50/60"
+                            }`}
+                          >
+                            <div
+                              className={`text-[9px] font-semibold tabular-nums ${
+                                p.isCurrent ? "text-emerald-700" : "text-slate-400"
+                              }`}
+                            >
+                              {p.label}
+                            </div>
+                            <div
+                              className={`truncate font-mono text-[11px] font-bold tabular-nums leading-tight ${
+                                p.isCurrent
+                                  ? "text-emerald-800"
+                                  : p.price != null
+                                    ? "text-slate-700"
+                                    : "text-slate-300"
+                              }`}
+                            >
+                              {p.price != null ? formatPhp(p.price) : "—"}
+                            </div>
+                            <div
+                              className={`h-3 text-[9px] font-semibold tabular-nums ${
+                                pUp ? "text-emerald-600" : pDown ? "text-red-500" : "text-slate-400"
+                              }`}
+                            >
+                              {p.delta != null
+                                ? `${pUp ? "▲" : pDown ? "▼" : "•"} ${Math.abs(p.delta).toFixed(1)}%`
+                                : ""}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Swing + midpoint with day-over-day change */}
+                <div className="mt-2 grid grid-cols-2 gap-1.5">
+                  <div className="rounded-lg border border-sky-100 bg-sky-50/70 px-2 py-1.5 text-center">
+                    <div className="text-[9px] font-bold uppercase tracking-wide text-sky-700">Swing</div>
+                    <div className="font-mono text-xs font-bold tabular-nums text-sky-800">
+                      {swing.toFixed(1)}%
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-slate-100 bg-slate-50 px-2 py-1.5 text-center">
+                    <div className="text-[9px] font-bold uppercase tracking-wide text-slate-400">Mid</div>
+                    <div className="font-mono text-xs font-bold tabular-nums text-slate-700">
+                      {formatPhp(mid)}
+                    </div>
+                    <div
+                      className={`h-3 text-[10px] font-semibold tabular-nums ${
+                        up ? "text-emerald-600" : down ? "text-red-500" : "text-slate-400"
+                      }`}
+                    >
+                      {delta != null
+                        ? `${up ? "▲" : down ? "▼" : "•"} ${Math.abs(delta).toFixed(2)}%`
+                        : ""}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Where this day's range sits inside the month's range */}
+                <div className="mt-2.5">
+                  <div className="relative h-1.5 rounded-full bg-slate-100">
+                    <div
+                      className={`absolute top-0 h-1.5 rounded-full ${
+                        isToday ? "bg-emerald-400" : "bg-slate-300"
+                      }`}
+                      style={{ left: `${barLeft}%`, width: `${Math.min(barWidth, 100 - barLeft)}%` }}
+                    />
+                    {nowPos != null && (
+                      <div
+                        className="absolute -top-1 h-3.5 w-1 -translate-x-1/2 rounded-full bg-emerald-600 ring-2 ring-white"
+                        style={{ left: `${nowPos}%` }}
+                        title={`Now ${formatPhp(nowPrice as number)}`}
+                      />
+                    )}
+                  </div>
+                  <div className="mt-1 flex justify-between text-[9px] font-medium text-slate-400">
+                    <span>Month low</span>
+                    <span>Month high</span>
                   </div>
                 </div>
               </div>
