@@ -161,16 +161,17 @@ export default function CalendarView() {
     });
   }, [recordsWithData, monthHighest, monthLowest, nowPrice, intradayPoints]);
 
-  /** Min poll-tile width (rem) so the longest price fits; columns auto-fit to the card width. */
-  const pollTileMinRem = useMemo(() => {
-    let longest = 0;
+  /** Poll tiles keep a FIXED size; only the price font shrinks (via container units) to fit the longest price. */
+  const pollPriceLen = useMemo(() => {
+    let longest = 6;
     for (const d of dailyTiles) {
       for (const p of d.polls) {
         if (p.price != null) longest = Math.max(longest, formatPhp(p.price).length);
       }
     }
-    return Math.max(3.5, longest * 0.42 + 0.75);
+    return longest;
   }, [dailyTiles]);
+  const pollPriceFont = `max(0.5rem, min(0.6875rem, calc((100cqw - 0.5rem) / ${(pollPriceLen * 0.62).toFixed(2)})))`;
 
   const coinCardsData = coinOptions.map((coin) => {
     const coinDays = (allCoinsData[coin.symbol] || []).filter(
@@ -475,10 +476,7 @@ export default function CalendarView() {
                       <span>Polls</span>
                       <span className="font-medium normal-case tracking-normal">Manila</span>
                     </div>
-                    <div
-                      className="grid gap-1"
-                      style={{ gridTemplateColumns: `repeat(auto-fit, minmax(${pollTileMinRem}rem, 1fr))` }}
-                    >
+                    <div className="grid grid-cols-4 gap-1">
                       {polls.map((p) => {
                         const pUp = p.delta != null && p.delta > 0.005;
                         const pDown = p.delta != null && p.delta < -0.005;
@@ -486,7 +484,8 @@ export default function CalendarView() {
                           <div
                             key={p.hour}
                             title={`${p.label} Manila`}
-                            className={`rounded-md px-1 py-1 text-center ${
+                            style={{ containerType: "inline-size" }}
+                            className={`min-w-0 rounded-md px-0.5 py-1 text-center ${
                               p.isCurrent
                                 ? "border border-emerald-400 bg-emerald-50 ring-1 ring-emerald-200"
                                 : p.price != null
@@ -502,7 +501,8 @@ export default function CalendarView() {
                               {p.label}
                             </div>
                             <div
-                              className={`whitespace-nowrap font-mono text-[11px] font-bold tabular-nums leading-tight ${
+                              style={{ fontSize: pollPriceFont }}
+                              className={`w-full whitespace-nowrap font-mono font-bold tabular-nums leading-tight ${
                                 p.isCurrent
                                   ? "text-emerald-800"
                                   : p.price != null
@@ -513,7 +513,7 @@ export default function CalendarView() {
                               {p.price != null ? formatPhp(p.price) : "—"}
                             </div>
                             <div
-                              className={`h-3 text-[9px] font-semibold tabular-nums ${
+                              className={`h-3 whitespace-nowrap text-[8px] font-semibold tabular-nums sm:text-[9px] ${
                                 pUp ? "text-emerald-600" : pDown ? "text-red-500" : "text-slate-400"
                               }`}
                             >

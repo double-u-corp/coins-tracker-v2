@@ -155,28 +155,34 @@ export default function ChartView() {
     return (lastPoint.high + lastPoint.low) / 2;
   }, [selectedCoin, points]);
 
-  /** Today's 8 poll prints (Manila), in time order starting 02:05 — "-" until that slot has data. */
-  const todayPollPrices = useMemo(() => {
-    // Display order: chronological, 02:05 first
+  /** Poll prints (Manila) for yesterday + today, 8 slots each in time order from 02:05 — null until a slot has data. */
+  const { todayPollPrices, yesterdayPollPrices, todayKey, yesterdayKey } = useMemo(() => {
     const SLOT_HOURS = [2, 5, 8, 11, 14, 17, 20, 23] as const;
     const SLOT_LABELS: Record<number, string> = {
+      2: "2:05",
+      5: "5:05",
       8: "8:05",
       11: "11:05",
       14: "14:05",
       17: "17:05",
       20: "20:05",
       23: "23:05",
-      2: "2:05",
-      5: "5:05",
     };
 
-    const now = new Date();
-    const manilaNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
-    const todayKey = manilaNow.toISOString().slice(0, 10); // YYYY-MM-DD in Manila wall via UTC+8 shift
+    const manilaNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
+    const todayKey = manilaNow.toISOString().slice(0, 10);
+    const yesterdayKey = new Date(manilaNow.getTime() - 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
 
     type SlotRow = { hour: number; label: string; price: number | null; isCurrent: boolean };
-    const bestByHour = new Map<number, { price: number; dist: number; ts: number }>();
+    type Hit = { price: number; dist: number; ts: number };
+    const byDay = new Map<string, Map<number, Hit>>([
+      [todayKey, new Map()],
+      [yesterdayKey, new Map()],
+    ]);
 
+    // 3h series covers 14 days, so yesterday is available. Falls back to daily points.
     const series = intradayPoints && intradayPoints.length > 0 ? intradayPoints : points;
     for (const pt of series) {
       const raw = (pt as { period?: string }).period;
@@ -184,8 +190,8 @@ export default function ChartView() {
       const tms = new Date(raw).getTime();
       if (!Number.isFinite(tms)) continue;
       const manila = new Date(tms + 8 * 60 * 60 * 1000);
-      const dayKey = manila.toISOString().slice(0, 10);
-      if (dayKey !== todayKey) continue;
+      const bucket = byDay.get(manila.toISOString().slice(0, 10));
+      if (!bucket) continue;
       const hour = manila.getUTCHours();
       // Map to nearest scheduled slot hour
       let slot = -1;
@@ -205,55 +211,165 @@ export default function ChartView() {
             ? (pt as { high: number }).high
             : null;
       if (price == null || !Number.isFinite(price)) continue;
-      const dist = best;
-      const prev = bestByHour.get(slot);
-      if (!prev || dist < prev.dist || (dist === prev.dist && tms >= prev.ts)) {
-        bestByHour.set(slot, { price, dist, ts: tms });
+      const prev = bucket.get(slot);
+      if (!prev || best < prev.dist || (best === prev.dist && tms >= prev.ts)) {
+        bucket.set(slot, { price, dist: best, ts: tms });
       }
     }
 
-    // Current slot = latest filled today, or nearest hour to now among filled
-    let currentHour: number | null = null;
-    let latestTs = -1;
-    for (const [h, v] of bestByHour) {
-      if (v.ts >= latestTs) {
-        latestTs = v.ts;
-        currentHour = h;
+    const build = (dayKey: string, markCurrent: boolean): SlotRow[] => {
+      const bucket = byDay.get(dayKey)!;
+      // Current slot = latest filled print of the day
+      let currentHour: number | null = null;
+      let latestTs = -1;
+      if (markCurrent) {
+        for (const [h, v] of bucket) {
+          if (v.ts >= latestTs) {
+            latestTs = v.ts;
+            currentHour = h;
+          }
+        }
       }
-    }
+      return SLOT_HOURS.map((hour) => {
+        const row = bucket.get(hour);
+        return {
+          hour,
+          label: SLOT_LABELS[hour],
+          price: row?.price ?? null,
+          isCurrent: markCurrent && currentHour === hour && row != null,
+        };
+      });
+    };
 
-    return SLOT_HOURS.map((hour) => {
-      const row = bestByHour.get(hour);
-      return {
-        hour,
-        label: SLOT_LABELS[hour],
-        price: row?.price ?? null,
-        isCurrent: currentHour === hour && row != null,
-      } satisfies SlotRow;
-    });
+    return {
+      todayPollPrices: build(todayKey, true),
+      yesterdayPollPrices: build(yesterdayKey, false),
+      todayKey,
+      yesterdayKey,
+    };
   }, [intradayPoints, points]);
 
-  /** Poll tiles with % change vs the previous filled poll (session order). */
-  const pollTiles = useMemo(() => {
-    // Change is vs the previous poll in time order (2:05 → 23:05).
+  /** Yesterday's price = last filled poll of yesterday. */
+  const yesterdayPrice = useMemo(() => {
+    for (let i = yesterdayPollPrices.length - 1; i >= 0; i--) {
+      const v = yesterdayPollPrices[i].price;
+      if (v != null) return v;
+    }
+    return null;
+  }, [yesterdayPollPrices]);
+
+  /** % change vs the previous poll in time order; today's first poll compares to yesterday's last price. */
+  const withDeltas = (
+    slots: { hour: number; label: string; price: number | null; isCurrent: boolean }[],
+    seed: number | null
+  ) => {
     const deltaByHour = new Map<number, number>();
-    let prev: number | null = null;
-    for (const s of [...todayPollPrices].sort((a, b) => a.hour - b.hour)) {
+    let prev: number | null = seed;
+    for (const s of slots) {
       if (s.price == null) continue;
       if (prev != null && prev > 0) deltaByHour.set(s.hour, ((s.price - prev) / prev) * 100);
       prev = s.price;
     }
-    return todayPollPrices.map((s) => ({ ...s, delta: deltaByHour.get(s.hour) ?? null }));
-  }, [todayPollPrices]);
+    return slots.map((s) => ({ ...s, delta: deltaByHour.get(s.hour) ?? null }));
+  };
+  const yesterdayTiles = useMemo(() => withDeltas(yesterdayPollPrices, null), [yesterdayPollPrices]);
+  const pollTiles = useMemo(
+    () => withDeltas(todayPollPrices, yesterdayPrice),
+    [todayPollPrices, yesterdayPrice]
+  );
 
-  /** Min tile width (rem) so the longest price fits: the grid auto-fits columns, so big prices get fewer, wider tiles on small screens. */
-  const pollTileMinRem = useMemo(() => {
-    const longest = pollTiles.reduce(
-      (max, s) => (s.price != null ? Math.max(max, formatPhp(s.price).length) : max),
-      0
+  /** Today vs yesterday's last price (for the header chip). */
+  const todayVsYesterday = useMemo(() => {
+    if (yesterdayPrice == null || yesterdayPrice <= 0 || !(currentPrice > 0)) return null;
+    return ((currentPrice - yesterdayPrice) / yesterdayPrice) * 100;
+  }, [yesterdayPrice, currentPrice]);
+
+  const dayLabel = (key: string) =>
+    new Date(`${key}T00:00:00Z`).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    });
+
+  /**
+   * Tiles keep a FIXED size; only the price font shrinks to fit. The longest price across
+   * both days drives one shared size so every tile matches (container units of each tile).
+   */
+  const pollPriceLen = useMemo(
+    () =>
+      [...yesterdayTiles, ...pollTiles].reduce(
+        (max, s) => (s.price != null ? Math.max(max, formatPhp(s.price).length) : max),
+        6
+      ),
+    [yesterdayTiles, pollTiles]
+  );
+  const pollPriceFont = (maxRem: number) =>
+    `max(0.5rem, min(${maxRem}rem, calc((100cqw - 0.5rem) / ${(pollPriceLen * 0.62).toFixed(2)})))`;
+
+  const renderPollTile = (s: (typeof pollTiles)[number], dayTag: string, muted: boolean) => {
+    const hasPrice = s.price != null;
+    const up = s.delta != null && s.delta > 0.005;
+    const down = s.delta != null && s.delta < -0.005;
+    return (
+      <div
+        key={`${dayTag}-${s.hour}`}
+        title={`${dayTag} ${s.label} Manila`}
+        style={{ containerType: "inline-size" }}
+        className={`relative flex min-w-0 flex-col items-center justify-center rounded-lg px-1 py-2.5 text-center transition-colors sm:px-2 ${
+          s.isCurrent
+            ? "border border-emerald-400 bg-gradient-to-b from-emerald-50 to-emerald-100/60 shadow-sm ring-2 ring-emerald-200"
+            : hasPrice
+              ? muted
+                ? "border border-gray-200 bg-gray-50"
+                : "border border-gray-200 bg-white hover:border-gray-300"
+              : "border border-dashed border-gray-200 bg-gray-50/60"
+        }`}
+      >
+        {s.isCurrent && (
+          <span className="absolute -top-2 left-1/2 inline-flex -translate-x-1/2 items-center gap-1 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-white shadow-sm">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
+            </span>
+            Now
+          </span>
+        )}
+
+        <div
+          className={`text-[10px] font-semibold tabular-nums tracking-wide ${
+            s.isCurrent ? "text-emerald-700" : "text-gray-400"
+          }`}
+        >
+          {s.label}
+        </div>
+
+        <div
+          style={{ fontSize: pollPriceFont(s.isCurrent ? 1 : 0.875) }}
+          className={`mt-0.5 w-full whitespace-nowrap font-mono font-bold tabular-nums leading-tight ${
+            s.isCurrent
+              ? "text-emerald-800"
+              : hasPrice
+                ? muted
+                  ? "text-gray-600"
+                  : "text-gray-800"
+                : "text-gray-300"
+          }`}
+        >
+          {hasPrice ? formatPhp(s.price as number) : "—"}
+        </div>
+
+        <div
+          className={`mt-0.5 h-3.5 whitespace-nowrap text-[9px] font-semibold tabular-nums sm:text-[10px] ${
+            up ? "text-emerald-600" : down ? "text-red-500" : "text-gray-400"
+          }`}
+        >
+          {s.delta != null
+            ? `${up ? "▲" : down ? "▼" : "•"} ${Math.abs(s.delta).toFixed(2)}%`
+            : ""}
+        </div>
+      </div>
     );
-    return Math.max(5.5, longest * 0.62 + 1.5);
-  }, [pollTiles]);
+  };
 
   const swingRanks = useMemo(() => {
     if (!allCoins || allCoins.length === 0) return new Map<string, number>();
@@ -653,73 +769,52 @@ export default function ChartView() {
               <div className="border-t border-gray-100 pt-4">
                 <div className="mb-2.5 flex items-center justify-between">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-                    Today&apos;s Polls
+                    3h Polls
                   </span>
-                  <span className="text-[11px] text-gray-400">Manila time</span>
-                </div>
-
-                <div
-                  className="grid gap-2"
-                  style={{ gridTemplateColumns: `repeat(auto-fit, minmax(${pollTileMinRem}rem, 1fr))` }}
-                >
-                  {pollTiles.map((s) => {
-                    const hasPrice = s.price != null;
-                    const up = s.delta != null && s.delta > 0.005;
-                    const down = s.delta != null && s.delta < -0.005;
-                    return (
-                      <div
-                        key={s.hour}
-                        title={`${s.label} Manila`}
-                        className={`relative flex flex-col items-center justify-center rounded-lg px-2 py-2.5 text-center transition-colors ${
-                          s.isCurrent
-                            ? "border border-emerald-400 bg-gradient-to-b from-emerald-50 to-emerald-100/60 shadow-sm ring-2 ring-emerald-200"
-                            : hasPrice
-                              ? "border border-gray-200 bg-white hover:border-gray-300"
-                              : "border border-dashed border-gray-200 bg-gray-50/60"
-                        }`}
-                      >
-                        {s.isCurrent && (
-                          <span className="absolute -top-2 left-1/2 inline-flex -translate-x-1/2 items-center gap-1 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-white shadow-sm">
-                            <span className="relative flex h-1.5 w-1.5">
-                              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
-                              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
-                            </span>
-                            Now
+                  <span className="flex flex-wrap items-center justify-end gap-x-2 text-[11px] text-gray-400">
+                    {yesterdayPrice != null && (
+                      <span className="inline-flex items-center gap-1 rounded-md bg-gray-50 px-1.5 py-0.5 ring-1 ring-gray-200">
+                        <span className="font-semibold uppercase tracking-wide text-gray-400">Yesterday</span>
+                        <span className="font-mono font-bold tabular-nums text-gray-700">
+                          {formatPhp(yesterdayPrice)}
+                        </span>
+                        {todayVsYesterday != null && (
+                          <span
+                            className={`font-semibold tabular-nums ${
+                              todayVsYesterday > 0.005
+                                ? "text-emerald-600"
+                                : todayVsYesterday < -0.005
+                                  ? "text-red-500"
+                                  : "text-gray-400"
+                            }`}
+                          >
+                            {todayVsYesterday > 0.005 ? "▲" : todayVsYesterday < -0.005 ? "▼" : "•"}{" "}
+                            {Math.abs(todayVsYesterday).toFixed(2)}%
                           </span>
                         )}
+                      </span>
+                    )}
+                    <span>Manila time</span>
+                  </span>
+                </div>
 
-                        <div
-                          className={`text-[10px] font-semibold tabular-nums tracking-wide ${
-                            s.isCurrent ? "text-emerald-700" : "text-gray-400"
-                          }`}
-                        >
-                          {s.label}
-                        </div>
-
-                        <div
-                          className={`mt-0.5 max-w-full whitespace-nowrap font-mono font-bold tabular-nums leading-tight ${
-                            s.isCurrent
-                              ? "text-base text-emerald-800"
-                              : hasPrice
-                                ? "text-sm text-gray-800"
-                                : "text-sm text-gray-300"
-                          }`}
-                        >
-                          {hasPrice ? formatPhp(s.price as number) : "—"}
-                        </div>
-
-                        <div
-                          className={`mt-0.5 h-3.5 text-[10px] font-semibold tabular-nums ${
-                            up ? "text-emerald-600" : down ? "text-red-500" : "text-gray-400"
-                          }`}
-                        >
-                          {s.delta != null
-                            ? `${up ? "▲" : down ? "▼" : "•"} ${Math.abs(s.delta).toFixed(2)}%`
-                            : ""}
-                        </div>
-                      </div>
-                    );
-                  })}
+                <div className="space-y-3">
+                  <div>
+                    <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                      Yesterday · {dayLabel(yesterdayKey)}
+                    </div>
+                    <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-8 sm:gap-2">
+                      {yesterdayTiles.map((t) => renderPollTile(t, "Yesterday", true))}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                      Today · {dayLabel(todayKey)}
+                    </div>
+                    <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-8 sm:gap-2">
+                      {pollTiles.map((t) => renderPollTile(t, "Today", false))}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
