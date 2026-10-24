@@ -5,7 +5,8 @@ import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
 import { useCalendarLogic } from "./useCalendarLogic";
 
-const POLL_SLOT_HOURS = [8, 11, 14, 17, 20, 23, 2, 5] as const;
+// Chronological within the Manila day: 2:05 first, 23:05 last.
+const POLL_SLOT_HOURS = [2, 5, 8, 11, 14, 17, 20, 23] as const;
 const POLL_SLOT_LABELS: Record<number, string> = {
   8: "8:05",
   11: "11:05",

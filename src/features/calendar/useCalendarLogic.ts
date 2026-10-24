@@ -116,7 +116,8 @@ export function useCalendarLogic() {
     }
     let cancelled = false;
     const monthStart = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1);
-    const hours = Math.max(24, Math.ceil((Date.now() - monthStart.getTime()) / 3_600_000));
+    // +24h buffer so the 2:05 poll on the 1st is never cut off by timezone differences.
+    const hours = Math.max(24, Math.ceil((Date.now() - monthStart.getTime()) / 3_600_000) + 24);
     fetch(`/api/coins?type=chart&symbol=${selectedSymbol}&granularity=3h&hours=${hours}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { points: ChartPoint[] } | null) => {

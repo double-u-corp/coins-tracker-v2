@@ -6,7 +6,6 @@ import {
   isLongExtended,
   isWatchlistBuyLowHit,
   isNearSupportWorthCheck,
-  calculateSMAAt,
   getEffectivePrice,
   type ConfluenceResult,
   type LadderLevel,
@@ -66,36 +65,49 @@ export type LongScanRunResult = {
   totalSaved?: number;
 };
 
+/** Skip majors / gold — speeds scan; focus on alts for buy-low. */
+const SKIP_SYMBOLS = new Set([
+  "BTCPHP",
+  "BTC",
+  "ETHPHP",
+  "ETH",
+  "XAUTPHP",
+  "XAUT",
+]);
+
 /**
- * Long-scan only (does not change Spot score): price near support AND
- * near / just crossing the 20 SMA from below (buy-low + momentum setup).
+ * Long-scan only (Spot score unchanged): near support / lower range
+ * AND short-term price rising (prefer 3h series).
  */
-function isNearSupportAndNear20SmaCross(
+function isPriceRising(series: ChartPoint[] | null | undefined, fallbackDaily: ChartPoint[]): boolean {
+  const src =
+    series && series.length >= 3
+      ? series
+      : fallbackDaily.length >= 3
+        ? fallbackDaily
+        : null;
+  if (!src) return false;
+  const n = src.length;
+  const last = getEffectivePrice(src[n - 1]);
+  const prev = getEffectivePrice(src[n - 2]);
+  // Look back ~2–4 prints for a clearer uptick (not a one-tick noise bounce)
+  const back = getEffectivePrice(src[Math.max(0, n - 4)]);
+  if (![last, prev, back].every((x) => Number.isFinite(x) && x > 0)) return false;
+  // Rising: last >= prev and last > earlier print by a small margin
+  return last >= prev * 0.999 && last > back * 1.002;
+}
+
+function isNearSupportAndRising(
   points: ChartPoint[],
+  intraday: ChartPoint[] | null | undefined,
   c: ConfluenceResult
 ): boolean {
-  if (points.length < 21) return false;
-  if (c.bias.includes("SHORT")) return false;
+  if (c.bias === "INSUFFICIENT DATA") return false;
+  if (c.bias.includes("SHORT")) return false; // hold cash — not a buy watch
   if (!isNearSupportWorthCheck(c)) return false;
-
-  const sma20 = calculateSMAAt(points, 20, 0);
-  const prevSma20 = calculateSMAAt(points, 20, 1);
-  if (sma20 == null || prevSma20 == null || sma20 <= 0) return false;
-
-  const price = c.currentPrice;
-  const prevPrice = getEffectivePrice(points[points.length - 2]);
-  if (!Number.isFinite(price) || !Number.isFinite(prevPrice)) return false;
-
-  const distPct = Math.abs(price - sma20) / sma20;
-  const nearBand =
-    c.atr != null && c.atr > 0 ? Math.max(0.012, (0.75 * c.atr) / sma20) : 0.02;
-  if (distPct > nearBand) return false;
-
-  const wasBelow = prevPrice <= prevSma20 * 1.002;
-  const nowNearOrAbove = price >= sma20 * 0.985;
-  const rising = price >= prevPrice * 0.998;
-
-  return wasBelow && nowNearOrAbove && rising;
+  // Skip already-run LONGs at the floor that are still "extended" vs ladder/range
+  if (c.bias.includes("LONG") && isLongExtended(c)) return false;
+  return isPriceRising(intraday, points);
 }
 
 function signalsNote(c: ConfluenceResult): string {
@@ -302,8 +314,9 @@ export async function runLongScanSnapshot(
     },
   });
 
-  const size = Math.ceil(allCoins.length / chunks) || 1;
-  const slice = allCoins.slice(chunk * size, chunk * size + size);
+  const coins = allCoins.filter((c) => !SKIP_SYMBOLS.has(c.symbol.toUpperCase()));
+  const size = Math.ceil(coins.length / chunks) || 1;
+  const slice = coins.slice(chunk * size, chunk * size + size);
 
   const errors: string[] = [];
   const hitPayloads: LongScanHitPayload[] = [];
@@ -325,7 +338,7 @@ export async function runLongScanSnapshot(
   await appendRunToLog({
     id: runId,
     scannedAt: prior?.scannedAt ?? runAt.toISOString(),
-    scanned: allCoins.length,
+    scanned: coins.length,
     saved: priorHits.length,
     pruned: 0,
     message: `Running chunk ${chunk + 1}/${chunks}…`,
@@ -338,28 +351,25 @@ export async function runLongScanSnapshot(
       cursor += 1;
       try {
         const points = await loadDailyPoints(coin.id);
-        const intraday = fast ? null : await loadIntradayPoints(coin.id);
+        // Always need a short 3h window for "rising"; fast only skips using it in confluence
+        const intraday = await loadIntradayPoints(coin.id);
         const currentPrice = coin.records[0]?.price;
 
         if (points.length < 5) continue;
 
         const confluence = computeConfluenceSignal(points, {
           currentPrice: currentPrice ?? undefined,
-          intradayPoints: intraday ?? undefined,
+          // Keep Spot-equivalent confluence on daily; 3h only for rising filter
+          intradayPoints: fast ? undefined : intraday ?? undefined,
         });
 
-        const extended = isLongExtended(confluence);
-        const isLong = confluence.bias.includes("LONG");
+        if (!isNearSupportAndRising(points, intraday, confluence)) continue;
+
         const buyLow = isWatchlistBuyLowHit(confluence);
-        const nearCross = isNearSupportAndNear20SmaCross(points, confluence);
-
-        if (isLong && extended && !nearCross) continue;
-        if (!isLong && !nearCross) continue;
-
         const ladder: LadderLevel[] = confluence.entrySuggestion?.ladder ?? [];
-        const tier = nearCross ? "NEAR_CROSS" : buyLow ? "BUY_LOW" : "LONG_WATCH";
-        const crossHint = nearCross ? " · near support + 20 SMA cross" : "";
-        const note = `[${tier}] ${signalsNote(confluence)}${crossHint}`.slice(0, 500);
+        const tier = buyLow ? "BUY_LOW" : "NEAR_SUPPORT_UP";
+        const note = `[${tier}] near support + rising (3h) · ${signalsNote(confluence)}`.slice(0, 500);
+        const extended = isLongExtended(confluence);
 
         // Dedupe symbol within this run
         if (priorHits.some((h) => h.symbol === coin.symbol) || hitPayloads.some((h) => h.symbol === coin.symbol)) {
@@ -410,14 +420,14 @@ export async function runLongScanSnapshot(
   const msg = isLast
     ? mergedHits.length > 0
       ? `Saved ${mergedHits.length} hit(s) (${chunks} chunks).`
-      : "No LONG / near-support·20SMA setups this run."
+      : "No near-support + rising setups this run."
     : `Chunk ${chunk + 1}/${chunks} done · ${mergedHits.length} hit(s) so far.`;
   const finalMessage = errors.length ? `${msg} Errors: ${errors.length}` : msg;
 
   await appendRunToLog({
     id: runId,
     scannedAt: prior?.scannedAt ?? runAt.toISOString(),
-    scanned: allCoins.length,
+    scanned: coins.length,
     saved: mergedHits.length,
     pruned: 0,
     message: finalMessage,
@@ -426,7 +436,7 @@ export async function runLongScanSnapshot(
 
   return {
     ok: true,
-    scanned: slice.length,
+    scanned: coins.length,
     saved: hitPayloads.length,
     pruned: 0,
     errors,

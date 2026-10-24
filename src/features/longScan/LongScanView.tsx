@@ -68,9 +68,15 @@ function nextScheduledRun(from = new Date()): Date {
 }
 
 function tierLabel(tier: string) {
+  if (tier === "NEAR_SUPPORT_UP" || tier === "near_support_up") {
+    return {
+      text: "Near support · rising",
+      cls: "bg-sky-100 text-sky-900",
+    };
+  }
   if (tier === "NEAR_CROSS" || tier === "near_cross") {
     return {
-      text: "Near support · 20 SMA",
+      text: "Near support · rising",
       cls: "bg-sky-100 text-sky-900",
     };
   }

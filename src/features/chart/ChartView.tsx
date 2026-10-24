@@ -155,10 +155,10 @@ export default function ChartView() {
     return (lastPoint.high + lastPoint.low) / 2;
   }, [selectedCoin, points]);
 
-  /** Today's 8 poll prints (Manila), starting 08:05 — "-" until that slot has data. */
+  /** Today's 8 poll prints (Manila), in time order starting 02:05 — "-" until that slot has data. */
   const todayPollPrices = useMemo(() => {
-    // Display order: session day starts 08:05
-    const SLOT_HOURS = [8, 11, 14, 17, 20, 23, 2, 5] as const;
+    // Display order: chronological, 02:05 first
+    const SLOT_HOURS = [2, 5, 8, 11, 14, 17, 20, 23] as const;
     const SLOT_LABELS: Record<number, string> = {
       8: "8:05",
       11: "11:05",
@@ -235,8 +235,7 @@ export default function ChartView() {
 
   /** Poll tiles with % change vs the previous filled poll (session order). */
   const pollTiles = useMemo(() => {
-    // Change is vs the previous poll in time order (2:05 → 23:05), even though
-    // tiles are displayed in session order starting 8:05.
+    // Change is vs the previous poll in time order (2:05 → 23:05).
     const deltaByHour = new Map<number, number>();
     let prev: number | null = null;
     for (const s of [...todayPollPrices].sort((a, b) => a.hour - b.hour)) {
