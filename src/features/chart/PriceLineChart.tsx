@@ -39,6 +39,8 @@ export interface PriceLineChartProps {
   sessionMarkers?: { hours: number[]; color: string; name: string }[];
   /** Live / latest price — shown as a distinct dot on the last bar (Spot). */
   currentPrice?: number | null;
+  /** Spot buys plotted on the matching Manila day at fill price. */
+  buyMarks?: { dayKey: string; price: number }[] | null;
 }
 
 type ActivePoint = {
@@ -185,6 +187,24 @@ export default function PriceLineChart({
     const rsiSeries = calculateRSISeries(points, 14);
 
     const hotSet = new Set(hotSlotHours || [23, 2]);
+    // Visible price band — skip buy markers far outside so Y-axis stays readable
+    let seriesMin = Infinity;
+    let seriesMax = -Infinity;
+    for (const p of points) {
+      const hi = typeof p.high === "number" ? p.high : getEffectivePrice(p);
+      const lo = typeof p.low === "number" ? p.low : hi;
+      if (Number.isFinite(hi)) seriesMax = Math.max(seriesMax, hi);
+      if (Number.isFinite(lo)) seriesMin = Math.min(seriesMin, lo);
+    }
+    if (currentPrice != null && Number.isFinite(currentPrice)) {
+      seriesMax = Math.max(seriesMax, Number(currentPrice));
+      seriesMin = Math.min(seriesMin, Number(currentPrice));
+    }
+    const span = seriesMax - seriesMin;
+    const pad = span > 0 ? span * 0.08 : (seriesMax > 0 ? seriesMax * 0.05 : 0);
+    const bandLo = seriesMin - pad;
+    const bandHi = seriesMax + pad;
+
     const data = points.map((p, index) => {
       const rawKeyLevel = "keyLevel" in p ? (p as any).keyLevel : undefined;
       const rawPeriod = (p as { period?: string }).period || p.label;
@@ -209,7 +229,9 @@ export default function PriceLineChart({
         if (Number.isFinite(tms)) {
           const dayKey = new Date(tms + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
           const hit = buyMarks.find((b) => b.dayKey === dayKey);
-          if (hit) buyPrice = hit.price;
+          if (hit && hit.price >= bandLo && hit.price <= bandHi) {
+            buyPrice = hit.price;
+          }
         }
       }
       const live =
@@ -373,13 +395,13 @@ export default function PriceLineChart({
               stroke="none"
               dot={{
                 r: isMobile ? 3 : 4,
-                fill: "#0a0a0a",
+                fill: "#7c3aed",
                 stroke: "#fff",
                 strokeWidth: isMobile ? 1 : 1.5,
               }}
               activeDot={{
                 r: isMobile ? 4 : 5,
-                fill: "#0a0a0a",
+                fill: "#7c3aed",
                 stroke: "#fff",
                 strokeWidth: 1.5,
               }}
