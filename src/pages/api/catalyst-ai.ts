@@ -258,10 +258,37 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
   }
 
   if (req.method === "POST") {
-    const { promptId, prompt, searchQuery, category, searchProfile, forceRefresh, responseFormat } = req.body || {};
+    const {
+      promptId,
+      prompt,
+      searchQuery,
+      category,
+      searchProfile,
+      forceRefresh,
+      responseFormat,
+      storeOnly,
+    } = req.body || {};
 
-    if (!promptId || !prompt || !category) {
-      return res.status(400).json({ error: "promptId, prompt, and category are required." });
+    if (!promptId || !category) {
+      return res.status(400).json({ error: "promptId and category are required." });
+    }
+
+    // Client-provided payload (macro merge / deleted keys) — no Tavily/Groq
+    if (typeof storeOnly === "string" && storeOnly.length > 0) {
+      try {
+        await prisma.catalystLog.upsert({
+          where: { promptId },
+          update: { response: storeOnly, category, updatedAt: new Date() },
+          create: { promptId, category, response: storeOnly },
+        });
+        return res.status(200).json({ response: storeOnly, stored: true });
+      } catch (err) {
+        return res.status(500).json({ error: (err as Error).message });
+      }
+    }
+
+    if (!prompt) {
+      return res.status(400).json({ error: "prompt is required unless storeOnly is set." });
     }
 
     // Fall back to the full prompt as the search query if the caller didn't

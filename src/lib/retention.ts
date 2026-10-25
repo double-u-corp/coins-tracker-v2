@@ -48,8 +48,8 @@ export const RECORD_RETENTION_DAYS = RECORD_RETENTION_MONTHS * 30;
  * row" guard is needed here (unlike Record) — nothing depends on an old
  * NewsItem surviving, so this is a plain age-based delete.
  */
-export const NEWS_RETENTION_MONTHS = 1;
-export const NEWS_RETENTION_DAYS = NEWS_RETENTION_MONTHS * 30;
+/** Price & RSS signals on Home — keep ~1 day only. */
+export const NEWS_RETENTION_DAYS = 1;
 
 /**
  * How long operational CronLog rows are kept. Cron logs are strictly diagnostic 

@@ -46,7 +46,7 @@ const FALLBACK_OUTLETS: Outlet[] = [
 
 /** Market Signals: outlet news table + cron RSS */
 export default function NewsSection({ refreshSignal }: NewsSectionProps) {
-  const { items, loading, loadingMore, error, hasMore, loadMore } = useNewsLogic(refreshSignal);
+  const { items, loading, loadingMore, error, hasMore, loadMore, removeItem } = useNewsLogic(refreshSignal);
 
   const [rows, setRows] = useState<OutletNewsRow[]>([]);
   const [outlets, setOutlets] = useState<Outlet[]>(FALLBACK_OUTLETS);
@@ -135,6 +135,7 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
     <section className="mt-8 space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-semibold text-gray-900">Market Signals</h2>
+        <CoinsPhAgentButton />
       </div>
 
       <div className="rounded-lg border border-teal-100 bg-white p-4 shadow-sm">
@@ -343,8 +344,18 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
                       )}
                     </div>
                     <p className="mt-1 text-sm text-gray-600">{item.summary}</p>
-                    <div className="mt-1 text-xs text-gray-400">
-                      {item.source} · {formatDateTime(item.publishedAt)}
+                    <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-400">
+                      <span>
+                        {item.source} · {formatDateTime(item.publishedAt)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void removeItem(item.id)}
+                        className="rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-700 hover:bg-rose-100"
+                        title="Delete this signal"
+                      >
+                        🗑 Delete
+                      </button>
                     </div>
                   </div>
                 </li>
@@ -365,5 +376,58 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
         )}
       </div>
     </section>
+  );
+}
+
+
+const COINS_PH_PROMPT = `You are a neutral research assistant for a Philippines spot crypto trader who uses **Coins.ph** (coins.ph) for PHP pairs.
+
+## Task
+Summarize **current and upcoming** Coins.ph platform issues, specifically auditing inbound PHP funding (bank transfers / InstaPay / PESONet restrictions), delistings, new listings, and spot trading service health. Stay factual.
+
+## Cover (only if verified)
+1. **PHP Cash-In / Cash-Out & Banking Rails** — Status of direct bank transfers (InstaPay / PESONet), e-wallet gateways, or DCPay Philippines processing limitations impacting retail fiat onboarding.
+2. **Delistings** — Coins removed or scheduled for removal; final trade / withdrawal deadlines.
+3. **New listings** — Coins newly added or announced for Coins.ph PHP pairs.
+4. **Service & Trading Issues** — Maintenance windows, app outages, convert/spot engine latency, or KYC blocks.
+5. **Fees or Policy Changes** — Any adjustments affecting retail PHP spot users.
+
+## Rules
+- Be neutral. Do not invent outages or restrictions.
+- Prefer official Coins.ph announcements, support help center notices, status pages, and reputable local/crypto news.
+- Do **not** invent news. Do **NOT** use training-memory headlines (often stale).
+- If nothing verified, say **"none verified"** per section.
+- Philippines / PHP context. Not investment advice.
+
+## Answer format
+1. **Verdict:** All clear / Caution / Major issues
+2. **PHP Cash-In & Banking Rails** (status & details)
+3. **Delistings** (bullet list or none verified)
+4. **New coins** (bullet list or none verified)
+5. **Trading & service issues** (bullet list or none verified)
+6. **Sources** (links if found)
+7. **Recheck by** (date)
+`;
+
+function CoinsPhAgentButton() {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(COINS_PH_PROMPT);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* ignore */
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={() => void copy()}
+      className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-950 hover:bg-amber-100"
+      title="Copy a Coins.ph status research prompt for your agent"
+    >
+      {copied ? "✅ Copied" : "📋 Coins.ph agent prompt"}
+    </button>
   );
 }

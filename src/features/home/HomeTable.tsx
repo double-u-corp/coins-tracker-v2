@@ -292,7 +292,7 @@ export default function HomeTable() {
       <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-gray-900">Coin Prices</h1>
-          {/* {canUpdatePrice && (
+          {canUpdatePrice && (
             <button
               type="button"
               onClick={triggerCronManually}
@@ -302,7 +302,7 @@ export default function HomeTable() {
             >
               <span>{cronTriggering ? "⏳ Running..." : "⚡ Run Cron"}</span>
             </button>
-          )} */}
+          )}
         </div>
       </div>
 
@@ -384,29 +384,37 @@ export default function HomeTable() {
                         </span>
                       </div>
                       {card.currentPrice != null && (
-                        <div className="text-[11px] text-gray-600 mt-0.5 flex flex-wrap items-center gap-1.5">
-                          <span>
-                            Price{" "}
-                            <span className="font-semibold text-gray-900">
-                              {formatPhp(card.currentPrice)}
-                            </span>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                          <span className="text-sm font-bold tabular-nums text-gray-900">
+                            {formatPhp(card.currentPrice)}
                           </span>
                           {(() => {
+                            // Same rules as Filter Coins pills: prefer % (color only, no ▲/▼);
+                            // if no %, fall back to direction arrow.
                             const pct =
                               movePctBySymbol[card.symbol.toUpperCase()] ??
                               movePctBySymbol[card.symbol.replace(/PHP$/i, "").toUpperCase()];
-                            if (pct == null || !Number.isFinite(pct)) return null;
-                            const up = pct > 0;
-                            const down = pct < 0;
+                            if (pct != null && Number.isFinite(pct)) {
+                              const up = pct > 0;
+                              const down = pct < 0;
+                              return (
+                                <span
+                                  className={`text-xs font-bold tabular-nums ${
+                                    up ? "text-green-600" : down ? "text-red-600" : "text-gray-500"
+                                  }`}
+                                >
+                                  {up ? "+" : ""}
+                                  {pct.toFixed(1)}%
+                                </span>
+                              );
+                            }
+                            const coin = coins.find(
+                              (c) => c.symbol.toUpperCase() === card.symbol.toUpperCase()
+                            );
                             return (
-                              <span
-                                className={`font-bold tabular-nums ${
-                                  up ? "text-green-600" : down ? "text-red-600" : "text-gray-500"
-                                }`}
-                              >
-                                {up ? "+" : ""}
-                                {pct.toFixed(1)}%
-                              </span>
+                              <PriceDirectionArrow
+                                direction={coin?.priceDirection ?? null}
+                              />
                             );
                           })()}
                         </div>

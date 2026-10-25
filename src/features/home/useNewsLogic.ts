@@ -57,5 +57,34 @@ export function useNewsLogic(refreshSignal?: unknown) {
     }
   }
 
-  return { items, loading, loadingMore, error, hasMore, loadMore };
+  async function removeItem(id: number) {
+    setError(null);
+    const prev = items;
+    // Optimistic — do not reload the whole list
+    setItems((list) => list.filter((x) => x.id !== id));
+    try {
+      let res = await fetch(`/api/news?id=${encodeURIComponent(String(id))}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      // Some hosts block DELETE — fallback POST
+      if (res.status === 405 || res.status === 404) {
+        res = await fetch("/api/news", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "delete", id }),
+        });
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Delete failed (${res.status})`);
+      }
+    } catch (err) {
+      setItems(prev);
+      setError((err as Error).message);
+    }
+  }
+
+  return { items, loading, loadingMore, error, hasMore, loadMore, removeItem };
 }
