@@ -5,7 +5,6 @@ import { useAuth } from "@/features/auth/useAuth";
 
 const PUBLIC_NAV_LINKS = [
   { href: "/", label: "Home" },
-  { href: "/chart", label: "Spot" },
   { href: "/timing", label: "Timing" },
 ];
 

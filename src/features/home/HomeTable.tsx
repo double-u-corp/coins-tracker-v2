@@ -292,7 +292,7 @@ export default function HomeTable() {
       <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-gray-900">Coin Prices</h1>
-          {canUpdatePrice && (
+          {/* {canUpdatePrice && (
             <button
               type="button"
               onClick={triggerCronManually}
@@ -302,7 +302,7 @@ export default function HomeTable() {
             >
               <span>{cronTriggering ? "⏳ Running..." : "⚡ Run Cron"}</span>
             </button>
-          )}
+          )} */}
         </div>
       </div>
 

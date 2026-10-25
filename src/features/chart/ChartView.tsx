@@ -5,12 +5,12 @@ import Dropdown from "@/components/Dropdown";
 import AlertBanner from "@/components/AlertBanner";
 import JournalSidebar from "./JournalSidebar";
 import TradingInsightCard from "./TradingInsightCard";
-import DCACalculator from "./DCACalculator";
 import { useChartLogic, type ChartRange } from "./useChartLogic";
 import { formatPhp } from "@/lib/format";
 import { getSupportResistance, BIAS_BADGE_CLASSES, BIAS_PRIORITY, isLongExtended, isWatchlistBuyLowHit, isNearSupportWorthCheck } from "./Technicals";
 import { useCoinScanner, formatScanResultsForJournal, formatSingleScanResult } from "./useCoinScanner";
 import MacroDayBanner from "./MacroDayBanner";
+import PositionAndTradesCard from "./PositionAndTradesCard";
 
 const PriceLineChart = dynamic(() => import("./PriceLineChart"), {
   ssr: false,
@@ -155,8 +155,8 @@ export default function ChartView() {
     return (lastPoint.high + lastPoint.low) / 2;
   }, [selectedCoin, points]);
 
-  /** Poll prints (Manila) for yesterday + today, 8 slots each in time order from 02:05 — null until a slot has data. */
-  const { todayPollPrices, yesterdayPollPrices, todayKey, yesterdayKey } = useMemo(() => {
+  /** Last 16 Manila poll slots ending at current; grouped by day for display. */
+  const pollWindow = useMemo(() => {
     const SLOT_HOURS = [2, 5, 8, 11, 14, 17, 20, 23] as const;
     const SLOT_LABELS: Record<number, string> = {
       2: "2:05",
@@ -168,21 +168,20 @@ export default function ChartView() {
       20: "20:05",
       23: "23:05",
     };
+    const WINDOW = 16;
 
     const manilaNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
     const todayKey = manilaNow.toISOString().slice(0, 10);
-    const yesterdayKey = new Date(manilaNow.getTime() - 24 * 60 * 60 * 1000)
-      .toISOString()
-      .slice(0, 10);
+    const manilaHour = manilaNow.getUTCHours();
 
-    type SlotRow = { hour: number; label: string; price: number | null; isCurrent: boolean };
+    let currentSlotIdx = 0;
+    for (let i = 0; i < SLOT_HOURS.length; i++) {
+      if (SLOT_HOURS[i] <= manilaHour) currentSlotIdx = i;
+    }
+
     type Hit = { price: number; dist: number; ts: number };
-    const byDay = new Map<string, Map<number, Hit>>([
-      [todayKey, new Map()],
-      [yesterdayKey, new Map()],
-    ]);
+    const byDay = new Map<string, Map<number, Hit>>();
 
-    // 3h series covers 14 days, so yesterday is available. Falls back to daily points.
     const series = intradayPoints && intradayPoints.length > 0 ? intradayPoints : points;
     for (const pt of series) {
       const raw = (pt as { period?: string }).period;
@@ -190,10 +189,8 @@ export default function ChartView() {
       const tms = new Date(raw).getTime();
       if (!Number.isFinite(tms)) continue;
       const manila = new Date(tms + 8 * 60 * 60 * 1000);
-      const bucket = byDay.get(manila.toISOString().slice(0, 10));
-      if (!bucket) continue;
+      const dayKey = manila.toISOString().slice(0, 10);
       const hour = manila.getUTCHours();
-      // Map to nearest scheduled slot hour
       let slot = -1;
       let best = 99;
       for (const h of SLOT_HOURS) {
@@ -211,102 +208,117 @@ export default function ChartView() {
             ? (pt as { high: number }).high
             : null;
       if (price == null || !Number.isFinite(price)) continue;
+      if (!byDay.has(dayKey)) byDay.set(dayKey, new Map());
+      const bucket = byDay.get(dayKey)!;
       const prev = bucket.get(slot);
       if (!prev || best < prev.dist || (best === prev.dist && tms >= prev.ts)) {
         bucket.set(slot, { price, dist: best, ts: tms });
       }
     }
 
-    const build = (dayKey: string, markCurrent: boolean): SlotRow[] => {
-      const bucket = byDay.get(dayKey)!;
-      // Current slot = latest filled print of the day
-      let currentHour: number | null = null;
-      let latestTs = -1;
-      if (markCurrent) {
-        for (const [h, v] of bucket) {
-          if (v.ts >= latestTs) {
-            latestTs = v.ts;
-            currentHour = h;
-          }
-        }
+    const shiftDay = (dayKey: string, delta: number) => {
+      const d = new Date(`${dayKey}T12:00:00.000Z`);
+      d.setUTCDate(d.getUTCDate() + delta);
+      return d.toISOString().slice(0, 10);
+    };
+
+    // Walk back WINDOW slots ending at today's current slot
+    type Cursor = { dayKey: string; hourIdx: number };
+    const cursors: Cursor[] = [];
+    let cur: Cursor = { dayKey: todayKey, hourIdx: currentSlotIdx };
+    for (let n = 0; n < WINDOW; n++) {
+      cursors.push(cur);
+      if (cur.hourIdx > 0) {
+        cur = { dayKey: cur.dayKey, hourIdx: cur.hourIdx - 1 };
+      } else {
+        cur = { dayKey: shiftDay(cur.dayKey, -1), hourIdx: SLOT_HOURS.length - 1 };
       }
-      return SLOT_HOURS.map((hour) => {
-        const row = bucket.get(hour);
-        return {
-          hour,
-          label: SLOT_LABELS[hour],
-          price: row?.price ?? null,
-          isCurrent: markCurrent && currentHour === hour && row != null,
-        };
-      });
-    };
-
-    return {
-      todayPollPrices: build(todayKey, true),
-      yesterdayPollPrices: build(yesterdayKey, false),
-      todayKey,
-      yesterdayKey,
-    };
-  }, [intradayPoints, points]);
-
-  /** Yesterday's price = last filled poll of yesterday. */
-  const yesterdayPrice = useMemo(() => {
-    for (let i = yesterdayPollPrices.length - 1; i >= 0; i--) {
-      const v = yesterdayPollPrices[i].price;
-      if (v != null) return v;
     }
-    return null;
-  }, [yesterdayPollPrices]);
+    cursors.reverse();
 
-  /** % change vs the previous poll in time order; today's first poll compares to yesterday's last price. */
-  const withDeltas = (
-    slots: { hour: number; label: string; price: number | null; isCurrent: boolean }[],
-    seed: number | null
-  ) => {
-    const deltaByHour = new Map<number, number>();
-    let prev: number | null = seed;
-    for (const s of slots) {
-      if (s.price == null) continue;
-      if (prev != null && prev > 0) deltaByHour.set(s.hour, ((s.price - prev) / prev) * 100);
-      prev = s.price;
-    }
-    return slots.map((s) => ({ ...s, delta: deltaByHour.get(s.hour) ?? null }));
-  };
-  const yesterdayTiles = useMemo(() => withDeltas(yesterdayPollPrices, null), [yesterdayPollPrices]);
-  const pollTiles = useMemo(
-    () => withDeltas(todayPollPrices, yesterdayPrice),
-    [todayPollPrices, yesterdayPrice]
-  );
-
-  /** Today vs yesterday's last price (for the header chip). */
-  const todayVsYesterday = useMemo(() => {
-    if (yesterdayPrice == null || yesterdayPrice <= 0 || !(currentPrice > 0)) return null;
-    return ((currentPrice - yesterdayPrice) / yesterdayPrice) * 100;
-  }, [yesterdayPrice, currentPrice]);
-
-  const dayLabel = (key: string) =>
-    new Date(`${key}T00:00:00Z`).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      timeZone: "UTC",
+    // Resolve prices with carry-forward; last tile = live current price
+    let last: number | null = null;
+    const tiles = cursors.map((c, i) => {
+      const hour = SLOT_HOURS[c.hourIdx];
+      const hit = byDay.get(c.dayKey)?.get(hour);
+      let price: number | null = hit?.price ?? null;
+      if (price != null) last = price;
+      else if (last != null) price = last;
+      const isCurrent = i === cursors.length - 1;
+      if (isCurrent && currentPrice > 0) price = currentPrice;
+      return {
+        dayKey: c.dayKey,
+        hour,
+        label: SLOT_LABELS[hour],
+        price,
+        isCurrent,
+        delta: null as number | null,
+      };
     });
 
-  /**
-   * Tiles keep a FIXED size; only the price font shrinks to fit. The longest price across
-   * both days drives one shared size so every tile matches (container units of each tile).
-   */
-  const pollPriceLen = useMemo(
-    () =>
-      [...yesterdayTiles, ...pollTiles].reduce(
-        (max, s) => (s.price != null ? Math.max(max, formatPhp(s.price).length) : max),
-        6
-      ),
-    [yesterdayTiles, pollTiles]
-  );
-  const pollPriceFont = (maxRem: number) =>
-    `max(0.5rem, min(${maxRem}rem, calc((100cqw - 0.5rem) / ${(pollPriceLen * 0.62).toFixed(2)})))`;
+    // Deltas vs previous tile in the window
+    for (let i = 0; i < tiles.length; i++) {
+      const prev = i > 0 ? tiles[i - 1].price : null;
+      const px = tiles[i].price;
+      if (prev != null && prev > 0 && px != null) {
+        tiles[i].delta = ((px - prev) / prev) * 100;
+      }
+    }
 
-  const renderPollTile = (s: (typeof pollTiles)[number], dayTag: string, muted: boolean) => {
+    // Group by day (preserve order)
+    const groups: {
+      dayKey: string;
+      tiles: typeof tiles;
+      align: "end" | "start";
+    }[] = [];
+    for (const tile of tiles) {
+      const g = groups[groups.length - 1];
+      if (!g || g.dayKey !== tile.dayKey) {
+        groups.push({ dayKey: tile.dayKey, tiles: [tile], align: "start" });
+      } else {
+        g.tiles.push(tile);
+      }
+    }
+    // First group right-aligned if partial day; last (today) left-aligned
+    if (groups.length > 0) {
+      groups[0].align = groups[0].tiles.length < 8 ? "end" : "start";
+      groups[groups.length - 1].align = "start";
+    }
+
+    const dayLabel = (key: string) =>
+      new Date(`${key}T00:00:00Z`).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        timeZone: "UTC",
+      });
+
+    return { groups, dayLabel, todayKey };
+  }, [intradayPoints, points, currentPrice]);
+
+  const pollPriceLen = useMemo(() => {
+    let max = 6;
+    for (const g of pollWindow.groups) {
+      for (const s of g.tiles) {
+        if (s.price != null) max = Math.max(max, formatPhp(s.price).length);
+      }
+    }
+    return max;
+  }, [pollWindow]);
+
+  const pollPriceFont = (maxRem: number) =>
+    `max(0.5rem, min(${maxRem}rem, calc((100cqw - 0.35rem) / ${(pollPriceLen * 0.55).toFixed(2)})))`;
+
+    const renderPollTile = (
+    s: {
+      hour: number;
+      label: string;
+      price: number | null;
+      isCurrent: boolean;
+      delta: number | null;
+    },
+    dayTag: string,
+    muted: boolean
+  ) => {
     const hasPrice = s.price != null;
     const up = s.delta != null && s.delta > 0.005;
     const down = s.delta != null && s.delta < -0.005;
@@ -315,13 +327,13 @@ export default function ChartView() {
         key={`${dayTag}-${s.hour}`}
         title={`${dayTag} ${s.label} Manila`}
         style={{ containerType: "inline-size" }}
-        className={`relative flex min-w-0 flex-col items-center justify-center rounded-lg px-1 py-2.5 text-center transition-colors sm:px-2 ${
+        className={`relative flex w-[5.75rem] sm:w-[6.75rem] flex-none flex-col items-center justify-center rounded-xl px-1.5 py-3 text-center shadow-sm transition-colors sm:px-2.5 ${
           s.isCurrent
-            ? "border border-emerald-400 bg-gradient-to-b from-emerald-50 to-emerald-100/60 shadow-sm ring-2 ring-emerald-200"
+            ? "border-2 border-emerald-500 bg-gradient-to-b from-emerald-50 to-emerald-100/80 ring-2 ring-emerald-200/80"
             : hasPrice
               ? muted
                 ? "border border-gray-200 bg-gray-50"
-                : "border border-gray-200 bg-white hover:border-gray-300"
+                : "border border-gray-200 bg-white hover:border-gray-300 hover:shadow"
               : "border border-dashed border-gray-200 bg-gray-50/60"
         }`}
       >
@@ -336,22 +348,22 @@ export default function ChartView() {
         )}
 
         <div
-          className={`text-[10px] font-semibold tabular-nums tracking-wide ${
-            s.isCurrent ? "text-emerald-700" : "text-gray-400"
+          className={`text-[11px] sm:text-xs font-bold tabular-nums tracking-wide ${
+            s.isCurrent ? "text-emerald-700" : "text-gray-500"
           }`}
         >
           {s.label}
         </div>
 
         <div
-          style={{ fontSize: pollPriceFont(s.isCurrent ? 1 : 0.875) }}
-          className={`mt-0.5 w-full whitespace-nowrap font-mono font-bold tabular-nums leading-tight ${
+          style={{ fontSize: pollPriceFont(s.isCurrent ? 1.15 : 1.05) }}
+          className={`mt-1 w-full whitespace-nowrap font-mono font-extrabold tabular-nums leading-tight ${
             s.isCurrent
-              ? "text-emerald-800"
+              ? "text-emerald-900"
               : hasPrice
                 ? muted
-                  ? "text-gray-600"
-                  : "text-gray-800"
+                  ? "text-gray-700"
+                  : "text-gray-900"
                 : "text-gray-300"
           }`}
         >
@@ -359,7 +371,7 @@ export default function ChartView() {
         </div>
 
         <div
-          className={`mt-0.5 h-3.5 whitespace-nowrap text-[9px] font-semibold tabular-nums sm:text-[10px] ${
+          className={`mt-1 min-h-[1rem] whitespace-nowrap text-[11px] sm:text-xs font-bold tabular-nums ${
             up ? "text-emerald-600" : down ? "text-red-500" : "text-gray-400"
           }`}
         >
@@ -371,7 +383,7 @@ export default function ChartView() {
     );
   };
 
-  const swingRanks = useMemo(() => {
+    const swingRanks = useMemo(() => {
     if (!allCoins || allCoins.length === 0) return new Map<string, number>();
 
     const ranked = [...allCoins]
@@ -404,6 +416,19 @@ export default function ChartView() {
       .filter((tx) => tx.symbol === symbol)
       .sort((a, b) => new Date(b.transactedAt).getTime() - new Date(a.transactedAt).getTime());
   }, [symbol, transactions]);
+
+  const buyMarks = useMemo(() => {
+    if (!coinTransactions?.length) return [] as { dayKey: string; price: number }[];
+    const marks: { dayKey: string; price: number }[] = [];
+    for (const tx of coinTransactions) {
+      if (tx.type !== "buy" || !(tx.price > 0)) continue;
+      const tms = new Date(tx.transactedAt).getTime();
+      if (!Number.isFinite(tms)) continue;
+      const dayKey = new Date(tms + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      marks.push({ dayKey, price: tx.price });
+    }
+    return marks;
+  }, [coinTransactions]);
 
   const technicals = useMemo(() => {
     if (points.length === 0) return { support: null, resistance: null };
@@ -771,50 +796,31 @@ export default function ChartView() {
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
                     3h Polls
                   </span>
-                  <span className="flex flex-wrap items-center justify-end gap-x-2 text-[11px] text-gray-400">
-                    {yesterdayPrice != null && (
-                      <span className="inline-flex items-center gap-1 rounded-md bg-gray-50 px-1.5 py-0.5 ring-1 ring-gray-200">
-                        <span className="font-semibold uppercase tracking-wide text-gray-400">Yesterday</span>
-                        <span className="font-mono font-bold tabular-nums text-gray-700">
-                          {formatPhp(yesterdayPrice)}
-                        </span>
-                        {todayVsYesterday != null && (
-                          <span
-                            className={`font-semibold tabular-nums ${
-                              todayVsYesterday > 0.005
-                                ? "text-emerald-600"
-                                : todayVsYesterday < -0.005
-                                  ? "text-red-500"
-                                  : "text-gray-400"
-                            }`}
-                          >
-                            {todayVsYesterday > 0.005 ? "▲" : todayVsYesterday < -0.005 ? "▼" : "•"}{" "}
-                            {Math.abs(todayVsYesterday).toFixed(2)}%
-                          </span>
-                        )}
-                      </span>
-                    )}
-                    <span>Manila time</span>
-                  </span>
+                  <span className="text-[11px] font-medium text-gray-400">Manila</span>
                 </div>
 
-                <div className="space-y-3">
-                  <div>
-                    <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-                      Yesterday · {dayLabel(yesterdayKey)}
-                    </div>
-                    <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-8 sm:gap-2">
-                      {yesterdayTiles.map((t) => renderPollTile(t, "Yesterday", true))}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-                      Today · {dayLabel(todayKey)}
-                    </div>
-                    <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-8 sm:gap-2">
-                      {pollTiles.map((t) => renderPollTile(t, "Today", false))}
-                    </div>
-                  </div>
+                {/* Continuous sequence (snake wrap) — no gaps between days */}
+                <div className="mt-2 flex flex-wrap gap-1.5 sm:gap-2">
+                  {pollWindow.groups.flatMap((g) => {
+                    const muted = g.dayKey !== pollWindow.todayKey;
+                    const dayTitle =
+                      g.dayKey === pollWindow.todayKey
+                        ? `Today · ${pollWindow.dayLabel(g.dayKey)}`
+                        : pollWindow.dayLabel(g.dayKey);
+                    return g.tiles.map((tile, ti) => (
+                      <div key={`${g.dayKey}-${tile.hour}`} className="relative flex-none">
+                        {ti === 0 && (
+                          <div
+                            className="pointer-events-none absolute -top-3.5 left-0 z-10 max-w-[5.25rem] truncate text-[9px] font-bold uppercase tracking-wide text-gray-400"
+                            title={dayTitle}
+                          >
+                            {dayTitle}
+                          </div>
+                        )}
+                        {renderPollTile(tile, g.dayKey, muted)}
+                      </div>
+                    ));
+                  })}
                 </div>
               </div>
             )}
@@ -842,6 +848,7 @@ export default function ChartView() {
                 support={technicals.support}
                 resistance={technicals.resistance}
                 intradayPoints={intradayPoints}
+                buyMarks={buyMarks}
               />
             )}
           </div>
@@ -856,61 +863,16 @@ export default function ChartView() {
             intradayPoints={intradayPoints}
           />
 
-          <DCACalculator
+          <PositionAndTradesCard
             symbol={symbol}
             currentPrice={currentPrice}
             portfolio={activePortfolio}
+            transactions={coinTransactions}
             support={technicals.support}
             resistance={technicals.resistance}
           />
 
-          <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-            <h3 className="mb-3 text-sm font-semibold text-gray-900">
-              Transaction History <span className="text-brand-600">({symbol})</span>
-            </h3>
-            {coinTransactions.length === 0 ? (
-              <p className="text-xs text-gray-500">No transactions recorded yet.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="border-b border-gray-200 bg-gray-50 text-gray-500">
-                    <tr>
-                      <th className="px-3 py-2">Date</th>
-                      <th className="px-3 py-2">Type</th>
-                      <th className="px-3 py-2">Amount</th>
-                      <th className="px-3 py-2">Price</th>
-                      <th className="px-3 py-2 text-right">Value</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {coinTransactions.map((tx) => (
-                      <tr key={tx.id} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 text-gray-500">
-                          {new Date(tx.transactedAt).toLocaleDateString()}
-                        </td>
-                        <td className="px-3 py-2">
-                          <span
-                            className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
-                              tx.type === "buy" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
-                            }`}
-                          >
-                            {tx.type}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 font-medium text-gray-800">{tx.coinAmount}</td>
-                        <td className="px-3 py-2 text-gray-600">{formatPhp(tx.price)}</td>
-                        <td className="px-3 py-2 text-right font-semibold text-gray-900">
-                          {formatPhp(tx.phpAmount)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          <JournalSidebar
+                    <JournalSidebar
             entries={entries}
             loading={journalLoading}
             error={journalError}

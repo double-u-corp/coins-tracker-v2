@@ -508,105 +508,40 @@ export default function TradingInsightCard({
         <h3 className="text-sm font-semibold text-gray-900">
           Spot Trading Insights <span className="text-brand-600">({symbol}/PHP)</span>
         </h3>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={handleCopyAgentPrompt}
-            title="Copy review prompt to clipboard"
-            className="rounded-md border border-gray-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
+            className="rounded-md border border-gray-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-800 hover:bg-gray-50"
           >
             {agentCopied
-              ? "✅ Copied — Ctrl/Cmd+V to paste"
+              ? "✅ Copied"
               : activePortfolio && activePortfolio.holdings > 0
-              ? "📋 Copy hold/exit review"
-              : "📋 Copy entry review"}
+                ? "📋 Copy hold/exit review"
+                : "📋 Copy entry review"}
           </button>
           <button
             type="button"
             onClick={handleOpenGoogleReview}
-            title="Opens Google with a short full-context review (fits URL). Full long prompt also copied for paste if needed."
+            title="Opens Google with a short review prompt. Full prompt also copied."
             className="rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-800 hover:bg-sky-100"
           >
             🔍 Google review
           </button>
-          <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold ${BIAS_BADGE_CLASSES[confluence.bias]}`}>
+          <span
+            className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold ${
+              BIAS_BADGE_CLASSES[confluence.bias]
+            }`}
+          >
             BIAS: {confluence.bias}
           </span>
-          <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-bold uppercase ${style.status}`}>
+          <span
+            className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-bold uppercase ${style.status}`}
+          >
             {style.statusText}
           </span>
         </div>
       </div>
-
-      {/* #2 Position bridge — only when you hold this coin */}
-      {isAllocated && (
-        <div className="mb-3 rounded-lg border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wide text-violet-800">
-              🎒 Open position
-            </span>
-            <span className="text-[11px] font-semibold text-violet-700">
-              Spot LONG · no leverage
-            </span>
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <div className="rounded-md bg-white/80 border border-violet-100 px-2 py-1.5">
-              <div className="text-[10px] font-bold uppercase text-gray-400">Holdings</div>
-              <div className="text-sm font-bold tabular-nums text-gray-900">
-                {holdings.toLocaleString(undefined, { maximumFractionDigits: 6 })}
-              </div>
-            </div>
-            <div className="rounded-md bg-white/80 border border-violet-100 px-2 py-1.5">
-              <div className="text-[10px] font-bold uppercase text-gray-400">Avg cost</div>
-              <div className="text-sm font-bold tabular-nums text-gray-900">
-                {avgCost != null ? formatPhp(avgCost) : "—"}
-              </div>
-            </div>
-            <div className="rounded-md bg-white/80 border border-violet-100 px-2 py-1.5">
-              <div className="text-[10px] font-bold uppercase text-gray-400">Unrealized</div>
-              <div
-                className={`text-sm font-bold tabular-nums ${
-                  unrealizedPhp == null
-                    ? "text-gray-900"
-                    : unrealizedPhp >= 0
-                    ? "text-emerald-700"
-                    : "text-rose-700"
-                }`}
-              >
-                {unrealizedPhp != null ? (
-                  <>
-                    {unrealizedPhp >= 0 ? "+" : ""}
-                    {formatPhp(unrealizedPhp)}
-                    {unrealizedPct != null && (
-                      <span className="ml-1 text-[11px] font-semibold">
-                        ({unrealizedPct >= 0 ? "+" : ""}
-                        {unrealizedPct.toFixed(1)}%)
-                      </span>
-                    )}
-                  </>
-                ) : (
-                  "—"
-                )}
-              </div>
-            </div>
-            <div className="rounded-md bg-white/80 border border-violet-100 px-2 py-1.5">
-              <div className="text-[10px] font-bold uppercase text-gray-400">Days held</div>
-              <div className="text-sm font-bold tabular-nums text-gray-900">
-                {daysHeld != null ? `${daysHeld}d` : "—"}
-                {firstBuyAt && (
-                  <span className="ml-1 text-[10px] font-medium text-gray-400">
-                    since {String(firstBuyAt).slice(0, 10)}
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-          <p className="mt-2 text-[11px] text-violet-900/80">
-            You already hold this coin — use <span className="font-semibold">hold/exit review</span> (not a fresh
-            entry). Bias below is context; decision is hold, trim, or wait.
-          </p>
-        </div>
-      )}
 
       <div className="space-y-3">
         {isInsufficient && (
@@ -660,51 +595,6 @@ export default function TradingInsightCard({
           </div>
         )}
 
-        {!isInsufficient && (confluence.entrySuggestion || confluence.exitSuggestion || confluence.invalidationNote) && (
-          <div className="rounded-md border border-gray-200 bg-gray-50 p-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
-                Entry / Stop / Target — Suggestion Only
-              </span>
-            </div>
-            {confluence.entrySuggestion && (
-              <div className="text-xs text-gray-700 space-y-1">
-                <span className="font-semibold text-emerald-700">Entry Ladder:</span>
-                <ul className="space-y-0.5 pl-3">
-                  {confluence.entrySuggestion.ladder.map((level, idx) => (
-                    <li key={idx} className="flex items-center justify-between">
-                      <span>
-                        ~{formatPhp(level.price)}{" "}
-                        <span className="text-gray-400">
-                          ({level.basis === "swing-low" ? "swing low" : "support"})
-                        </span>
-                      </span>
-                      <span className="font-semibold text-emerald-700">{level.allocationPct}%</span>
-                    </li>
-                  ))}
-                </ul>
-                <p>{confluence.entrySuggestion.note}</p>
-              </div>
-            )}
-            {confluence.invalidationNote && (
-              <div className="text-xs text-gray-700">
-                <span className="font-semibold text-rose-700">Stop: </span>
-                {confluence.invalidationNote}
-              </div>
-            )}
-            {confluence.exitSuggestion && (
-              <div className="text-xs text-gray-700">
-                <span className="font-semibold text-blue-700">Target ~{formatPhp(confluence.exitSuggestion.price)}: </span>
-                {confluence.exitSuggestion.note}
-              </div>
-            )}
-            <p className="text-[10px] text-gray-400 pt-1 border-t border-gray-200">
-              These are technical reference levels only, not instructions — news, fundamentals, and your own risk
-              tolerance can override any of this. You're responsible for the call either way.
-            </p>
-          </div>
-        )}
-
         {/* Confluence breakdown — every signal that fed the score, visible */}
         <div className="rounded-md border border-gray-200 bg-gray-50/80 p-2.5">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-2 flex justify-between items-center">
@@ -715,7 +605,9 @@ export default function TradingInsightCard({
             <span className="text-gray-700 font-bold">{confluence.macroTrend}</span>
           </div>
           <div className="space-y-1.5">
-            {confluence.signals.map((s) => (
+            {confluence.signals
+              .filter((s) => !/^swing structure$/i.test(s.name))
+              .map((s) => (
               <div
                 key={s.name}
                 className={`flex items-center justify-between gap-2 text-xs p-1.5 rounded ${
@@ -747,44 +639,8 @@ export default function TradingInsightCard({
             updating as new price checks come in — signals can shift until the day closes.
           </p>
         </div>
-
-        <div className="rounded-md border border-brand-200 bg-brand-50/50 p-3">
-          <div className="flex items-center justify-between mb-1">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-brand-800">DCA Allocation Directive</div>
-            <div className="text-xs font-bold text-brand-900 bg-brand-100 px-2 py-0.5 rounded">{style.action}</div>
-          </div>
-          <p className="text-xs text-brand-900/80 font-medium leading-normal mt-1">
-            💡 <span className="underline decoration-brand-300 underline-offset-2">Meaning</span>:{" "}
-            {isInsufficient
-              ? "Wait for more history before sizing an entry — early signals on thin data are unreliable."
-              : confluence.bias.includes("LONG")
-              ? "Multiple signals align bullish. Execute tranches near support, respecting the invalidation level above."
-              : confluence.bias.includes("SHORT")
-              ? "Multiple signals align bearish or price is extended. This means wait, not short — hold cash and watch for a pullback into the entry ladder above."
-              : "Signals are mixed or offsetting. No strong edge either way — wait for clearer confluence."}
-          </p>
-        </div>
-
-        <div className="rounded-md border border-gray-200 bg-gray-50/80 p-2.5">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-2">
-            Key Levels
-          </div>
-          <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="bg-white p-1.5 rounded border border-gray-100">
-              <div className="text-[10px] text-gray-500 font-medium">Support</div>
-              <div className="text-xs font-bold text-emerald-700">{formatPhp(confluence.support)}</div>
-            </div>
-            <div className="bg-white p-1.5 rounded border border-gray-100">
-              <div className="text-[10px] text-gray-500 font-medium">Current</div>
-              <div className="text-xs font-bold text-gray-800">{formatPhp(confluence.currentPrice)}</div>
-            </div>
-            <div className="bg-white p-1.5 rounded border border-gray-100">
-              <div className="text-[10px] text-gray-500 font-medium">Resistance</div>
-              <div className="text-xs font-bold text-rose-700">{formatPhp(confluence.resistance)}</div>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );
 }
+

@@ -71,9 +71,9 @@ export default function MacroDayBanner() {
           📅 No macro prints tagged for <strong>today / tomorrow</strong> (Manila) in the last Catalysts calendar
           scan.
         </span>
-        <Link href="/catalysts" className="font-semibold text-violet-700 hover:underline shrink-0">
+        {/* <Link href="/catalysts" className="font-semibold text-violet-700 hover:underline shrink-0">
           Catalysts →
-        </Link>
+        </Link> */}
       </div>
     );
   }

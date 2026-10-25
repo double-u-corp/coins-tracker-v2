@@ -150,12 +150,13 @@ export default function PriceLineChart({
   hotSlotHours = [23, 2],
   sessionMarkers = [],
   currentPrice = null,
+  buyMarks = null,
 }: PriceLineChartProps) {
   const [showSma20, setShowSma20] = useState<boolean>(true);
   const [showSma50, setShowSma50] = useState<boolean>(true);
   const [showSma200, setShowSma200] = useState<boolean>(true);
-  const [showRsi, setShowRsi] = useState<boolean>(false);
-  const [showSwing, setShowSwing] = useState<boolean>(false);
+  const [showRsi, setShowRsi] = useState<boolean>(true);
+  const [showSwing, setShowSwing] = useState<boolean>(true);
   const isMobile = useIsMobile(640);
   const [mobilePoint, setMobilePoint] = useState<ActivePoint | null>(null);
   const [swingMobilePoint, setSwingMobilePoint] = useState<{ label: string; price: number } | null>(null);
@@ -202,11 +203,21 @@ export default function PriceLineChart({
         sessionFields[`sessionPrice${mi}`] = hit ? px : null;
       });
       const isLast = index === points.length - 1;
+      let buyPrice: number | null = null;
+      if (buyMarks?.length && rawPeriod) {
+        const tms = new Date(rawPeriod).getTime();
+        if (Number.isFinite(tms)) {
+          const dayKey = new Date(tms + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+          const hit = buyMarks.find((b) => b.dayKey === dayKey);
+          if (hit) buyPrice = hit.price;
+        }
+      }
       const live =
         currentPrice != null && Number.isFinite(currentPrice) ? Number(currentPrice) : null;
       return {
         ...p,
         price: px,
+        buyPrice,
         hotPrice: isHotSlot ? px : null,
         isHotSlot,
         // Distinct marker for live price on the latest bar only
@@ -221,7 +232,7 @@ export default function PriceLineChart({
     });
 
     return { chartData: data, fallbackLevels: levels, liveEquilibrium: equilibrium };
-  }, [points, highlightHotSlots, hotSlotHours, sessionMarkers, currentPrice]);
+  }, [points, highlightHotSlots, hotSlotHours, sessionMarkers, currentPrice, buyMarks]);
 
   const support = externalSupport ?? fallbackLevels.support;
   const resistance = externalResistance ?? fallbackLevels.resistance;
@@ -356,6 +367,26 @@ export default function PriceLineChart({
             {showHigh && (
               <Line type="monotone" dataKey={priceLineName === "Price" ? "price" : "high"} stroke="#22c55e" strokeWidth={1.5} dot={false} name={priceLineName} connectNulls />
             )}
+            <Line
+              type="monotone"
+              dataKey="buyPrice"
+              stroke="none"
+              dot={{
+                r: isMobile ? 3 : 4,
+                fill: "#0a0a0a",
+                stroke: "#fff",
+                strokeWidth: isMobile ? 1 : 1.5,
+              }}
+              activeDot={{
+                r: isMobile ? 4 : 5,
+                fill: "#0a0a0a",
+                stroke: "#fff",
+                strokeWidth: 1.5,
+              }}
+              name="Buy"
+              connectNulls={false}
+              isAnimationActive={false}
+            />
             {currentPrice != null && Number.isFinite(currentPrice) && (
               <Line
                 type="monotone"
