@@ -71,12 +71,120 @@ const INTENSITY_STYLES: Record<
   },
 };
 
+
+function formatTimingAgentPrompt(data: TimingResponse): string {
+  const lines: string[] = [];
+  lines.push(
+    `You are a neutral research assistant for a Philippines **spot LONG-only** PHP crypto trader (Coins.ph / Maya style — no shorting, no leverage).`
+  );
+  lines.push(``);
+  lines.push(`## Goal`);
+  lines.push(
+    `Use the **poll-timing pattern** below (from our app’s 3h price checks) together with **verified upcoming news** to advise when to watch markets more closely — not when to force a buy.`
+  );
+  lines.push(``);
+  lines.push(`## How our data is built`);
+  lines.push(
+    `- Prices are polled about **8× per day** on a Manila schedule (~02:05, 05:05, 08:05, 11:05, 14:05, 17:05, 20:05, 23:05).`
+  );
+  lines.push(
+    `- “Move” = absolute % change between consecutive polls ≤5h apart. This is **liquidity / activity timing**, not a buy signal by itself.`
+  );
+  lines.push(
+    `- Window analyzed: last **${data.days} days**. Generated: ${data.generatedAt}.`
+  );
+  lines.push(``);
+  lines.push(`## Observed pattern (from our data)`);
+  if (data.hottestSlot) {
+    lines.push(
+      `- **Hottest Manila slot:** ${data.hottestSlot.label} (avg |move| ${data.hottestSlot.avgAbsPct}%, median ${data.hottestSlot.medianAbsPct}%, ${data.hottestSlot.pctMovesAbove1}% of samples >1%, n=${data.hottestSlot.sampleCount}).`
+    );
+  }
+  if (data.quietestSlot) {
+    lines.push(
+      `- **Quietest Manila slot:** ${data.quietestSlot.label} (avg |move| ${data.quietestSlot.avgAbsPct}%).`
+    );
+  }
+  if (data.hottestWeekday) {
+    lines.push(
+      `- **Hottest weekday:** ${data.hottestWeekday.label} (avg |move| ${data.hottestWeekday.avgAbsPct}%).`
+    );
+  }
+  if (data.quietestWeekday) {
+    lines.push(
+      `- **Quietest weekday:** ${data.quietestWeekday.label} (avg |move| ${data.quietestWeekday.avgAbsPct}%).`
+    );
+  }
+  lines.push(`- Full slot ranking (hot → quiet):`);
+  for (const s of [...data.slots].sort((a, b) => a.rank - b.rank)) {
+    lines.push(
+      `  - #${s.rank} ${s.label}: avg ${s.avgAbsPct}% · med ${s.medianAbsPct}% · >1% ${s.pctMovesAbove1}% · ${s.intensity} · samples ${s.sampleCount}`
+    );
+  }
+  if (data.weekdays?.length) {
+    lines.push(`- Weekday ranking:`);
+    for (const w of [...data.weekdays].sort((a, b) => a.rank - b.rank)) {
+      lines.push(
+        `  - #${w.rank} ${w.label}: avg ${w.avgAbsPct}% · >1% ${w.pctMovesAbove1}% · ${w.intensity}`
+      );
+    }
+  }
+  if (data.topMoversByHotSlot?.length && data.hottestSlot) {
+    lines.push(`- Most active coins in hottest window (${data.hottestSlot.label}):`);
+    for (const c of data.topMoversByHotSlot.slice(0, 8)) {
+      lines.push(`  - ${c.name} (${c.symbol}): avg |move| ${c.avgAbsPct}% · samples ${c.samples}`);
+    }
+  }
+  if (data.guidance?.length) {
+    lines.push(`- App guidance notes:`);
+    for (const g of data.guidance) lines.push(`  - ${g}`);
+  }
+  lines.push(``);
+  lines.push(`## What to research`);
+  lines.push(
+    `1. **Upcoming macro** (next 7–14 days): FOMC, CPI, PCE, NFP/jobs, major US session risks that often hit crypto during Manila evening / US open.`
+  );
+  lines.push(
+    `2. **Micro / crypto-specific** (next 48–72h): exchange maintenance, major unlocks, ETF flows headlines, Coins.ph listing/delist if relevant — only if verified.`
+  );
+  lines.push(
+    `3. **Pattern check:** Does the news calendar line up with our hot slots (e.g. US data at Manila evening → 20:05 / 23:05 / 02:05 activity)? Or is our hot window mostly thin-liquidity noise?`
+  );
+  lines.push(``);
+  lines.push(`## Rules`);
+  lines.push(`- Be **neutral**. Do not lean bullish or force a long.`);
+  lines.push(`- Do **not** invent news. Do **NOT** use training-memory headlines (often stale).`);
+  lines.push(`- Unverified → say "none verified".`);
+  lines.push(`- Timing ≠ entry: hot slots mean **watch / stage limits carefully**, not chase.`);
+  lines.push(`- Spot only — no short / no leverage advice.`);
+  lines.push(``);
+  lines.push(`## Answer format`);
+  lines.push(`1. **Pattern read:** Does our hot/quiet window look session-driven, news-driven, or sparse-data noise?`);
+  lines.push(`2. **Upcoming verified events** (next 7–14d) with times if known — or "none verified".`);
+  lines.push(`3. **Overlap:** Which of our Manila slots are most at risk around those events?`);
+  lines.push(`4. **Practical watch plan** for a spot buyer (when to check charts vs when to ignore noise).`);
+  lines.push(`5. **Recheck by** (date).`);
+  return lines.join("\n");
+}
+
 export default function SwingTimingView() {
   const [days, setDays] = useState(30);
   const [data, setData] = useState<TimingResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
+  const [agentCopied, setAgentCopied] = useState(false);
+
+  const copyAgentPrompt = async () => {
+    if (!data) return;
+    try {
+      await navigator.clipboard.writeText(formatTimingAgentPrompt(data));
+      setAgentCopied(true);
+      setTimeout(() => setAgentCopied(false), 2000);
+    } catch {
+      setError("Could not copy prompt");
+    }
+  };
 
   const load = useCallback(async (d: number) => {
     setLoading(true);
@@ -145,6 +253,15 @@ export default function SwingTimingView() {
             title="Recompute from latest poll history"
           >
             {loading ? "Refreshing…" : "↻ Refresh"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void copyAgentPrompt()}
+            disabled={!data || loading}
+            className="rounded-md border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-bold text-violet-900 hover:bg-violet-100 disabled:opacity-50"
+            title="Copy prompt: timing pattern + upcoming news research"
+          >
+            {agentCopied ? "✅ Copied" : "📋 Timing + news agent"}
           </button>
         </div>
       </div>
