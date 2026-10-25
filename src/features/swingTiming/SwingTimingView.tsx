@@ -72,128 +72,352 @@ const INTENSITY_STYLES: Record<
 };
 
 
-function formatTimingPatternPrompt(data: TimingResponse): string {
+/** Manila hour → slot label for the poll that ends that window */
+const SLOT_HOURS = [2, 5, 8, 11, 14, 17, 20, 23] as const;
+const SLOT_LABEL: Record<number, string> = {
+  2: "02:05",
+  5: "05:05",
+  8: "08:05",
+  11: "11:05",
+  14: "14:05",
+  17: "17:05",
+  20: "20:05",
+  23: "23:05",
+};
+
+function manilaNowLabel(): string {
+  return new Date().toLocaleString("en-US", {
+    timeZone: "Asia/Manila",
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
+function recheckByLabel(daysAhead: number): string {
+  const d = new Date(Date.now() + daysAhead * 86400000);
+  return d.toLocaleDateString("en-US", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+/** Map an ET clock time on a given ET date to Manila date+time and nearest poll slot after release. */
+function etToManilaSlot(
+  dateYmd: string,
+  timeET?: string
+): { manilaLine: string; slotLabel: string } {
+  const [hh, mm] = (timeET || "00:00").split(":").map((x) => parseInt(x, 10) || 0);
+  // EDT until 2026-11-01: UTC-4 → Manila = +12h; after: EST UTC-5 → +13h
+  const edCutoff = new Date("2026-11-01T00:00:00Z").getTime();
+  const etApprox = new Date(`${dateYmd}T${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:00Z`);
+  const offsetH = etApprox.getTime() < edCutoff ? 12 : 13;
+  const manila = new Date(etApprox.getTime() + offsetH * 3600000);
+  const manilaY = manila.toISOString().slice(0, 10);
+  const mH = manila.getUTCHours();
+  const mM = manila.getUTCMinutes();
+  // Slot window that would capture reaction: first poll label at or after Manila time
+  let slot = SLOT_HOURS[0];
+  for (const h of SLOT_HOURS) {
+    if (h * 60 + 5 >= mH * 60 + mM) {
+      slot = h;
+      break;
+    }
+    slot = h;
+  }
+  // if release after 23:05, next day's 02:05
+  if (mH * 60 + mM > 23 * 60 + 5) slot = 2;
+  const manilaLine = `${manilaY} ${String(mH).padStart(2, "0")}:${String(mM).padStart(2, "0")} MNL`;
+  return { manilaLine, slotLabel: SLOT_LABEL[slot] || "02:05" };
+}
+
+function slotWindowBefore(label: string): string {
+  const map: Record<string, string> = {
+    "02:05": "23:05–02:05",
+    "05:05": "02:05–05:05",
+    "08:05": "05:05–08:05",
+    "11:05": "08:05–11:05",
+    "14:05": "11:05–14:05",
+    "17:05": "14:05–17:05",
+    "20:05": "17:05–20:05",
+    "23:05": "20:05–23:05",
+  };
+  // labels from API may be longer ("11:05 PM …")
+  for (const [k, v] of Object.entries(map)) {
+    if (label.includes(k.replace(/^0/, "")) || label.includes(k)) return v;
+  }
+  return "3h before label";
+}
+
+function formatTimingPatternPrompt(
+  data: TimingResponse,
+  macroSlotLines: string[],
+  heldCoins: string
+): string {
+  const allAvg =
+    data.slots.length > 0
+      ? data.slots.reduce((s, x) => s + x.avgAbsPct, 0) / data.slots.length
+      : 0;
   const lines: string[] = [];
+  lines.push(`ROLE`);
   lines.push(
-    `You are a neutral research assistant for a Philippines **spot LONG-only** PHP crypto trader (Coins.ph / Maya style — no shorting, no leverage).`
+    `You are a neutral research assistant for a Philippines spot LONG-only PHP crypto trader (Coins.ph / Maya style: no shorting, no leverage). You give no buy signals, price targets, or predictions. "No action" is a valid answer.`
   );
   lines.push(``);
-  lines.push(`## Goal`);
+  lines.push(`PURPOSE`);
   lines.push(
-    `Interpret our **poll-timing pattern** (3h checks) so the trader knows when to watch vs ignore noise. This is **not** a buy signal.`
+    `Turn our poll-timing stats into a short watch plan, and check live news for the coins that are unusually active in the hot window. Timing is activity/liquidity, never an entry signal. "Stage" applies only if the trader's own Spot page already shows a long bias, which you cannot see.`
   );
   lines.push(``);
-  lines.push(`## How our data is built`);
+  lines.push(`HOW THE DATA IS BUILT`);
   lines.push(
-    `- Prices polled ~**8× per day** Manila: 02:05, 05:05, 08:05, 11:05, 14:05, 17:05, 20:05, 23:05.`
+    `- Polls ~8×/day, Manila: 02:05, 05:05, 08:05, 11:05, 14:05, 17:05, 20:05, 23:05.`
   );
   lines.push(
-    `- Move = absolute % change between consecutive polls ≤5h apart (activity / liquidity timing).`
+    `- A slot's stat = |% move| over the ~3 hours BEFORE its label (11:05 PM ≈ activity into that print).`
   );
-  lines.push(`- Window: last **${data.days} days**. Generated: ${data.generatedAt}.`);
+  lines.push(`- It cannot see moves shorter than ~3h, or which direction price went.`);
+  lines.push(
+    `- Generated: ${manilaNowLabel()} · Window: ${data.days} days · All-slot avg |move| ${allAvg.toFixed(2)}%.`
+  );
+  lines.push(`- Slot gaps under ~0.15 percentage points are noise.`);
   lines.push(``);
-  lines.push(`## Slot activity (${data.days} days · Manila)`);
+  lines.push(`PRECOMPUTED READ (from the app; do not recompute)`);
   if (data.hottestSlot) {
     lines.push(
-      `- Hottest slot: **${data.hottestSlot.label}** — avg |move| ${data.hottestSlot.avgAbsPct}%, median ${data.hottestSlot.medianAbsPct}%, >1% moves ${data.hottestSlot.pctMovesAbove1}%, n=${data.hottestSlot.sampleCount}.`
+      `- Hottest slot: ${data.hottestSlot.label} (avg ${data.hottestSlot.avgAbsPct}%, >1% ${data.hottestSlot.pctMovesAbove1}%, n=${data.hottestSlot.sampleCount}).`
     );
   }
   if (data.quietestSlot) {
     lines.push(
-      `- Quietest slot: **${data.quietestSlot.label}** — avg |move| ${data.quietestSlot.avgAbsPct}%.`
+      `- Quietest slot: ${data.quietestSlot.label} (avg ${data.quietestSlot.avgAbsPct}%).`
     );
   }
-  lines.push(`- Full ranking (hot → quiet):`);
-  for (const s of [...data.slots].sort((a, b) => a.rank - b.rank)) {
-    lines.push(
-      `  ${s.rank}. ${s.label} — avg ${s.avgAbsPct}% · med ${s.medianAbsPct}% · >1% ${s.pctMovesAbove1}% · ${s.intensity} · samples ${s.sampleCount}`
-    );
-  }
-  lines.push(``);
-  lines.push(`## Weekday activity (${data.days} days · Manila)`);
   if (data.hottestWeekday) {
     lines.push(
-      `- Hottest weekday: **${data.hottestWeekday.label}** — avg |move| ${data.hottestWeekday.avgAbsPct}%, >1% ${data.hottestWeekday.pctMovesAbove1}%.`
+      `- Hottest weekday: ${data.hottestWeekday.label} (avg ${data.hottestWeekday.avgAbsPct}%).`
     );
   }
   if (data.quietestWeekday) {
     lines.push(
-      `- Quietest weekday: **${data.quietestWeekday.label}** — avg |move| ${data.quietestWeekday.avgAbsPct}%.`
+      `- Quietest weekday: ${data.quietestWeekday.label} (avg ${data.quietestWeekday.avgAbsPct}%).`
     );
   }
+  for (const g of data.guidance || []) lines.push(`- ${g}`);
+  lines.push(``);
+  lines.push(`SLOT TABLE (Manila; window ≈ 3h before label)`);
+  lines.push(`label | window | avg | median | >1% | n | intensity`);
+  for (const s of [...data.slots].sort((a, b) => a.rank - b.rank)) {
+    lines.push(
+      `${s.label} | ${slotWindowBefore(s.label)} | ${s.avgAbsPct}% | ${s.medianAbsPct}% | ${s.pctMovesAbove1}% | ${s.sampleCount} | ${s.intensity}`
+    );
+  }
+  lines.push(``);
+  lines.push(`WEEKDAY SUMMARY (${data.days} days · Manila)`);
   if (data.weekdays?.length) {
-    lines.push(`- Full ranking (hot → quiet):`);
+    lines.push(`day | avg | median | >1% | n | intensity`);
     for (const w of [...data.weekdays].sort((a, b) => a.rank - b.rank)) {
       lines.push(
-        `  ${w.rank}. ${w.label} — avg ${w.avgAbsPct}% · med ${w.medianAbsPct}% · >1% ${w.pctMovesAbove1}% · ${w.intensity} · samples ${w.sampleCount}`
+        `${w.label} | ${w.avgAbsPct}% | ${w.medianAbsPct}% | ${w.pctMovesAbove1}% | ${w.sampleCount} | ${w.intensity}`
       );
     }
   } else {
-    lines.push(`- No weekday breakdown available.`);
+    lines.push(`(no weekday breakdown)`);
   }
   lines.push(``);
-  if (data.topMoversByHotSlot?.length && data.hottestSlot) {
-    lines.push(`## Most active coins in hottest window (${data.hottestSlot.label})`);
-    for (const c of data.topMoversByHotSlot.slice(0, 10)) {
-      lines.push(`- ${c.name} (${c.symbol}): avg |move| ${c.avgAbsPct}% · samples ${c.samples}`);
-    }
-    lines.push(``);
-  }
-  if (data.guidance?.length) {
-    lines.push(`## App notes`);
-    for (const g of data.guidance) lines.push(`- ${g}`);
-    lines.push(``);
-  }
-  lines.push(`## Rules`);
-  lines.push(`- Be neutral. Do not force a long.`);
-  lines.push(`- Do not invent news. Timing ≠ entry signal.`);
-  lines.push(`- Spot only — no short / no leverage.`);
-  lines.push(``);
-  lines.push(`## Answer format`);
-  lines.push(`1. **Pattern read** (session-driven vs noise vs thin data)`);
-  lines.push(`2. **Which Manila slots / weekdays** deserve attention`);
-  lines.push(`3. **Practical watch plan** for a spot buyer`);
-  lines.push(`4. **Recheck by** (date)`);
-  return lines.join("\n");
-}
-
-function formatMacroWatchAgentPrompt(macroLines: string[]): string {
-  const lines: string[] = [];
   lines.push(
-    `You are a neutral research assistant for a Philippines **spot LONG-only** PHP crypto trader.`
+    `MACRO LANDING IN SLOT WINDOWS, next 14 days (context only; verified separately in the Macro watch prompt)`
   );
-  lines.push(``);
-  lines.push(`## Goal`);
-  lines.push(
-    `Validate and enrich the **Macro watch** calendar below (Fed, CPI, PCE, NFP, and any manual notes). Help the trader know what can shake crypto and when (Manila time).`
-  );
-  lines.push(``);
-  lines.push(`## Macro watch — upcoming dates already in our app`);
-  lines.push(
-    `From Home → Macro watch. Validate times; do **not** invent dates. Mark stale or wrong items.`
-  );
-  lines.push(``);
-  if (macroLines.length) {
-    for (const L of macroLines) lines.push(`- ${L}`);
+  if (macroSlotLines.length) {
+    for (const L of macroSlotLines) lines.push(`- ${L}`);
   } else {
-    lines.push(`- (No events loaded from the app.)`);
+    lines.push(`- none loaded`);
   }
   lines.push(``);
-  lines.push(`## Rules`);
-  lines.push(`- Be neutral. Do not lean bullish without evidence.`);
-  lines.push(`- Do **not** invent news. Do **NOT** use training-memory headlines (often stale).`);
-  lines.push(`- Unverified → "none verified".`);
-  lines.push(`- Philippines / Manila context for “when to watch”.`);
+  lines.push(
+    `COINS TO CHECK (top active in hottest slot — search news; BTC/ETH/SOL if present in list)`
+  );
+  lines.push(`ticker | pair | hot-slot avg | samples`);
+  const coins = data.topMoversByHotSlot || [];
+  for (const c of coins.slice(0, 10)) {
+    lines.push(`${c.name} | ${c.symbol} | ${c.avgAbsPct}% | ${c.samples}`);
+  }
+  if (!coins.length) lines.push(`(none)`);
   lines.push(``);
-  lines.push(`## Answer format`);
-  lines.push(`1. **Calendar audit** — keep / fix time / stale (per item above)`);
-  lines.push(`2. **Any missing high-impact macro** next 14 days (verified only)`);
-  lines.push(`3. **Manila watch windows** around each high-priority event`);
-  lines.push(`4. **Recheck by** (date)`);
+  lines.push(`Held coins: ${heldCoins || "none provided"}`);
+  lines.push(``);
+  lines.push(`RESEARCH TASKS (live search required; no training memory)`);
+  lines.push(
+    `1. For each coin above, search separately for news from the last 14 days or scheduled in the next 14 days: token unlock, upgrade/fork, listing/delisting, exploit/hack, ETF/regulatory item.`
+  );
+  lines.push(
+    `2. If a found item has a scheduled time, convert it to Manila and say which poll-slot window it lands in.`
+  );
+  lines.push(
+    `3. Note any Coins.ph/Maya-side notice (maintenance, pair suspension) only if you can source it.`
+  );
+  lines.push(``);
+  lines.push(`VERIFICATION RULES`);
+  lines.push(
+    `- Each item needs source name, publish date, and URL. No source: do not list it; write "none verified".`
+  );
+  lines.push(
+    `- Hacks/exploits/delistings need an official post OR two independent outlets. Otherwise label "Unconfirmed" and keep it out of the posture column.`
+  );
+  lines.push(`- No historical analogs, no sentiment summaries, no memory headlines.`);
+  lines.push(
+    `- If you have no live search, say so in one line and answer only the Pattern read.`
+  );
+  lines.push(``);
+  lines.push(`POSTURE LABELS (use only these)`);
+  lines.push(
+    `IGNORE · WATCH (check price/news at the slot, no order) · STAGE (only if Spot already shows a long bias; prefer resting limit orders before the window, not market orders inside it) · RISK (verified negative item on a coin above or held; review exposure, do not add)`
+  );
+  lines.push(``);
+  lines.push(`RULES`);
+  lines.push(
+    `Neutral. Do not lean bullish. Spot only. Do not restate the tables. Under ~300 words excluding tables.`
+  );
+  lines.push(``);
+  lines.push(`ANSWER FORMAT`);
+  lines.push(`0. Data status (1 line: search available? thin data?)`);
+  lines.push(
+    `1. Pattern read (max 3 bullets: what stands out vs noise, using PRECOMPUTED READ; say if the hot slot overlaps a macro event)`
+  );
+  lines.push(`2. Slots/weekdays worth attention (max 3 lines, each with a posture)`);
+  lines.push(
+    `3. Coin news table: Coin | Item | Type | Date | Source | Posture (one row per coin; "none verified" if empty)`
+  );
+  lines.push(`4. Do (max 3) / Don't (max 3) for a spot buyer this week`);
+  lines.push(`Recheck by: ${recheckByLabel(7)}`);
   return lines.join("\n");
 }
 
-async function loadMacroLinesFromApp(): Promise<string[]> {
+function formatMacroWatchAgentPrompt(
+  eventTableLines: string[],
+  slotStatsHint: string
+): string {
+  const lines: string[] = [];
+  lines.push(`ROLE`);
+  lines.push(
+    `You are a neutral research assistant for a Philippines spot LONG-only PHP crypto trader (no shorting, no leverage). No buy signals, targets, or predictions. "No action" is a valid answer.`
+  );
+  lines.push(``);
+  lines.push(`PURPOSE`);
+  lines.push(
+    `Verify the macro calendar below, find missing high-impact events, and tell the trader which Manila windows to watch. Hot windows are activity, not direction.`
+  );
+  lines.push(``);
+  lines.push(`TIME RULES (given facts; use them)`);
+  lines.push(`- Manila is UTC+8, no daylight saving.`);
+  lines.push(
+    `- US Eastern is EDT (UTC-4) until Nov 1, 2026, so ET→Manila = +12h. After that it is EST (UTC-5), so ET→Manila = +13h.`
+  );
+  lines.push(
+    `- Always state the Manila DATE as well as the time. Evening ET events can fall on the next Manila date.`
+  );
+  lines.push(``);
+  lines.push(`TODAY`);
+  lines.push(manilaNowLabel());
+  lines.push(``);
+  lines.push(
+    `CALENDAR FROM THE APP (already converted by the app; verify, do not assume it is right)`
+  );
+  lines.push(
+    `name | impact | ET date+time | Manila date+time | poll-slot window | slot avg / >1% (if known)`
+  );
+  if (eventTableLines.length) {
+    for (const L of eventTableLines) lines.push(L);
+  } else {
+    lines.push(`(no events in app)`);
+  }
+  lines.push(``);
+  lines.push(
+    `Manual notes without a verifiable event type (OTHER with no primary source) should be treated cautiously.`
+  );
+  lines.push(``);
+  lines.push(`APP POLL SLOTS (Manila; each stat covers the ~3h BEFORE its label)`);
+  lines.push(`02:05, 05:05, 08:05, 11:05, 14:05, 17:05, 20:05, 23:05.`);
+  lines.push(`Polls cannot see moves shorter than ~3h or their direction.`);
+  if (slotStatsHint) {
+    lines.push(slotStatsHint);
+  }
+  lines.push(``);
+  lines.push(`RESEARCH TASKS (live search required; no training memory)`);
+  lines.push(
+    `1. Verify each event's date and time against the primary source (federalreserve.gov, bls.gov, bea.gov). Reply KEEP / FIX (give correct ET AND Manila date+time) / STALE. Also check the Manila date and the slot mapping.`
+  );
+  lines.push(
+    `2. Find verified high-impact events in the next 21 days that are NOT in our list: Fed speakers/minutes, GDP, PPI, retail sales, Treasury refunding, scheduled US political/regulatory dates, and anything else scheduled and sourced.`
+  );
+  lines.push(
+    `3. Philippines items: BSP policy decision dates, and any scheduled USD/PHP-relevant release. PHP pairs move with USD/PHP as well as with USD crypto prices.`
+  );
+  lines.push(
+    `4. For each HIGH event, state when the release lands relative to the app's poll slots, including sub-slot timing (e.g. a statement landing minutes before a poll).`
+  );
+  lines.push(``);
+  lines.push(`VERIFICATION RULES`);
+  lines.push(
+    `- Each claim needs a primary source, its URL, and the date you checked.`
+  );
+  lines.push(
+    `- Unverified: write "none verified". Do not guess a date or time.`
+  );
+  lines.push(
+    `- No memory headlines, no "last time CPI came in hot…" history, no forecasts or consensus numbers unless sourced and dated.`
+  );
+  lines.push(
+    `- If you have no live search, say so in one line and only check the arithmetic of the conversions above.`
+  );
+  lines.push(``);
+  lines.push(`POSTURE LABELS (use only these)`);
+  lines.push(
+    `IGNORE · WATCH (check price at the time, no order) · STAGE (only if the trader's Spot page already shows a long bias; prefer resting limit orders before the window, not market orders inside it) · RISK (verified item that raises event risk for coins held; review exposure, do not add)`
+  );
+  lines.push(``);
+  lines.push(`RULES`);
+  lines.push(
+    `Neutral. Do not lean bullish. Spot only. Under ~300 words excluding tables.`
+  );
+  lines.push(``);
+  lines.push(`ANSWER FORMAT`);
+  lines.push(`0. Data status (1 line: search available? primary sources checked?)`);
+  lines.push(
+    `1. Calendar audit table: Event | Manila date+time | Slot window | Verdict (KEEP/FIX/STALE) | Source | Posture`
+  );
+  lines.push(
+    `2. Missing macro, next 21 days (verified only; same columns) or "none verified"`
+  );
+  lines.push(
+    `3. Manila watch windows: for each HIGH event, one line: "watch from [time] to [time] Manila" (about 30 min before to the next poll after release), plus whether the poll stats will capture the reaction`
+  );
+  lines.push(`4. Do (max 3) / Don't (max 3) for a spot buyer around these dates`);
+  lines.push(
+    `5. App corrections (wrong dates, ET/Manila mismatches, stale rows) or "none"`
+  );
+  lines.push(`Recheck by: ${recheckByLabel(7)}`);
+  return lines.join("\n");
+}
+
+type MacroEventRow = {
+  date: string;
+  title: string;
+  type?: string;
+  severity?: string;
+  timeET?: string;
+  manilaTimeLabel?: string;
+  coinSymbol?: string;
+  detail?: string;
+  source?: string;
+};
+
+async function loadMacroEventsFromApp(): Promise<{
+  eventTableLines: string[];
+  macroSlotLines: string[];
+  slotByLabel: Map<string, SlotStat>;
+}> {
   const catRes = await fetch("/api/catalyst-ai")
     .then((r) => (r.ok ? r.json() : null))
     .catch(() => null);
@@ -213,40 +437,37 @@ async function loadMacroLinesFromApp(): Promise<string[]> {
     }
   }
 
-  const macroLines: string[] = [];
-  if (!macroLog?.response) return macroLines;
+  const eventTableLines: string[] = [];
+  const macroSlotLines: string[] = [];
+  if (!macroLog?.response) {
+    return { eventTableLines, macroSlotLines, slotByLabel: new Map() };
+  }
 
   try {
     let raw = String(macroLog.response).trim();
     raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
     const parsed = JSON.parse(raw);
-    const arr = Array.isArray(parsed) ? parsed : [];
-    arr.sort((a: { date?: string }, b: { date?: string }) =>
-      String(a.date || "").localeCompare(String(b.date || ""))
-    );
+    const arr: MacroEventRow[] = Array.isArray(parsed) ? parsed : [];
+    arr.sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
     for (const e of arr) {
       const date = String(e.date || "").slice(0, 10);
       const title = (e.title || "").trim();
       const key = `${date}|${title.toLowerCase()}`;
       if (deletedKeys.has(key)) continue;
-      const bits = [
-        date || "?",
-        e.type || "OTHER",
-        e.severity === "high" ? "HIGH" : e.severity || "",
-        title,
-      ].filter(Boolean);
-      let line = bits.join(" · ");
-      if (e.timeET) line += ` · ${e.timeET} ET`;
-      if (e.manilaTimeLabel) line += ` · ${e.manilaTimeLabel}`;
-      if (e.coinSymbol) line += ` · coin ${e.coinSymbol}`;
-      if (e.detail) line += ` — ${String(e.detail).slice(0, 180)}`;
-      if (e.source === "manual") line += " [manual]";
-      macroLines.push(line);
+      const impact = e.severity === "high" ? "HIGH" : e.severity || "medium";
+      const { manilaLine, slotLabel } = etToManilaSlot(date, e.timeET);
+      const etPart = e.timeET ? `${date} ${e.timeET} ET` : `${date} (time unknown) ET`;
+      eventTableLines.push(
+        `${title} | ${impact} | ${etPart} | ${manilaLine} | ~${slotLabel} window | ${e.type || "OTHER"}${e.source === "manual" ? " [manual]" : ""}`
+      );
+      macroSlotLines.push(
+        `${date} ${title} (${impact}) → Manila ${manilaLine} → slot ~${slotLabel}`
+      );
     }
   } catch {
-    macroLines.push("(Macro watch response could not be parsed)");
+    eventTableLines.push("(Macro watch response could not be parsed)");
   }
-  return macroLines;
+  return { eventTableLines, macroSlotLines, slotByLabel: new Map() };
 }
 
 export default function SwingTimingView() {
@@ -260,7 +481,15 @@ export default function SwingTimingView() {
   const copyTimingPrompt = async () => {
     if (!data) return;
     try {
-      await navigator.clipboard.writeText(formatTimingPatternPrompt(data));
+      const { macroSlotLines } = await loadMacroEventsFromApp();
+      // Enrich macro lines with slot avg if we can match label
+      const enriched = macroSlotLines.map((line) => {
+        const slot = data.slots.find((s) => line.includes(s.label.slice(0, 5)) || line.includes("23:05") && s.label.includes("23"));
+        if (!slot) return line;
+        return `${line} (slot avg ${slot.avgAbsPct}%, >1% ${slot.pctMovesAbove1}%)`;
+      });
+      const text = formatTimingPatternPrompt(data, enriched, "none provided");
+      await navigator.clipboard.writeText(text);
       setAgentCopied("timing");
       setTimeout(() => setAgentCopied(null), 2000);
     } catch {
@@ -270,8 +499,18 @@ export default function SwingTimingView() {
 
   const copyMacroPrompt = async () => {
     try {
-      const macroLines = await loadMacroLinesFromApp();
-      await navigator.clipboard.writeText(formatMacroWatchAgentPrompt(macroLines));
+      const { eventTableLines } = await loadMacroEventsFromApp();
+      let slotHint = "";
+      if (data?.slots?.length) {
+        const bits = data.slots
+          .slice()
+          .sort((a, b) => a.rank - b.rank)
+          .slice(0, 3)
+          .map((s) => `${s.label}: avg ${s.avgAbsPct}%, >1% ${s.pctMovesAbove1}%`);
+        slotHint = `Hottest slots (from Timing, ${data.days}d): ${bits.join(" · ")}`;
+      }
+      const text = formatMacroWatchAgentPrompt(eventTableLines, slotHint);
+      await navigator.clipboard.writeText(text);
       setAgentCopied("macro");
       setTimeout(() => setAgentCopied(null), 2000);
     } catch {
