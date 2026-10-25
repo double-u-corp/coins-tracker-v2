@@ -105,6 +105,40 @@ export default function LongScanView() {
 
   const nextRun = useMemo(() => nextScheduledRun(now), [now]);
 
+  /** Flatten hits across runs → group by coin (newest first). */
+  const coinGroups = useMemo(() => {
+    type Row = Hit & { scannedAt: string; runId: string };
+    const map = new Map<string, { symbol: string; name: string; rows: Row[] }>();
+    for (const run of runs) {
+      for (const h of run.hits || []) {
+        const key = h.symbol.toUpperCase();
+        let g = map.get(key);
+        if (!g) {
+          g = { symbol: h.symbol, name: h.name, rows: [] };
+          map.set(key, g);
+        }
+        g.rows.push({ ...h, scannedAt: run.scannedAt, runId: run.id });
+      }
+    }
+    const groups = [...map.values()].map((g) => {
+      g.rows.sort((a, b) => b.scannedAt.localeCompare(a.scannedAt));
+      return g;
+    });
+    // Sort coins: most recent hit first, then symbol
+    groups.sort((a, b) => {
+      const at = a.rows[0]?.scannedAt || "";
+      const bt = b.rows[0]?.scannedAt || "";
+      if (at !== bt) return bt.localeCompare(at);
+      return a.symbol.localeCompare(b.symbol);
+    });
+    return groups;
+  }, [runs]);
+
+  const emptyRunCount = useMemo(
+    () => runs.filter((r) => !r.hits?.length).length,
+    [runs]
+  );
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -158,14 +192,18 @@ export default function LongScanView() {
 
   const removeRun = async (runId: string) => {
     setDeletingKey(runId);
+    setError(null);
+    const prev = runs;
+    // Optimistic: drop run locally — no full page reload
+    setRuns((r) => r.filter((x) => x.id !== runId));
     try {
       const res = await fetch(`/api/long-scan?runId=${encodeURIComponent(runId)}`, {
         method: "DELETE",
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Delete failed");
-      await load();
     } catch (err) {
+      setRuns(prev);
       setError((err as Error).message);
     } finally {
       setDeletingKey(null);
@@ -173,16 +211,39 @@ export default function LongScanView() {
   };
 
   const removeHit = async (runId: string, symbol: string) => {
-    setDeletingKey(`${runId}:${symbol}`);
+    const key = `${runId}:${symbol}`;
+    setDeletingKey(key);
+    setError(null);
+    const prev = runs;
+    // Optimistic: remove hit from that run; drop run if no hits left
+    setRuns((list) =>
+      list
+        .map((run) => {
+          if (run.id !== runId) return run;
+          const hits = (run.hits || []).filter(
+            (h) => h.symbol.toUpperCase() !== symbol.toUpperCase()
+          );
+          return {
+            ...run,
+            hits,
+            saved: hits.length,
+            message:
+              hits.length > 0
+                ? run.message
+                : "No near-support + rising setups this run.",
+          };
+        })
+        .filter((run) => run.hits.length > 0 || run.message)
+    );
     try {
       const res = await fetch(
         `/api/long-scan?runId=${encodeURIComponent(runId)}&symbol=${encodeURIComponent(symbol)}`,
         { method: "DELETE" }
       );
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Delete failed");
-      await load();
     } catch (err) {
+      setRuns(prev);
       setError((err as Error).message);
     } finally {
       setDeletingKey(null);
@@ -222,163 +283,136 @@ export default function LongScanView() {
             <div key={i} className="h-24 rounded-lg bg-gray-100" />
           ))}
         </div>
-      ) : runs.length === 0 ? (
+      ) : coinGroups.length === 0 && runs.length === 0 ? (
         <p className="text-sm text-gray-500">
           No runs yet. Use <span className="font-semibold">Run scan now</span> or wait for the
           schedule.
         </p>
+      ) : coinGroups.length === 0 ? (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          <p className="font-semibold text-slate-800">No coin hits stored yet</p>
+          <p className="mt-1 text-xs">
+            {runs.length} run(s) logged · {emptyRunCount} empty. Next:{" "}
+            <span className="font-semibold text-indigo-800">
+              {formatWhen(nextRun.toISOString())}
+            </span>
+          </p>
+        </div>
       ) : (
-        <div className="space-y-8">
-          {runs.map((run) => {
-            const empty = !run.hits?.length;
-            const when = formatWhen(run.scannedAt);
+        <div className="space-y-6">
+          <p className="text-[11px] text-gray-500">
+            {coinGroups.length} coin(s) · grouped by symbol · newest scan first inside each card
+          </p>
+          {coinGroups.map((g) => {
             return (
-              <section key={run.id}>
-                <div
-                  className={`mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border-2 px-3 py-2.5 shadow-sm ${
-                    empty ? "border-slate-200 bg-slate-50" : "border-indigo-200 bg-indigo-50"
-                  }`}
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-xl shrink-0">🕒</span>
-                    <div className="min-w-0">
-                      <h2 className="text-base font-extrabold text-slate-900 tracking-tight">
-                        {when}
-                      </h2>
-                      <p className="text-[11px] font-semibold text-slate-600">
-                        {empty
-                          ? `No hits · checked ${run.scanned}`
-                          : `${run.hits.length} hit(s) · checked ${run.scanned}`}
-                        {run.message ? ` · ${run.message}` : ""}
-                      </p>
-                    </div>
+              <section
+                key={g.symbol}
+                className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 bg-gradient-to-r from-indigo-50/80 to-white px-4 py-3">
+                  <div className="min-w-0">
+                    <h2 className="text-base font-extrabold text-slate-900 truncate">
+                      {g.name}{" "}
+                      <span className="font-mono text-sm font-bold text-indigo-700">
+                        {g.symbol}
+                      </span>
+                    </h2>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => void removeRun(run.id)}
-                    disabled={deletingKey === run.id}
-                    className="rounded border border-gray-200 bg-white px-2 py-1 text-[11px] font-bold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                  <Link
+                    href={`/chart?symbol=${encodeURIComponent(g.symbol)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-indigo-700"
                   >
-                    {deletingKey === run.id ? "…" : "Delete run"}
-                  </button>
+                    Spot →
+                  </Link>
                 </div>
 
-                {empty ? (
-                  <p className="text-sm text-slate-500 pl-1">
-                    Nothing matched this pass. Next scheduled:{" "}
-                    <span className="font-semibold text-indigo-800">
-                      {formatWhen(nextRun.toISOString())}
-                    </span>
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                    {run.hits.map((h) => {
-                      const badge = tierLabel(h.tier);
-                      return (
-                        <article
-                          key={`${run.id}-${h.symbol}`}
-                          className="rounded-xl border border-emerald-100 bg-white p-4 shadow-sm"
-                        >
-                          <div className="flex items-start justify-between gap-2 mb-2">
-                            <div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="text-base font-bold text-gray-900">{h.name}</span>
-                                <span className="font-mono text-[10px] text-gray-500">
-                                  {h.symbol}
-                                </span>
-                                <span
-                                  className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                                    h.bias === "STRONG LONG"
-                                      ? "bg-emerald-600 text-white"
-                                      : h.bias.includes("LONG")
-                                        ? "bg-emerald-100 text-emerald-900"
-                                        : "bg-slate-100 text-slate-700"
-                                  }`}
-                                >
-                                  {h.bias}
-                                </span>
-                                <span
-                                  className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${badge.cls}`}
-                                >
-                                  {badge.text}
-                                </span>
-                              </div>
-                              <p className="mt-1.5 inline-flex rounded-md bg-slate-900 px-2 py-1 text-[11px] font-bold text-white">
-                                {when}
-                              </p>
-                              <p className="text-[11px] text-gray-500 mt-1">
-                                score {h.score >= 0 ? "+" : ""}
-                                {h.score}/±{h.maxScore} · {(h.confidence * 100).toFixed(0)}% data
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <Link
-                                href={`/chart?symbol=${encodeURIComponent(h.symbol)}`}
-                                className="text-[11px] font-bold text-brand-600 hover:underline"
-                              >
-                                Spot →
-                              </Link>
-                              <button
-                                type="button"
-                                onClick={() => void removeHit(run.id, h.symbol)}
-                                disabled={deletingKey === `${run.id}:${h.symbol}`}
-                                className="rounded border border-gray-200 px-1.5 py-0.5 text-[11px] font-bold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
-                              >
-                                ✕
-                              </button>
-                            </div>
+                <div className="divide-y divide-gray-100">
+                  {g.rows.map((h) => {
+                    const tlab = tierLabel(h.tier);
+                    return (
+                      <article
+                        key={`${h.runId}-${h.symbol}-${h.scannedAt}`}
+                        className="px-4 py-3 hover:bg-slate-50/60"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                          <time className="text-xs font-bold text-indigo-900 tabular-nums">
+                            🕒 {formatWhen(h.scannedAt)}
+                          </time>
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${tlab.cls}`}
+                            >
+                              {tlab.text}
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-600">
+                              {h.bias} · {h.score >= 0 ? "+" : ""}
+                              {h.score}/±{h.maxScore}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => void removeHit(h.runId, h.symbol)}
+                              disabled={deletingKey === `${h.runId}:${h.symbol}`}
+                              className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-bold text-rose-700 shadow-sm hover:bg-rose-100 disabled:opacity-50"
+                              title="Remove this hit"
+                            >
+                              {deletingKey === `${h.runId}:${h.symbol}` ? "…" : "🗑 Delete"}
+                            </button>
                           </div>
+                        </div>
 
-                          <div className="text-sm font-semibold text-gray-900 mb-2">
-                            Price {formatPhp(h.currentPrice)}
-                            {h.support != null && (
-                              <span className="text-xs font-normal text-gray-500">
-                                {" "}
-                                · S {formatPhp(h.support)}
-                              </span>
-                            )}
-                            {h.resistance != null && (
-                              <span className="text-xs font-normal text-gray-500">
-                                {" "}
-                                · R {formatPhp(h.resistance)}
-                              </span>
-                            )}
-                          </div>
-
-                          {h.ladder?.length > 0 && (
-                            <div className="mb-2">
-                              <p className="text-[11px] font-bold uppercase text-gray-500 mb-1">
-                                Entry ladder
-                              </p>
-                              <ul className="space-y-0.5 text-xs text-gray-800">
-                                {h.ladder.map((lvl, i) => (
-                                  <li key={i} className="flex justify-between gap-2 font-mono">
-                                    <span>
-                                      ~{formatPhp(lvl.price)}{" "}
-                                      <span className="text-gray-500 font-sans">({lvl.basis})</span>
-                                    </span>
-                                    <span className="text-gray-600">{lvl.allocationPct}%</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
+                        <div className="text-sm font-bold text-slate-900 mb-1">
+                          {formatPhp(h.currentPrice)}
+                          {h.support != null && (
+                            <span className="text-xs font-normal text-gray-500">
+                              {" "}
+                              · S {formatPhp(h.support)}
+                            </span>
                           )}
+                          {h.resistance != null && (
+                            <span className="text-xs font-normal text-gray-500">
+                              {" "}
+                              · R {formatPhp(h.resistance)}
+                            </span>
+                          )}
+                        </div>
 
+                        {h.ladder?.length > 0 && (
+                          <ul className="mb-1 space-y-0.5 text-xs text-gray-800">
+                            {h.ladder.map((lvl, i) => (
+                              <li key={i} className="flex justify-between gap-2 font-mono">
+                                <span>
+                                  ~{formatPhp(lvl.price)}{" "}
+                                  <span className="text-gray-500 font-sans">({lvl.basis})</span>
+                                </span>
+                                <span className="text-gray-600">{lvl.allocationPct}%</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
                           {h.invalidation != null && (
-                            <p className="text-xs text-rose-800 mb-1">
-                              <span className="font-bold">Stop:</span> ~{formatPhp(h.invalidation)}
-                            </p>
+                            <span className="text-rose-800">
+                              <span className="font-bold">Stop</span> ~{formatPhp(h.invalidation)}
+                            </span>
                           )}
                           {h.target != null && (
-                            <p className="text-xs text-emerald-800">
-                              <span className="font-bold">Target:</span> ~{formatPhp(h.target)}
-                            </p>
+                            <span className="text-emerald-800">
+                              <span className="font-bold">Target</span> ~{formatPhp(h.target)}
+                            </span>
                           )}
-                        </article>
-                      );
-                    })}
-                  </div>
-                )}
+                        </div>
+                        {h.signalsNote && (
+                          <p className="mt-1.5 text-[10px] text-gray-500 line-clamp-2">
+                            {h.signalsNote}
+                          </p>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
               </section>
             );
           })}
