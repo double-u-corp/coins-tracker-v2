@@ -5,10 +5,7 @@ import { useAuth } from "@/features/auth/useAuth";
 
 const PUBLIC_NAV_LINKS = [
   { href: "/", label: "Home" },
-  { href: "/calendar", label: "Calendar" },
   { href: "/chart", label: "Spot" },
-  { href: "/structure", label: "3h Trading" },
-  { href: "/long-scan", label: "LONG scan" },
   { href: "/timing", label: "Timing" },
 ];
 

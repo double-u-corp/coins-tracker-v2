@@ -292,7 +292,7 @@ export default function HomeTable() {
       <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-gray-900">Coin Prices</h1>
-          {/* {canUpdatePrice && (
+          {canUpdatePrice && (
             <button
               type="button"
               onClick={triggerCronManually}
@@ -302,7 +302,7 @@ export default function HomeTable() {
             >
               <span>{cronTriggering ? "⏳ Running..." : "⚡ Run Cron"}</span>
             </button>
-          )} */}
+          )}
         </div>
       </div>
 
@@ -320,9 +320,17 @@ export default function HomeTable() {
               <span className="h-3 w-16 animate-pulse rounded bg-violet-100" aria-hidden />
             )}
           </h2>
-          <span className="text-xs text-gray-400">
-            Targets near/hit · agent review-by dates
-          </span>
+          <div className="flex items-center gap-3 flex-wrap">
+            <Link
+              href="/long-scan"
+              className="text-xs font-bold text-indigo-700 hover:underline"
+            >
+              📡 LONG scan →
+            </Link>
+            <span className="text-xs text-gray-400">
+              Targets near/hit · agent review-by dates
+            </span>
+          </div>
         </div>
 
         {loading ? (
@@ -376,11 +384,31 @@ export default function HomeTable() {
                         </span>
                       </div>
                       {card.currentPrice != null && (
-                        <div className="text-[11px] text-gray-600 mt-0.5">
-                          Price{" "}
-                          <span className="font-semibold text-gray-900">
-                            {formatPhp(card.currentPrice)}
+                        <div className="text-[11px] text-gray-600 mt-0.5 flex flex-wrap items-center gap-1.5">
+                          <span>
+                            Price{" "}
+                            <span className="font-semibold text-gray-900">
+                              {formatPhp(card.currentPrice)}
+                            </span>
                           </span>
+                          {(() => {
+                            const pct =
+                              movePctBySymbol[card.symbol.toUpperCase()] ??
+                              movePctBySymbol[card.symbol.replace(/PHP$/i, "").toUpperCase()];
+                            if (pct == null || !Number.isFinite(pct)) return null;
+                            const up = pct > 0;
+                            const down = pct < 0;
+                            return (
+                              <span
+                                className={`font-bold tabular-nums ${
+                                  up ? "text-green-600" : down ? "text-red-600" : "text-gray-500"
+                                }`}
+                              >
+                                {up ? "+" : ""}
+                                {pct.toFixed(1)}%
+                              </span>
+                            );
+                          })()}
                         </div>
                       )}
                     </div>

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
-import type { ChartPoint, CoinSummary, DailyRecord } from "@/validators/recordSchema";
+import type { CoinSummary, DailyRecord, ChartPoint } from "@/validators/recordSchema";
 
 export interface CoinOption {
   symbol: string;
   name: string;
-  currentPrice?: number | null; // Added currentPrice
+  currentPrice?: number | null;
 }
 
 export type MultiCoinRecords = Record<string, DailyRecord[]>;
@@ -17,29 +17,26 @@ export function useCalendarLogic() {
   const [selectedSymbol, setSelectedSymbol] = useState<string>("");
   const [hasAppliedInitialSymbol, setHasAppliedInitialSymbol] = useState(false);
   const [monthCursor, setMonthCursor] = useState<Date>(() => new Date());
-  
+
   const [allCoinsData, setAllCoinsData] = useState<MultiCoinRecords>({});
-  
-  // 3h poll series for the selected coin (same endpoint the Chart page uses).
-  // Best-effort: null on failure, the calendar just hides the poll tiles.
   const [intradayPoints, setIntradayPoints] = useState<ChartPoint[] | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load the list of coins once
   useEffect(() => {
     let cancelled = false;
     fetch("/api/coins")
       .then((res) => res.json())
       .then((data: { coins: CoinSummary[] }) => {
         if (!cancelled && Array.isArray(data.coins)) {
-          // Map the currentPrice so it is available in the UI
-          setCoinOptions(data.coins.map((c) => ({ 
-            symbol: c.symbol, 
-            name: c.name,
-            currentPrice: c.currentPrice 
-          })));
+          setCoinOptions(
+            data.coins.map((c) => ({
+              symbol: c.symbol,
+              name: c.name,
+              currentPrice: c.currentPrice,
+            }))
+          );
         }
       })
       .catch(() => {});
@@ -48,13 +45,13 @@ export function useCalendarLogic() {
     };
   }, []);
 
-  // Initial symbol handling from router query
   useEffect(() => {
     if (hasAppliedInitialSymbol) return;
     if (!router.isReady) return;
     if (coinOptions.length === 0) return;
 
-    const queriedSymbol = typeof router.query.symbol === "string" ? router.query.symbol.toUpperCase() : "";
+    const queriedSymbol =
+      typeof router.query.symbol === "string" ? router.query.symbol.toUpperCase() : "";
     if (queriedSymbol) {
       const matched = coinOptions.find((c) => c.symbol === queriedSymbol);
       if (matched) {
@@ -70,7 +67,6 @@ export function useCalendarLogic() {
     return `${y}-${m}`;
   }, [monthCursor]);
 
-  // Always fetch all coins for the selected month to ensure accurate ranking calculations
   useEffect(() => {
     if (coinOptions.length === 0) return;
 
@@ -107,31 +103,27 @@ export function useCalendarLogic() {
     };
   }, [monthParam, coinOptions]);
 
-  // Intraday polls for the selected coin. `hours` reaches back from now to the
-  // start of the viewed month so past months are covered; the view filters by day.
   useEffect(() => {
     if (!selectedSymbol) {
       setIntradayPoints(null);
       return;
     }
     let cancelled = false;
-    const monthStart = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1);
-    // +24h buffer so the 2:05 poll on the 1st is never cut off by timezone differences.
-    const hours = Math.max(24, Math.ceil((Date.now() - monthStart.getTime()) / 3_600_000) + 24);
-    fetch(`/api/coins?type=chart&symbol=${selectedSymbol}&granularity=3h&hours=${hours}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { points: ChartPoint[] } | null) => {
-        if (!cancelled) setIntradayPoints(data?.points?.length ? data.points : null);
+    fetch(
+      `/api/coins?type=chart&symbol=${encodeURIComponent(selectedSymbol)}&granularity=3h&hours=960`
+    )
+      .then((res) => (res.ok ? res.json() : { points: [] }))
+      .then((data: { points?: ChartPoint[] }) => {
+        if (!cancelled) setIntradayPoints(Array.isArray(data.points) ? data.points : []);
       })
       .catch(() => {
-        if (!cancelled) setIntradayPoints(null);
+        if (!cancelled) setIntradayPoints([]);
       });
     return () => {
       cancelled = true;
     };
-  }, [selectedSymbol, monthCursor]);
+  }, [selectedSymbol, monthParam]);
 
-  // Derive single coin daily records directly from allCoinsData
   const days = useMemo(() => {
     return selectedSymbol ? allCoinsData[selectedSymbol] || [] : [];
   }, [selectedSymbol, allCoinsData]);

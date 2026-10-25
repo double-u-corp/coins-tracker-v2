@@ -6,7 +6,7 @@ const PROMPT_ID = "watchlist-market-signals";
 const CATEGORY = "WatchlistNews";
 const PER_OUTLET = 3;
 /** Keep rows this many days; older can still be deleted manually sooner. */
-const RETAIN_DAYS = 14;
+const RETAIN_DAYS = 2;
 
 export const CORE_OUTLETS = [
   { id: "theblock", host: "theblock.co", label: "The Block" },
