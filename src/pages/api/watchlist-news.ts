@@ -10,7 +10,6 @@ const RETAIN_DAYS = 1; // keep outlet rows ~1 day only
 
 export const CORE_OUTLETS = [
   { id: "theblock", host: "theblock.co", label: "The Block" },
-  { id: "cointelegraph", host: "cointelegraph.com", label: "Cointelegraph" },
   { id: "decrypt", host: "decrypt.co", label: "Decrypt" },
   // Replaced CoinDesk + Blockworks (unreachable on user network)
   { id: "bitcoinmagazine", host: "bitcoinmagazine.com", label: "Bitcoin Magazine" },

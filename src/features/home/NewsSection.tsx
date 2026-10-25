@@ -38,7 +38,6 @@ function formatDateTime(iso: string): string {
 
 const FALLBACK_OUTLETS: Outlet[] = [
   { id: "theblock", host: "theblock.co", label: "The Block" },
-  { id: "cointelegraph", host: "cointelegraph.com", label: "Cointelegraph" },
   { id: "decrypt", host: "decrypt.co", label: "Decrypt" },
   { id: "bitcoinmagazine", host: "bitcoinmagazine.com", label: "Bitcoin Magazine" },
   { id: "dlnews", host: "dlnews.com", label: "DL News" },

@@ -46,36 +46,12 @@ function CoinCard({ coin, canUpdatePrice, onUpdatePriceClick }: CoinCardProps) {
         </span>
 
         <div className="flex items-center gap-1.5">
-          {canUpdatePrice && (
-            <button
-              type="button"
-              onClick={() => onUpdatePriceClick({ symbol: coin.symbol, name: coin.name })}
-              className="rounded bg-brand-50 border border-brand-200 px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 transition-colors"
-              title="Update this coin's price manually"
-            >
-              Update
-            </button>
-          )}
           <Link
-            href={`/calendar?symbol=${coin.symbol}`}
-            className="rounded bg-gray-100 border border-gray-200 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-200 transition-colors"
-            title={`See ${coin.symbol}'s calendar`}
+            href={`/chart?symbol=${encodeURIComponent(coin.symbol)}`}
+            className="rounded bg-indigo-50 border border-indigo-200 px-2.5 py-1 text-xs font-bold text-indigo-800 hover:bg-indigo-100 transition-colors"
+            title={`Open Spot for ${coin.symbol}`}
           >
-            Calendar
-          </Link>
-          <Link
-            href={`/chart?symbol=${coin.symbol}`}
-            className="rounded bg-gray-100 border border-gray-200 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-200 transition-colors"
-            title={`See ${coin.symbol}'s chart`}
-          >
-            Spot
-          </Link>
-          <Link
-            href={`/structure?symbol=${encodeURIComponent(coin.symbol)}`}
-            className="rounded bg-indigo-50 border border-indigo-200 px-2 py-1 text-xs font-medium text-indigo-800 hover:bg-indigo-100 transition-colors"
-            title={`3h structure ladder for ${coin.symbol}`}
-          >
-            3h
+            Spot →
           </Link>
         </div>
       </div>

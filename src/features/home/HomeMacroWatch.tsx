@@ -15,6 +15,12 @@ const CALENDAR_PROMPT =
 const SEARCH_QUERY =
   "US economic calendar CPI PCE NFP FOMC jobs report schedule this month next month";
 
+type ManualEvent = MacroEvent & {
+  detail?: string;
+  coinSymbol?: string;
+  source?: "manual" | "scan";
+};
+
 type HistorySnap = { at: number; eventCount: number; events: MacroEvent[] };
 
 type MetaStore = {
@@ -98,6 +104,15 @@ export default function HomeMacroWatch() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [formDate, setFormDate] = useState("");
+  const [formTitle, setFormTitle] = useState("");
+  const [formType, setFormType] = useState<MacroEvent["type"]>("OTHER");
+  const [formSeverity, setFormSeverity] = useState<"high" | "medium">("medium");
+  const [formTimeET, setFormTimeET] = useState("");
+  const [formDetail, setFormDetail] = useState("");
+  const [formCoin, setFormCoin] = useState("");
+  const [savingManual, setSavingManual] = useState(false);
 
   const saveEvents = async (next: MacroEvent[]) => {
     await fetch("/api/catalyst-ai", {
@@ -249,6 +264,48 @@ export default function HomeMacroWatch() {
     }
   };
 
+  const addManualEvent = async () => {
+    const date = formDate.trim();
+    const title = formTitle.trim();
+    if (!date || !title) {
+      setError("Date and title are required");
+      return;
+    }
+    setSavingManual(true);
+    setError(null);
+    try {
+      const evt: ManualEvent = {
+        date,
+        title,
+        type: formType,
+        severity: formSeverity,
+        timeET: formTimeET.trim() || undefined,
+        detail: formDetail.trim() || undefined,
+        coinSymbol: formCoin.trim().toUpperCase() || undefined,
+        source: "manual",
+      };
+      const withManila = attachManilaFields([evt])[0] ?? evt;
+      const deleted = new Set(meta.deletedKeys);
+      // Allow re-adding a previously deleted key
+      const key = eventKey(withManila);
+      const nextDeleted = meta.deletedKeys.filter((k) => k !== key);
+      const merged = mergeEvents(events, [withManila], new Set(nextDeleted));
+      const nextMeta: MetaStore = { ...meta, deletedKeys: nextDeleted };
+      await persistMerged(merged, nextMeta);
+      setEvents(merged);
+      setMeta(nextMeta);
+      setFormTitle("");
+      setFormDetail("");
+      setFormTimeET("");
+      setFormCoin("");
+      setShowAddForm(false);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSavingManual(false);
+    }
+  };
+
   const deleteHistorySnap = async (at: number) => {
     const nextMeta: MetaStore = {
       ...meta,
@@ -326,6 +383,13 @@ export default function HomeMacroWatch() {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
+            onClick={() => setShowAddForm((v) => !v)}
+            className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-900 hover:bg-emerald-100"
+          >
+            {showAddForm ? "Cancel" : "+ Add news"}
+          </button>
+          <button
+            type="button"
             onClick={() => setShowHistory((v) => !v)}
             className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
           >
@@ -343,6 +407,100 @@ export default function HomeMacroWatch() {
       </div>
 
       {error && <p className="mb-2 text-xs text-rose-600">{error}</p>}
+
+      
+      {showAddForm && (
+        <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50/40 p-3 space-y-2">
+          <p className="text-[11px] font-bold text-emerald-900">
+            Add macro or coin news (saved on this calendar — not auto-deleted)
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <label className="text-[11px] font-semibold text-slate-700">
+              Date (YYYY-MM-DD)
+              <input
+                type="date"
+                value={formDate}
+                onChange={(e) => setFormDate(e.target.value)}
+                className="mt-0.5 w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+              />
+            </label>
+            <label className="text-[11px] font-semibold text-slate-700">
+              Time ET (optional)
+              <input
+                type="text"
+                placeholder="08:30"
+                value={formTimeET}
+                onChange={(e) => setFormTimeET(e.target.value)}
+                className="mt-0.5 w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+              />
+            </label>
+            <label className="text-[11px] font-semibold text-slate-700 sm:col-span-2">
+              Title
+              <input
+                type="text"
+                placeholder="US GDP advance estimate and PCE inflation"
+                value={formTitle}
+                onChange={(e) => setFormTitle(e.target.value)}
+                className="mt-0.5 w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+              />
+            </label>
+            <label className="text-[11px] font-semibold text-slate-700">
+              Type
+              <select
+                value={formType}
+                onChange={(e) => setFormType(e.target.value as MacroEvent["type"])}
+                className="mt-0.5 w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+              >
+                <option value="OTHER">OTHER / Coin news</option>
+                <option value="FOMC">FOMC</option>
+                <option value="CPI">CPI</option>
+                <option value="PCE">PCE</option>
+                <option value="NFP">NFP</option>
+                <option value="EXPIRY">EXPIRY</option>
+              </select>
+            </label>
+            <label className="text-[11px] font-semibold text-slate-700">
+              Priority
+              <select
+                value={formSeverity}
+                onChange={(e) => setFormSeverity(e.target.value as "high" | "medium")}
+                className="mt-0.5 w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+              >
+                <option value="high">High priority</option>
+                <option value="medium">Medium</option>
+              </select>
+            </label>
+            <label className="text-[11px] font-semibold text-slate-700">
+              Coin (optional, e.g. SOLPHP)
+              <input
+                type="text"
+                placeholder="SOLPHP"
+                value={formCoin}
+                onChange={(e) => setFormCoin(e.target.value)}
+                className="mt-0.5 w-full rounded border border-slate-200 px-2 py-1.5 text-sm font-mono"
+              />
+            </label>
+            <label className="text-[11px] font-semibold text-slate-700 sm:col-span-2">
+              Detail / note
+              <textarea
+                rows={3}
+                placeholder="8:30 AM Eastern → 8:30 PM PHT. BEA schedules Q3 GDP and September PCE…"
+                value={formDetail}
+                onChange={(e) => setFormDetail(e.target.value)}
+                className="mt-0.5 w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+              />
+            </label>
+          </div>
+          <button
+            type="button"
+            onClick={() => void addManualEvent()}
+            disabled={savingManual}
+            className="rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-50"
+          >
+            {savingManual ? "Saving…" : "Save to Macro watch"}
+          </button>
+        </div>
+      )}
 
       {showHistory && (
         <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3 max-h-56 overflow-y-auto">
@@ -438,7 +596,12 @@ export default function HomeMacroWatch() {
                   </span>
                   {high && (
                     <span className="rounded border border-rose-300 bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-800">
-                      HIGH
+                      High priority
+                    </span>
+                  )}
+                  {(evt as ManualEvent).source === "manual" && (
+                    <span className="rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                      Manual
                     </span>
                   )}
                 </div>
@@ -448,9 +611,18 @@ export default function HomeMacroWatch() {
                   {evt.timeET ? ` · ${evt.timeET} ET` : ""}
                   {evt.manilaTimeLabel ? ` · ${evt.manilaTimeLabel}` : ""}
                 </div>
-                {evt.severity === "high" && (
-                  <p className="mt-1 text-[11px] text-rose-700/80">High impact for crypto risk</p>
+                {(evt as ManualEvent).coinSymbol && (
+                  <p className="mt-1 text-[11px] font-bold text-indigo-800">
+                    {(evt as ManualEvent).coinSymbol}
+                  </p>
                 )}
+                {(evt as ManualEvent).detail ? (
+                  <p className="mt-1 text-[11px] text-slate-600 whitespace-pre-wrap">
+                    {(evt as ManualEvent).detail}
+                  </p>
+                ) : evt.severity === "high" ? (
+                  <p className="mt-1 text-[11px] text-rose-700/80">High priority</p>
+                ) : null}
               </div>
             );
           })}

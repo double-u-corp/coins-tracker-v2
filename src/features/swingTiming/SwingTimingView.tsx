@@ -72,7 +72,7 @@ const INTENSITY_STYLES: Record<
 };
 
 
-function formatTimingAgentPrompt(data: TimingResponse): string {
+function formatTimingPatternPrompt(data: TimingResponse): string {
   const lines: string[] = [];
   lines.push(
     `You are a neutral research assistant for a Philippines **spot LONG-only** PHP crypto trader (Coins.ph / Maya style — no shorting, no leverage).`
@@ -80,91 +80,173 @@ function formatTimingAgentPrompt(data: TimingResponse): string {
   lines.push(``);
   lines.push(`## Goal`);
   lines.push(
-    `Use the **poll-timing pattern** below (from our app’s 3h price checks) together with **verified upcoming news** to advise when to watch markets more closely — not when to force a buy.`
+    `Interpret our **poll-timing pattern** (3h checks) so the trader knows when to watch vs ignore noise. This is **not** a buy signal.`
   );
   lines.push(``);
   lines.push(`## How our data is built`);
   lines.push(
-    `- Prices are polled about **8× per day** on a Manila schedule (~02:05, 05:05, 08:05, 11:05, 14:05, 17:05, 20:05, 23:05).`
+    `- Prices polled ~**8× per day** Manila: 02:05, 05:05, 08:05, 11:05, 14:05, 17:05, 20:05, 23:05.`
   );
   lines.push(
-    `- “Move” = absolute % change between consecutive polls ≤5h apart. This is **liquidity / activity timing**, not a buy signal by itself.`
+    `- Move = absolute % change between consecutive polls ≤5h apart (activity / liquidity timing).`
   );
-  lines.push(
-    `- Window analyzed: last **${data.days} days**. Generated: ${data.generatedAt}.`
-  );
+  lines.push(`- Window: last **${data.days} days**. Generated: ${data.generatedAt}.`);
   lines.push(``);
-  lines.push(`## Observed pattern (from our data)`);
+  lines.push(`## Slot activity (${data.days} days · Manila)`);
   if (data.hottestSlot) {
     lines.push(
-      `- **Hottest Manila slot:** ${data.hottestSlot.label} (avg |move| ${data.hottestSlot.avgAbsPct}%, median ${data.hottestSlot.medianAbsPct}%, ${data.hottestSlot.pctMovesAbove1}% of samples >1%, n=${data.hottestSlot.sampleCount}).`
+      `- Hottest slot: **${data.hottestSlot.label}** — avg |move| ${data.hottestSlot.avgAbsPct}%, median ${data.hottestSlot.medianAbsPct}%, >1% moves ${data.hottestSlot.pctMovesAbove1}%, n=${data.hottestSlot.sampleCount}.`
     );
   }
   if (data.quietestSlot) {
     lines.push(
-      `- **Quietest Manila slot:** ${data.quietestSlot.label} (avg |move| ${data.quietestSlot.avgAbsPct}%).`
+      `- Quietest slot: **${data.quietestSlot.label}** — avg |move| ${data.quietestSlot.avgAbsPct}%.`
     );
   }
+  lines.push(`- Full ranking (hot → quiet):`);
+  for (const s of [...data.slots].sort((a, b) => a.rank - b.rank)) {
+    lines.push(
+      `  ${s.rank}. ${s.label} — avg ${s.avgAbsPct}% · med ${s.medianAbsPct}% · >1% ${s.pctMovesAbove1}% · ${s.intensity} · samples ${s.sampleCount}`
+    );
+  }
+  lines.push(``);
+  lines.push(`## Weekday activity (${data.days} days · Manila)`);
   if (data.hottestWeekday) {
     lines.push(
-      `- **Hottest weekday:** ${data.hottestWeekday.label} (avg |move| ${data.hottestWeekday.avgAbsPct}%).`
+      `- Hottest weekday: **${data.hottestWeekday.label}** — avg |move| ${data.hottestWeekday.avgAbsPct}%, >1% ${data.hottestWeekday.pctMovesAbove1}%.`
     );
   }
   if (data.quietestWeekday) {
     lines.push(
-      `- **Quietest weekday:** ${data.quietestWeekday.label} (avg |move| ${data.quietestWeekday.avgAbsPct}%).`
-    );
-  }
-  lines.push(`- Full slot ranking (hot → quiet):`);
-  for (const s of [...data.slots].sort((a, b) => a.rank - b.rank)) {
-    lines.push(
-      `  - #${s.rank} ${s.label}: avg ${s.avgAbsPct}% · med ${s.medianAbsPct}% · >1% ${s.pctMovesAbove1}% · ${s.intensity} · samples ${s.sampleCount}`
+      `- Quietest weekday: **${data.quietestWeekday.label}** — avg |move| ${data.quietestWeekday.avgAbsPct}%.`
     );
   }
   if (data.weekdays?.length) {
-    lines.push(`- Weekday ranking:`);
+    lines.push(`- Full ranking (hot → quiet):`);
     for (const w of [...data.weekdays].sort((a, b) => a.rank - b.rank)) {
       lines.push(
-        `  - #${w.rank} ${w.label}: avg ${w.avgAbsPct}% · >1% ${w.pctMovesAbove1}% · ${w.intensity}`
+        `  ${w.rank}. ${w.label} — avg ${w.avgAbsPct}% · med ${w.medianAbsPct}% · >1% ${w.pctMovesAbove1}% · ${w.intensity} · samples ${w.sampleCount}`
       );
     }
+  } else {
+    lines.push(`- No weekday breakdown available.`);
   }
+  lines.push(``);
   if (data.topMoversByHotSlot?.length && data.hottestSlot) {
-    lines.push(`- Most active coins in hottest window (${data.hottestSlot.label}):`);
-    for (const c of data.topMoversByHotSlot.slice(0, 8)) {
-      lines.push(`  - ${c.name} (${c.symbol}): avg |move| ${c.avgAbsPct}% · samples ${c.samples}`);
+    lines.push(`## Most active coins in hottest window (${data.hottestSlot.label})`);
+    for (const c of data.topMoversByHotSlot.slice(0, 10)) {
+      lines.push(`- ${c.name} (${c.symbol}): avg |move| ${c.avgAbsPct}% · samples ${c.samples}`);
     }
+    lines.push(``);
   }
   if (data.guidance?.length) {
-    lines.push(`- App guidance notes:`);
-    for (const g of data.guidance) lines.push(`  - ${g}`);
+    lines.push(`## App notes`);
+    for (const g of data.guidance) lines.push(`- ${g}`);
+    lines.push(``);
   }
-  lines.push(``);
-  lines.push(`## What to research`);
-  lines.push(
-    `1. **Upcoming macro** (next 7–14 days): FOMC, CPI, PCE, NFP/jobs, major US session risks that often hit crypto during Manila evening / US open.`
-  );
-  lines.push(
-    `2. **Micro / crypto-specific** (next 48–72h): exchange maintenance, major unlocks, ETF flows headlines, Coins.ph listing/delist if relevant — only if verified.`
-  );
-  lines.push(
-    `3. **Pattern check:** Does the news calendar line up with our hot slots (e.g. US data at Manila evening → 20:05 / 23:05 / 02:05 activity)? Or is our hot window mostly thin-liquidity noise?`
-  );
-  lines.push(``);
   lines.push(`## Rules`);
-  lines.push(`- Be **neutral**. Do not lean bullish or force a long.`);
-  lines.push(`- Do **not** invent news. Do **NOT** use training-memory headlines (often stale).`);
-  lines.push(`- Unverified → say "none verified".`);
-  lines.push(`- Timing ≠ entry: hot slots mean **watch / stage limits carefully**, not chase.`);
-  lines.push(`- Spot only — no short / no leverage advice.`);
+  lines.push(`- Be neutral. Do not force a long.`);
+  lines.push(`- Do not invent news. Timing ≠ entry signal.`);
+  lines.push(`- Spot only — no short / no leverage.`);
   lines.push(``);
   lines.push(`## Answer format`);
-  lines.push(`1. **Pattern read:** Does our hot/quiet window look session-driven, news-driven, or sparse-data noise?`);
-  lines.push(`2. **Upcoming verified events** (next 7–14d) with times if known — or "none verified".`);
-  lines.push(`3. **Overlap:** Which of our Manila slots are most at risk around those events?`);
-  lines.push(`4. **Practical watch plan** for a spot buyer (when to check charts vs when to ignore noise).`);
-  lines.push(`5. **Recheck by** (date).`);
+  lines.push(`1. **Pattern read** (session-driven vs noise vs thin data)`);
+  lines.push(`2. **Which Manila slots / weekdays** deserve attention`);
+  lines.push(`3. **Practical watch plan** for a spot buyer`);
+  lines.push(`4. **Recheck by** (date)`);
   return lines.join("\n");
+}
+
+function formatMacroWatchAgentPrompt(macroLines: string[]): string {
+  const lines: string[] = [];
+  lines.push(
+    `You are a neutral research assistant for a Philippines **spot LONG-only** PHP crypto trader.`
+  );
+  lines.push(``);
+  lines.push(`## Goal`);
+  lines.push(
+    `Validate and enrich the **Macro watch** calendar below (Fed, CPI, PCE, NFP, and any manual notes). Help the trader know what can shake crypto and when (Manila time).`
+  );
+  lines.push(``);
+  lines.push(`## Macro watch — upcoming dates already in our app`);
+  lines.push(
+    `From Home → Macro watch. Validate times; do **not** invent dates. Mark stale or wrong items.`
+  );
+  lines.push(``);
+  if (macroLines.length) {
+    for (const L of macroLines) lines.push(`- ${L}`);
+  } else {
+    lines.push(`- (No events loaded from the app.)`);
+  }
+  lines.push(``);
+  lines.push(`## Rules`);
+  lines.push(`- Be neutral. Do not lean bullish without evidence.`);
+  lines.push(`- Do **not** invent news. Do **NOT** use training-memory headlines (often stale).`);
+  lines.push(`- Unverified → "none verified".`);
+  lines.push(`- Philippines / Manila context for “when to watch”.`);
+  lines.push(``);
+  lines.push(`## Answer format`);
+  lines.push(`1. **Calendar audit** — keep / fix time / stale (per item above)`);
+  lines.push(`2. **Any missing high-impact macro** next 14 days (verified only)`);
+  lines.push(`3. **Manila watch windows** around each high-priority event`);
+  lines.push(`4. **Recheck by** (date)`);
+  return lines.join("\n");
+}
+
+async function loadMacroLinesFromApp(): Promise<string[]> {
+  const catRes = await fetch("/api/catalyst-ai")
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null);
+  const logs = catRes?.logs || {};
+  const macroLog = logs["macro-calendar-events"];
+  const metaLog = logs["macro-calendar-meta"];
+
+  let deletedKeys = new Set<string>();
+  if (metaLog?.response) {
+    try {
+      const meta = JSON.parse(String(metaLog.response));
+      if (Array.isArray(meta.deletedKeys)) {
+        deletedKeys = new Set(meta.deletedKeys.map(String));
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const macroLines: string[] = [];
+  if (!macroLog?.response) return macroLines;
+
+  try {
+    let raw = String(macroLog.response).trim();
+    raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+    const parsed = JSON.parse(raw);
+    const arr = Array.isArray(parsed) ? parsed : [];
+    arr.sort((a: { date?: string }, b: { date?: string }) =>
+      String(a.date || "").localeCompare(String(b.date || ""))
+    );
+    for (const e of arr) {
+      const date = String(e.date || "").slice(0, 10);
+      const title = (e.title || "").trim();
+      const key = `${date}|${title.toLowerCase()}`;
+      if (deletedKeys.has(key)) continue;
+      const bits = [
+        date || "?",
+        e.type || "OTHER",
+        e.severity === "high" ? "HIGH" : e.severity || "",
+        title,
+      ].filter(Boolean);
+      let line = bits.join(" · ");
+      if (e.timeET) line += ` · ${e.timeET} ET`;
+      if (e.manilaTimeLabel) line += ` · ${e.manilaTimeLabel}`;
+      if (e.coinSymbol) line += ` · coin ${e.coinSymbol}`;
+      if (e.detail) line += ` — ${String(e.detail).slice(0, 180)}`;
+      if (e.source === "manual") line += " [manual]";
+      macroLines.push(line);
+    }
+  } catch {
+    macroLines.push("(Macro watch response could not be parsed)");
+  }
+  return macroLines;
 }
 
 export default function SwingTimingView() {
@@ -173,16 +255,27 @@ export default function SwingTimingView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
-  const [agentCopied, setAgentCopied] = useState(false);
+  const [agentCopied, setAgentCopied] = useState<"timing" | "macro" | null>(null);
 
-  const copyAgentPrompt = async () => {
+  const copyTimingPrompt = async () => {
     if (!data) return;
     try {
-      await navigator.clipboard.writeText(formatTimingAgentPrompt(data));
-      setAgentCopied(true);
-      setTimeout(() => setAgentCopied(false), 2000);
+      await navigator.clipboard.writeText(formatTimingPatternPrompt(data));
+      setAgentCopied("timing");
+      setTimeout(() => setAgentCopied(null), 2000);
     } catch {
-      setError("Could not copy prompt");
+      setError("Could not copy timing prompt");
+    }
+  };
+
+  const copyMacroPrompt = async () => {
+    try {
+      const macroLines = await loadMacroLinesFromApp();
+      await navigator.clipboard.writeText(formatMacroWatchAgentPrompt(macroLines));
+      setAgentCopied("macro");
+      setTimeout(() => setAgentCopied(null), 2000);
+    } catch {
+      setError("Could not copy macro prompt");
     }
   };
 
@@ -256,12 +349,20 @@ export default function SwingTimingView() {
           </button>
           <button
             type="button"
-            onClick={() => void copyAgentPrompt()}
+            onClick={() => void copyTimingPrompt()}
             disabled={!data || loading}
             className="rounded-md border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-bold text-violet-900 hover:bg-violet-100 disabled:opacity-50"
-            title="Copy prompt: timing pattern + upcoming news research"
+            title="Copy: slot + weekday activity pattern"
           >
-            {agentCopied ? "✅ Copied" : "📋 Timing + news agent"}
+            {agentCopied === "timing" ? "✅ Copied" : "📋 Timing pattern"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void copyMacroPrompt()}
+            className="rounded-md border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-900 hover:bg-indigo-100"
+            title="Copy: Macro watch calendar for agent validation"
+          >
+            {agentCopied === "macro" ? "✅ Copied" : "📋 Macro watch"}
           </button>
         </div>
       </div>
