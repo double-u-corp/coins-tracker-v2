@@ -41,6 +41,23 @@ export interface PriceLineChartProps {
   currentPrice?: number | null;
   /** Spot buys plotted on the matching Manila day at fill price. */
   buyMarks?: { dayKey: string; price: number }[] | null;
+  /** Optional analysis overlays controlled from parent (Spot). */
+  overlayControls?: {
+    showHigh: boolean;
+    showLow: boolean;
+    showKey: boolean;
+    showS1: boolean;
+    showS2: boolean;
+    showR1: boolean;
+    showR2: boolean;
+    onToggleHigh: () => void;
+    onToggleLow: () => void;
+    onToggleKey: () => void;
+    onToggleS1: () => void;
+    onToggleS2: () => void;
+    onToggleR1: () => void;
+    onToggleR2: () => void;
+  } | null;
 }
 
 type ActivePoint = {
@@ -153,6 +170,7 @@ export default function PriceLineChart({
   sessionMarkers = [],
   currentPrice = null,
   buyMarks = null,
+  overlayControls = null,
 }: PriceLineChartProps) {
   const [showSma20, setShowSma20] = useState<boolean>(true);
   const [showSma50, setShowSma50] = useState<boolean>(true);
@@ -323,13 +341,24 @@ export default function PriceLineChart({
   return (
     <div className="w-full flex flex-col gap-3">
       {/* Mobile: 3-column grid so every pill is on-screen. sm+: flex wrap. */}
-      <div className="grid grid-cols-3 gap-1.5 sm:flex sm:flex-wrap sm:gap-2 w-full">
+      <div className="grid grid-cols-4 gap-1 sm:flex sm:flex-wrap sm:gap-2 w-full">
         <IndicatorPill active={showSma20} onClick={() => setShowSma20(!showSma20)} color="amber" label="20 SMA" />
         <IndicatorPill active={showSma50} onClick={() => setShowSma50(!showSma50)} color="blue" label="50 SMA" />
         <IndicatorPill active={showSma200} onClick={() => setShowSma200(!showSma200)} color="purple" label="200 SMA" />
         <IndicatorPill active={showRsi} onClick={() => setShowRsi(!showRsi)} color="indigo" label="RSI" />
         {!!intradayPoints?.length && (
           <IndicatorPill active={showSwing} onClick={() => setShowSwing(!showSwing)} color="teal" label="Swing" />
+        )}
+        {overlayControls && (
+          <>
+            <IndicatorPill active={overlayControls.showHigh} onClick={overlayControls.onToggleHigh} color="green" label="High" />
+            <IndicatorPill active={overlayControls.showLow} onClick={overlayControls.onToggleLow} color="red" label="Low" />
+            <IndicatorPill active={overlayControls.showKey} onClick={overlayControls.onToggleKey} color="purple" label="Key" />
+            <IndicatorPill active={overlayControls.showS1} onClick={overlayControls.onToggleS1} color="green" label="S1" />
+            <IndicatorPill active={overlayControls.showS2} onClick={overlayControls.onToggleS2} color="green" label="S2" />
+            <IndicatorPill active={overlayControls.showR1} onClick={overlayControls.onToggleR1} color="red" label="R1" />
+            <IndicatorPill active={overlayControls.showR2} onClick={overlayControls.onToggleR2} color="red" label="R2" />
+          </>
         )}
         {currentPrice != null && Number.isFinite(currentPrice) && (
           <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-900">
@@ -339,7 +368,7 @@ export default function PriceLineChart({
         )}
       </div>
 
-      <div className="h-64 sm:h-96 w-full -ml-2 sm:ml-0">
+      <div className="h-[22rem] sm:h-[28rem] w-full -ml-2 sm:ml-0">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart
             data={chartData}
@@ -703,6 +732,8 @@ function IndicatorPill({
     purple: active ? "bg-purple-100 text-purple-700 border-purple-300" : "bg-white text-gray-500 border-gray-200",
     indigo: active ? "bg-indigo-100 text-indigo-700 border-indigo-300" : "bg-white text-gray-500 border-gray-200",
     teal: active ? "bg-teal-100 text-teal-800 border-teal-300" : "bg-white text-gray-500 border-gray-200",
+    green: active ? "bg-emerald-100 text-emerald-800 border-emerald-300" : "bg-white text-gray-500 border-gray-200",
+    red: active ? "bg-rose-100 text-rose-800 border-rose-300" : "bg-white text-gray-500 border-gray-200",
   };
 
   return (

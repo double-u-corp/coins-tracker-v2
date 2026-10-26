@@ -260,13 +260,16 @@ function formatTimingPatternPrompt(
   lines.push(``);
   lines.push(`RESEARCH TASKS (live search required; no training memory)`);
   lines.push(
-    `1. For each coin above, search separately for news from the last 14 days or scheduled in the next 14 days: token unlock, upgrade/fork, listing/delisting, exploit/hack, ETF/regulatory item.`
+    `1. **Crypto-only news** for each coin above (last 14d / next 14d): unlocks, upgrades/forks, listings/delists, exploits, ETF/regulatory, exchange/stablecoin incidents. Skip routine macro unless a clear crypto link.`
   );
   lines.push(
-    `2. If a found item has a scheduled time, convert it to Manila and say which poll-slot window it lands in.`
+    `2. If scheduled, convert to Manila and map to poll slots 02:05–23:05. Poll = check time, not guaranteed move.`
   );
   lines.push(
-    `3. Note any Coins.ph/Maya-side notice (maintenance, pair suspension) only if you can source it.`
+    `3. Coins.ph/Maya notices only if primary-sourced.`
+  );
+  lines.push(
+    `4. Prefer primary sources + URL + date checked. Unverified → "none verified". No invented events.`
   );
   lines.push(``);
   lines.push(`VERIFICATION RULES`);
@@ -360,10 +363,10 @@ function formatMacroWatchAgentPrompt(
     `1. Verify each event's date and time against the primary source (federalreserve.gov, bls.gov, bea.gov). Reply KEEP / FIX (give correct ET AND Manila date+time) / STALE. Also check the Manila date and the slot mapping.`
   );
   lines.push(
-    `2. Find verified high-impact events in the next 21 days that are NOT in our list: Fed speakers/minutes, GDP, PPI, retail sales, Treasury refunding, scheduled US political/regulatory dates, and anything else scheduled and sourced.`
+    `2. Prefer **crypto-specific** additions next 21 days (regulation, ETF material flows, major exchange/protocol events). Include routine macro (GDP, PPI, auctions, speeches) **only** with a concrete crypto relevance — otherwise omit.`
   );
   lines.push(
-    `3. Philippines items: BSP policy decision dates, and any scheduled USD/PHP-relevant release. PHP pairs move with USD/PHP as well as with USD crypto prices.`
+    `3. Philippines: BSP decisions or USD/PHP items only when they can move local PHP crypto liquidity or risk appetite.`
   );
   lines.push(
     `4. For each HIGH event, state when the release lands relative to the app's poll slots, including sub-slot timing (e.g. a statement landing minutes before a poll).`
@@ -556,15 +559,15 @@ function formatWhyMovingPrompt(
   const lines: string[] = [];
   lines.push(`ROLE`);
   lines.push(
-    `You are a neutral research assistant for a Philippines spot LONG-only PHP trader (no short, no leverage). No buy signals.`
+    `You are a neutral crypto-market research assistant for a Philippines-based spot LONG-only trader. No shorting, leverage, or margin.`
   );
   lines.push(``);
-  lines.push(`PURPOSE`);
+  lines.push(`GOAL`);
   lines.push(
-    `Explain **why these coins moved the most over the last ~2 days** using our **3h Manila poll prints**. Ranking is by total |%| path over ~48h — **not** the 14/30/60 hot-slot list.`
+    `Explain **why the biggest movers of the last ~2 days** moved, using our 3h Manila poll path + **verified crypto-specific news only**. Ranking is total |%| path over ~48h — not the 14/30/60 hot-slot list.`
   );
   lines.push(``);
-  lines.push(`BIGGEST MOVERS LAST ~2 DAYS (ranked by total |%| path)`);
+  lines.push(`BIGGEST MOVERS LAST ~2 DAYS`);
   if (data.topMovers2d?.length) {
     for (const m of data.topMovers2d) {
       lines.push(
@@ -572,13 +575,11 @@ function formatWhyMovingPrompt(
       );
     }
   } else {
-    lines.push(`- (ranking not available — using path series only)`);
+    lines.push(`- (ranking not available — use path series only)`);
   }
   lines.push(``);
   lines.push(`RECENT 3h POLL PATH (~2 days, Manila)`);
-  lines.push(
-    `Each line is one poll print. Compare consecutive prints to see up/down into the hot slot.`
-  );
+  lines.push(`Each line is one poll print. Compare consecutive prints for grind / dump / chop.`);
   lines.push(``);
   if (series.length) {
     for (const s of series) {
@@ -599,31 +600,42 @@ function formatWhyMovingPrompt(
     lines.push(`- (no poll series)`);
     lines.push(``);
   }
-  lines.push(`RESEARCH TASKS (live search; no training memory)`);
+  lines.push(`SEARCH PRIORITY (crypto first)`);
   lines.push(
-    `1. For each coin above, explain the path in plain language (grind up, dump, chop, gap).`
+    `Tier 1: regulation/enforcement, protocol upgrades/incidents, exchange outages/hacks/withdrawals, stablecoin issues, material ETF flows, major unlocks/migrations, verified exploits.`
   );
   lines.push(
-    `2. Search verified news last 48–72h that could explain the moves (unlock, listing, hack, macro). Unverified → "none verified".`
+    `Tier 2: official project/issuer announcements for these coins, credible listings/delistings, tokenomics or ecosystem moves likely to affect liquidity.`
   );
   lines.push(
-    `3. Say whether the move lines up with the hottest slot or looks random/thin liquidity.`
+    `Tier 3 macro: ONLY if a concrete, timely crypto link (e.g. FOMC when rates clearly drive risk assets). Do NOT auto-list GDP, NFP, auctions, elections, speeches.`
   );
   lines.push(``);
-  lines.push(`RULES`);
-  lines.push(`- Neutral. Do not recommend buys.`);
-  lines.push(`- Do not invent news. Cite source + URL when possible.`);
-  lines.push(`- Spot only.`);
+  lines.push(`VERIFICATION`);
+  lines.push(`- Prefer official blogs, exchange notices, regulators, primary data; confirm secondary leads.`);
+  lines.push(`- No rumors, price predictions, recycled commentary, or unconfirmed social claims.`);
+  lines.push(`- Do not invent events, times, unlocks, impact, or URLs. Unverified → "none verified".`);
+  lines.push(`- State date checked + source URL for every included item.`);
+  lines.push(``);
+  lines.push(`TIME`);
+  lines.push(`- Manila (PHT, UTC+8). Polls: 02:05, 05:05, 08:05, 11:05, 14:05, 17:05, 20:05, 23:05.`);
+  lines.push(`- A poll slot is when to check the market, not when price must move.`);
+  lines.push(``);
+  lines.push(`POSTURE (use only these)`);
+  lines.push(`IGNORE · WATCH (check next poll — not a buy) · RISK (verified item raises risk for a coin already held)`);
+  lines.push(`Do not use STAGE from news alone.`);
   lines.push(``);
   lines.push(`ANSWER FORMAT`);
-  lines.push(`0. Data status (search available?)`);
-  lines.push(`1. Per-coin path read (max 3 bullets each)`);
-  lines.push(`2. News table: Coin | Item | Date | Source | Posture (WATCH/IGNORE/RISK)`);
-  lines.push(`3. Does this justify extra attention at the hot slot? Yes/No + why`);
-  lines.push(`Recheck by: next session`);
+  lines.push(`0. Data status (sources checked · limitations)`);
+  lines.push(`1. Per-coin path read (max 3 bullets each from our polls)`);
+  lines.push(
+    `2. Event table: Manila time | Coin | Item | Why it matters | Confidence | First poll after | Posture | Source URL`
+  );
+  lines.push(`3. Exclusions (tempting non-crypto noise you skipped)`);
+  lines.push(`4. Monitoring tips (max 3) — no buy-from-news`);
+  lines.push(`If nothing material: "No verified high-impact crypto-specific events found for this period."`);
   return lines.join("\n");
 }
-
 
 function symbolsFor2dPath(data: TimingResponse): string[] {
   const from2d = (data.topMovers2d || []).map((c) => c.symbol);

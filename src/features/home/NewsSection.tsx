@@ -135,8 +135,8 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
   const copyOutletAgent = async () => {
     const lines: string[] = [];
     lines.push("ROLE: Neutral crypto news assistant for a Philippines spot LONG-only PHP trader (no short/leverage).");
-    lines.push("PURPOSE: Summarize the Core outlet headlines below. One overall verdict: BULLISH / BEARISH / NEUTRAL for crypto risk appetite over the next few days.");
-    lines.push("RULES: Do not invent news. Prefer the linked themes only. Not investment advice. No buy signals.");
+    lines.push("PURPOSE: Summarize Core outlet headlines. Verdict BULLISH / BEARISH / NEUTRAL for **crypto** risk appetite only.");
+    lines.push("RULES: Focus on crypto-specific themes (protocol, exchange, regulation, ETF, stablecoin, unlocks). Ignore pure equity/macro noise unless a clear crypto link. Do not invent news. No buy signals.");
     lines.push("");
     lines.push("HEADLINES:");
     for (const row of rows.slice(0, 20)) {
@@ -158,8 +158,8 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
   const copyRssAgent = async () => {
     const lines: string[] = [];
     lines.push("ROLE: Neutral crypto news assistant for a Philippines spot LONG-only PHP trader (no short/leverage).");
-    lines.push("PURPOSE: Summarize Price & RSS signals from our app. Overall verdict: BULLISH / BEARISH / NEUTRAL.");
-    lines.push("RULES: Do not invent news. Use only items listed. Not a buy signal.");
+    lines.push("PURPOSE: Summarize Price & RSS signals. Verdict BULLISH / BEARISH / NEUTRAL for crypto only.");
+    lines.push("RULES: Emphasize coin/protocol/exchange/regulatory items. Skip unrelated non-crypto noise. Do not invent news. Not a buy signal.");
     lines.push("");
     lines.push("SIGNALS:");
     for (const item of articleItems.slice(0, 20)) {

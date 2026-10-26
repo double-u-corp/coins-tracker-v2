@@ -174,8 +174,8 @@ export function formatEntryReviewPrompt(
   lines.push(`- **Stance: NEUTRAL.** Do not default to bullish or "talk the trader into staying long."`);
   lines.push(`- If technicals and/or verified news are weak, risk-off, or bearish → say so clearly (WAIT / SKIP / TRIM / SELL as fits). Do not soften a bearish read into HOLD out of optimism.`);
   lines.push(`- Primary filter = technical snapshot below; news is secondary and only when verified.`);
-  lines.push(`- You MAY search live news/trends; do NOT use training-memory headlines (often stale).`);
-  lines.push(`- Do not invent news. Unverified → say "none verified".`);
+  lines.push(`- You MAY search live **crypto-specific** news (protocol, exchange, regulation, ETF, unlocks, exploits); do NOT use training-memory headlines.`);
+  lines.push(`- Skip routine macro calendars unless a clear, timely crypto link. Do not invent news. Unverified → "none verified".`);
   lines.push(`- Balanced view: list both supportive and negative factors when both exist; do not cherry-pick only bullish points.`);
   if (isAllocated) {
     lines.push(`- **Verified positive catalysts** may support HOLD or a short wait — only when they outweigh technical risk.`);

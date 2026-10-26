@@ -56,8 +56,11 @@ export default function ChartView() {
 
   const [showHigh, setShowHigh] = useState(true);
   const [showLow, setShowLow] = useState(true);
-  const [showKeyLevels, setShowKeyLevels] = useState(true);
-  const [showStructureLevels, setShowStructureLevels] = useState(true);
+  const [showKeyLevels, setShowKeyLevels] = useState(false);
+  const [showS1, setShowS1] = useState(false);
+  const [showS2, setShowS2] = useState(false);
+  const [showR1, setShowR1] = useState(false);
+  const [showR2, setShowR2] = useState(false);
   const [showAllScanResults, setShowAllScanResults] = useState(false);
   const [scanCopied, setScanCopied] = useState(false);
   const [cardCopiedSymbol, setCardCopiedSymbol] = useState<string | null>(null);
@@ -443,23 +446,38 @@ export default function ChartView() {
   }, [points]);
 
   const structureExtraLevels = useMemo(() => {
-    if (!showStructureLevels || points.length < 5) return null;
+    if (points.length < 5) return null;
+    const anyLevel = showS1 || showS2 || showR1 || showR2;
+    if (!anyLevel) return null;
     const sup = technicals.support ?? 0;
     const res = technicals.resistance ?? 0;
-    const px = currentPrice > 0 ? currentPrice : (points[points.length - 1] ? (points[points.length - 1].high + points[points.length - 1].low) / 2 : 0);
+    const px =
+      currentPrice > 0
+        ? currentPrice
+        : points[points.length - 1]
+          ? (points[points.length - 1].high + points[points.length - 1].low) / 2
+          : 0;
     const series = intradayPoints && intradayPoints.length > 10 ? intradayPoints : points;
     try {
-      return buildStructureKeyLevels(series, px, sup, res).map((l) => ({
-        price: l.price,
-        label: l.label,
-        shortLabel: l.shortLabel,
-        color: l.color,
-        dashed: l.dashed,
-      }));
+      const all = buildStructureKeyLevels(series, px, sup, res);
+      const allow = new Set<string>();
+      if (showS1) allow.add("S1");
+      if (showS2) allow.add("S2");
+      if (showR1) allow.add("R1");
+      if (showR2) allow.add("R2");
+      return all
+        .filter((l) => allow.has(l.shortLabel))
+        .map((l) => ({
+          price: l.price,
+          label: l.label,
+          shortLabel: l.shortLabel,
+          color: l.color,
+          dashed: l.dashed,
+        }));
     } catch {
       return null;
     }
-  }, [showStructureLevels, points, intradayPoints, technicals.support, technicals.resistance, currentPrice]);
+  }, [showS1, showS2, showR1, showR2, points, intradayPoints, technicals.support, technicals.resistance, currentPrice]);
 
 
   return (
@@ -692,93 +710,20 @@ export default function ChartView() {
         )}
       </div>
 
-      <div className="flex flex-wrap items-end gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-        <Dropdown
-          label="Coin"
-          placeholder="Select a coin to analyse"
-          value={symbol}
-          onChange={setSymbol}
-          options={coinOptions.map((c) => ({
-            label: `${c.name} (${c.symbol})`,
-            value: c.symbol,
-          }))}
-        />
-
-        <div className="flex flex-col gap-1 text-sm font-medium text-gray-700">
-          <span>Range</span>
-          <div
-            className={`inline-flex rounded-md border border-gray-200 p-1 bg-white ${
-              !symbol ? "opacity-50 pointer-events-none" : ""
-            }`}
-          >
-            {RANGE_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => setRange(opt.value)}
-                className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
-                  range === opt.value
-                    ? "bg-brand-600 text-white"
-                    : "text-gray-600 hover:bg-gray-100"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
+      {!symbol ? (
+        <div className="flex flex-wrap items-end gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+          <Dropdown
+            label="Coin"
+            placeholder="Select a coin to analyse"
+            value={symbol}
+            onChange={setSymbol}
+            options={coinOptions.map((c) => ({
+              label: `${c.name} (${c.symbol})`,
+              value: c.symbol,
+            }))}
+          />
         </div>
-
-        <div className="flex flex-col gap-1 text-sm font-medium text-gray-700">
-          <span>Analysis Overlays</span>
-          <div
-            className={`flex flex-wrap items-center gap-1.5 rounded-md border border-gray-200 p-1 bg-white ${
-              !symbol ? "opacity-50 pointer-events-none" : ""
-            }`}
-          >
-            <button
-              type="button"
-              onClick={() => setShowHigh(!showHigh)}
-              className={`rounded px-2 py-1 text-[11px] sm:text-xs sm:px-2.5 sm:py-1.5 font-medium transition-colors ${
-                showHigh ? "bg-green-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-              }`}
-            >
-              High
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowLow(!showLow)}
-              className={`rounded px-2 py-1 text-[11px] sm:text-xs sm:px-2.5 sm:py-1.5 font-medium transition-colors ${
-                showLow ? "bg-red-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-              }`}
-            >
-              Low
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowKeyLevels(!showKeyLevels)}
-              className={`rounded px-2 py-1 text-[11px] sm:text-xs sm:px-2.5 sm:py-1.5 font-medium transition-colors ${
-                showKeyLevels
-                  ? "bg-purple-600 text-white"
-                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-              }`}
-            >
-              Key
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowStructureLevels(!showStructureLevels)}
-              className={`rounded px-2 py-1 text-[11px] sm:text-xs sm:px-2.5 sm:py-1.5 font-medium transition-colors ${
-                showStructureLevels
-                  ? "bg-teal-600 text-white"
-                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-              }`}
-              title="S1/S2 support · R1/R2 resistance"
-            >
-              S/R
-            </button>
-          </div>
-        </div>
-      </div>
+      ) : null}
 
       {!symbol ? (
         <div className="space-y-6">
@@ -865,6 +810,38 @@ export default function ChartView() {
             )}
           </div>
 
+          <div className="flex flex-wrap items-end gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+            <Dropdown
+              label="Coin"
+              placeholder="Select a coin to analyse"
+              value={symbol}
+              onChange={setSymbol}
+              options={coinOptions.map((c) => ({
+                label: `${c.name} (${c.symbol})`,
+                value: c.symbol,
+              }))}
+            />
+            <div className="flex flex-col gap-1 text-sm font-medium text-gray-700">
+              <span>Range</span>
+              <div className="inline-flex rounded-md border border-gray-200 p-1 bg-white">
+                {RANGE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setRange(opt.value)}
+                    className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                      range === opt.value
+                        ? "bg-brand-600 text-white"
+                        : "text-gray-600 hover:bg-gray-100"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
           <div className="w-full rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
             {chartLoading ? (
               <div className="flex h-96 items-center justify-center text-sm text-gray-500">
@@ -889,6 +866,22 @@ export default function ChartView() {
                 extraLevels={structureExtraLevels}
                 intradayPoints={intradayPoints}
                 buyMarks={buyMarks}
+                overlayControls={{
+                  showHigh,
+                  showLow,
+                  showKey: showKeyLevels,
+                  showS1,
+                  showS2,
+                  showR1,
+                  showR2,
+                  onToggleHigh: () => setShowHigh((v) => !v),
+                  onToggleLow: () => setShowLow((v) => !v),
+                  onToggleKey: () => setShowKeyLevels((v) => !v),
+                  onToggleS1: () => setShowS1((v) => !v),
+                  onToggleS2: () => setShowS2((v) => !v),
+                  onToggleR1: () => setShowR1((v) => !v),
+                  onToggleR2: () => setShowR2((v) => !v),
+                }}
               />
             )}
           </div>
