@@ -156,13 +156,19 @@ export default function HomeTable() {
       const coin =
         allCoins.find((c) => c.symbol.toUpperCase() === sym) ||
         coins.find((c) => c.symbol.toUpperCase() === sym);
-      const pct =
+      const pctNews =
         movePctBySymbol[sym] ?? movePctBySymbol[sym.replace(/PHP$/i, "")];
+      const pctPoll =
+        coin?.priceChangePct != null && Number.isFinite(coin.priceChangePct)
+          ? coin.priceChangePct
+          : null;
+      const pct =
+        pctPoll != null ? pctPoll : pctNews != null && Number.isFinite(pctNews) ? pctNews : null;
       return {
         sym,
         name: coin?.name || sym.replace(/PHP$/i, ""),
         price: coin?.currentPrice ?? null,
-        pct: pct != null && Number.isFinite(pct) ? pct : null,
+        pct,
         dir: coin?.priceDirection ?? null,
       };
     });
@@ -670,22 +676,36 @@ export default function HomeTable() {
                       Spot →
                     </Link>
                   </div>
-                  <div className="mt-1 flex items-center gap-2">
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
                     <span className="text-sm font-bold tabular-nums text-slate-900">
                       {coin?.currentPrice != null ? formatPhp(coin.currentPrice) : "—"}
                     </span>
-                    {pct != null && Number.isFinite(pct) ? (
-                      <span
-                        className={`text-xs font-bold tabular-nums ${
-                          up ? "text-green-600" : down ? "text-red-600" : "text-gray-500"
-                        }`}
-                      >
-                        {up ? "+" : ""}
-                        {pct.toFixed(1)}%
-                      </span>
-                    ) : (
-                      <PriceDirectionArrow direction={coin?.priceDirection ?? null} />
-                    )}
+                    {(() => {
+                      const change =
+                        pct != null && Number.isFinite(pct)
+                          ? pct
+                          : coin?.priceChangePct != null && Number.isFinite(coin.priceChangePct)
+                            ? coin.priceChangePct
+                            : null;
+                      if (change == null) {
+                        return (
+                          <PriceDirectionArrow direction={coin?.priceDirection ?? null} />
+                        );
+                      }
+                      const isUp = change > 0;
+                      const isDown = change < 0;
+                      return (
+                        <span
+                          className={`inline-flex items-center gap-0.5 text-xs font-bold tabular-nums ${
+                            isUp ? "text-green-600" : isDown ? "text-red-600" : "text-gray-500"
+                          }`}
+                        >
+                          <span aria-hidden>{isUp ? "▲" : isDown ? "▼" : ""}</span>
+                          {isUp ? "+" : ""}
+                          {change.toFixed(2)}%
+                        </span>
+                      );
+                    })()}
                   </div>
                 </div>
               );

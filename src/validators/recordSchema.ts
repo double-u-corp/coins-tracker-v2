@@ -30,6 +30,8 @@ export const coinSummarySchema = z.object({
   // up/down/stay flat since the last time a price was recorded for this
   // coin. Null when there's fewer than two Records yet to compare.
   priceDirection: z.enum(["up", "down", "flat"]).nullable(),
+  /** % change vs previous poll/record; null if no prior price */
+  priceChangePct: z.number().nullable().optional(),
 });
 
 export type CoinSummary = z.infer<typeof coinSummarySchema>;

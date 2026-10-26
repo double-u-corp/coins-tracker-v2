@@ -81,7 +81,9 @@ async function handleSummary(res: NextApiResponse<SummaryResponse>) {
       : null;
 
     let priceDirection: "up" | "down" | "flat" | null = null;
-    if (latest && previous) {
+    let priceChangePct: number | null = null;
+    if (latest && previous && previous.price > 0) {
+      priceChangePct = ((latest.price - previous.price) / previous.price) * 100;
       if (latest.price > previous.price) priceDirection = "up";
       else if (latest.price < previous.price) priceDirection = "down";
       else priceDirection = "flat";
@@ -100,6 +102,8 @@ async function handleSummary(res: NextApiResponse<SummaryResponse>) {
       targetHighReached: targetHigh !== null && currentPrice !== null && currentPrice >= targetHigh,
       targetLowReached: targetLow !== null && currentPrice !== null && currentPrice <= targetLow,
       priceDirection,
+      priceChangePct:
+        priceChangePct != null ? Number(priceChangePct.toFixed(2)) : null,
     };
   });
 
