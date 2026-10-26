@@ -129,7 +129,7 @@ function etToManilaSlot(
   const mH = manila.getUTCHours();
   const mM = manila.getUTCMinutes();
   // Slot window that would capture reaction: first poll label at or after Manila time
-  let slot = SLOT_HOURS[0];
+  let slot: number = SLOT_HOURS[0];
   for (const h of SLOT_HOURS) {
     if (h * 60 + 5 >= mH * 60 + mM) {
       slot = h;
