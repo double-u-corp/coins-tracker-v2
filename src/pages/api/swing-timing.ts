@@ -57,6 +57,18 @@ type CoinSlotHighlight = {
   samples: number;
 };
 
+/** Biggest movers over the last ~48h only (independent of days window). */
+type Coin2dMover = {
+  symbol: string;
+  name: string;
+  /** Sum of consecutive |%| moves in the last ~2 days */
+  totalAbsPct: number;
+  /** Last print vs first print in window (%) */
+  netPct: number;
+  samples: number;
+  lastPrice: number;
+};
+
 type ResponseBody = {
   days: number;
   generatedAt: string;
@@ -67,6 +79,8 @@ type ResponseBody = {
   hottestWeekday: WeekdayStat | null;
   quietestWeekday: WeekdayStat | null;
   topMoversByHotSlot: CoinSlotHighlight[];
+  /** Ranked by totalAbsPct over last 48h — not the 14/30/60 hot-slot list */
+  topMovers2d: Coin2dMover[];
   guidance: string[];
 };
 
@@ -144,6 +158,16 @@ export default async function handler(
     movesByWeekday.set(d, []);
   }
 
+  const since2d = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+  const movers2dRaw: {
+    symbol: string;
+    name: string;
+    totalAbsPct: number;
+    netPct: number;
+    samples: number;
+    lastPrice: number;
+  }[] = [];
+
   for (const coin of coins) {
     const records = await prisma.record.findMany({
       where: { coinId: coin.id, createdAt: { gte: since } },
@@ -151,6 +175,34 @@ export default async function handler(
       select: { price: true, createdAt: true },
     });
     if (records.length < 2) continue;
+
+    // Last ~48h path only (independent of activity-window days)
+    const rec2d = records.filter((r) => r.createdAt >= since2d);
+    if (rec2d.length >= 2) {
+      let totalAbs = 0;
+      let samples2d = 0;
+      for (let i = 1; i < rec2d.length; i++) {
+        const prev = rec2d[i - 1];
+        const cur = rec2d[i];
+        if (!(prev.price > 0) || !(cur.price > 0)) continue;
+        const gapH = (cur.createdAt.getTime() - prev.createdAt.getTime()) / (60 * 60 * 1000);
+        if (gapH > 5) continue;
+        totalAbs += (Math.abs(cur.price - prev.price) / prev.price) * 100;
+        samples2d += 1;
+      }
+      const first = rec2d.find((r) => r.price > 0);
+      const last = [...rec2d].reverse().find((r) => r.price > 0);
+      if (samples2d >= 2 && first && last) {
+        movers2dRaw.push({
+          symbol: coin.symbol,
+          name: coin.name,
+          totalAbsPct: totalAbs,
+          netPct: ((last.price - first.price) / first.price) * 100,
+          samples: samples2d,
+          lastPrice: last.price,
+        });
+      }
+    }
 
     for (let i = 1; i < records.length; i++) {
       const prev = records[i - 1];
@@ -264,6 +316,15 @@ export default async function handler(
       .map((x) => ({ ...x, avgAbsPct: Number(x.avgAbsPct.toFixed(3)) }));
   }
 
+  const topMovers2d = movers2dRaw
+    .sort((a, b) => b.totalAbsPct - a.totalAbsPct)
+    .slice(0, 8)
+    .map((x) => ({
+      ...x,
+      totalAbsPct: Number(x.totalAbsPct.toFixed(3)),
+      netPct: Number(x.netPct.toFixed(3)),
+    }));
+
   const guidance: string[] = [];
   if (hottestSlot && quietestSlot) {
     guidance.push(
@@ -298,6 +359,7 @@ export default async function handler(
     hottestWeekday,
     quietestWeekday,
     topMoversByHotSlot,
+    topMovers2d,
     guidance,
   });
 }

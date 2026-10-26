@@ -32,6 +32,15 @@ type CoinSlotHighlight = {
   samples: number;
 };
 
+type Coin2dMover = {
+  symbol: string;
+  name: string;
+  totalAbsPct: number;
+  netPct: number;
+  samples: number;
+  lastPrice: number;
+};
+
 type TimingResponse = {
   days: number;
   generatedAt: string;
@@ -42,6 +51,8 @@ type TimingResponse = {
   hottestWeekday: WeekdayStat | null;
   quietestWeekday: WeekdayStat | null;
   topMoversByHotSlot: CoinSlotHighlight[];
+  /** Biggest movers last ~2 days only */
+  topMovers2d?: Coin2dMover[];
   guidance: string[];
 };
 
@@ -118,7 +129,7 @@ function etToManilaSlot(
   const mH = manila.getUTCHours();
   const mM = manila.getUTCMinutes();
   // Slot window that would capture reaction: first poll label at or after Manila time
-  let slot: (typeof SLOT_HOURS)[number] = SLOT_HOURS[0];
+  let slot = SLOT_HOURS[0];
   for (const h of SLOT_HOURS) {
     if (h * 60 + 5 >= mH * 60 + mM) {
       slot = h;
@@ -542,7 +553,6 @@ function formatWhyMovingPrompt(
   data: TimingResponse,
   series: RecentPollSeries[]
 ): string {
-  const hot = data.hottestSlot;
   const lines: string[] = [];
   lines.push(`ROLE`);
   lines.push(
@@ -551,16 +561,18 @@ function formatWhyMovingPrompt(
   lines.push(``);
   lines.push(`PURPOSE`);
   lines.push(
-    `Explain **why prices moved** over the last ~2 days using our **3h Manila poll prints only**. This is separate from the 14/30/60-day activity ranking.`
+    `Explain **why these coins moved the most over the last ~2 days** using our **3h Manila poll prints**. Ranking is by total |%| path over ~48h — **not** the 14/30/60 hot-slot list.`
   );
   lines.push(``);
-  lines.push(`HOTTEST ACTIVITY SLOT (from long window — context only)`);
-  if (hot) {
-    lines.push(
-      `- ${hot.label}: avg |move| ${hot.avgAbsPct}%, >1% ${hot.pctMovesAbove1}%, intensity ${hot.intensity}`
-    );
+  lines.push(`BIGGEST MOVERS LAST ~2 DAYS (ranked by total |%| path)`);
+  if (data.topMovers2d?.length) {
+    for (const m of data.topMovers2d) {
+      lines.push(
+        `- ${m.name} (${m.symbol}): total |path| ${m.totalAbsPct}% · net ${m.netPct >= 0 ? "+" : ""}${m.netPct}% · samples ${m.samples} · last ${m.lastPrice}`
+      );
+    }
   } else {
-    lines.push(`- (unknown)`);
+    lines.push(`- (ranking not available — using path series only)`);
   }
   lines.push(``);
   lines.push(`RECENT 3h POLL PATH (~2 days, Manila)`);
@@ -612,6 +624,22 @@ function formatWhyMovingPrompt(
   return lines.join("\n");
 }
 
+
+function symbolsFor2dPath(data: TimingResponse): string[] {
+  const from2d = (data.topMovers2d || []).map((c) => c.symbol);
+  if (from2d.length) return from2d.slice(0, 8);
+  // Fallback only if API old
+  return [
+    ...new Set(
+      [
+        ...(data.topMoversByHotSlot || []).map((c) => c.symbol),
+        "BTCPHP",
+        "ETHPHP",
+      ].filter(Boolean)
+    ),
+  ].slice(0, 8);
+}
+
 export default function SwingTimingView() {
   const [days, setDays] = useState(30);
   const [data, setData] = useState<TimingResponse | null>(null);
@@ -649,16 +677,7 @@ export default function SwingTimingView() {
     try {
       let series = recentPolls;
       if (!series.length) {
-        const symbols = [
-          ...new Set(
-            [
-              ...(data.topMoversByHotSlot || []).map((c) => c.symbol),
-              "BTCPHP",
-              "ETHPHP",
-            ].filter(Boolean)
-          ),
-        ].slice(0, 5);
-        series = await fetchRecentPollsStructured(symbols);
+        series = await fetchRecentPollsStructured(symbolsFor2dPath(data));
         setRecentPolls(series);
       }
       const text = formatWhyMovingPrompt(data, series);
@@ -721,15 +740,7 @@ export default function SwingTimingView() {
       return;
     }
     let cancelled = false;
-    const symbols = [
-      ...new Set(
-        [
-          ...(data.topMoversByHotSlot || []).map((c) => c.symbol),
-          "BTCPHP",
-          "ETHPHP",
-        ].filter(Boolean)
-      ),
-    ].slice(0, 5);
+    const symbols = symbolsFor2dPath(data);
     setRecentPollsLoading(true);
     void fetchRecentPollsStructured(symbols)
       .then((rows) => {
@@ -981,10 +992,10 @@ export default function SwingTimingView() {
           <div className="rounded-lg border-2 border-teal-200 bg-teal-50/30 p-4 shadow-sm">
             <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
               <div>
-                <h2 className="text-sm font-bold text-teal-950">2d · 3h path</h2>
+                <h2 className="text-sm font-bold text-teal-950">2d · biggest movers</h2>
                 <p className="text-[11px] text-teal-900/80 mt-0.5">
-                  Separate from 14/30/60 activity ranking — why is the hottest coin (and peers) moving
-                  now?
+                  Ranked by total |%| move over the <span className="font-semibold">last ~2 days only</span>
+                  — not the 14/30/60 hot-slot list. Use for latest-news checks.
                 </p>
               </div>
               <button
@@ -996,10 +1007,32 @@ export default function SwingTimingView() {
                 {agentCopied === "why" ? "✅ Copied" : "📋 Why moving (2d)"}
               </button>
             </div>
-            <p className="text-[11px] text-gray-600 mb-3">
-              Last ~16 Manila 3h prints for hot-slot coins + BTC/ETH. Green/red tiles = up/down vs prior
+            <p className="text-[11px] text-gray-600 mb-2">
+              Path tiles = last ~16 Manila 3h prints for the 2d biggest movers. Green/red = up/down vs prior
               print.
             </p>
+            {data.topMovers2d && data.topMovers2d.length > 0 && (
+              <div className="mb-3 flex flex-wrap gap-1.5">
+                {data.topMovers2d.map((m, i) => (
+                  <span
+                    key={m.symbol}
+                    className="inline-flex items-center gap-1 rounded-full border border-teal-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-teal-900"
+                    title={`total |path| ${m.totalAbsPct}% · net ${m.netPct}%`}
+                  >
+                    <span className="text-teal-500">#{i + 1}</span>
+                    {m.symbol.replace(/PHP$/i, "")}
+                    <span
+                      className={
+                        m.netPct > 0 ? "text-emerald-600" : m.netPct < 0 ? "text-rose-600" : "text-gray-500"
+                      }
+                    >
+                      {m.netPct >= 0 ? "+" : ""}
+                      {m.netPct.toFixed(1)}%
+                    </span>
+                  </span>
+                ))}
+              </div>
+            )}
             {recentPollsLoading ? (
               <p className="text-xs text-gray-400">Loading 3h series…</p>
             ) : recentPolls.length === 0 ? (

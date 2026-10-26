@@ -160,32 +160,137 @@ export default function HomeTable() {
         movePctBySymbol[sym] ?? movePctBySymbol[sym.replace(/PHP$/i, "")];
       return {
         sym,
-        name: coin?.name || sym,
+        name: coin?.name || sym.replace(/PHP$/i, ""),
         price: coin?.currentPrice ?? null,
         pct: pct != null && Number.isFinite(pct) ? pct : null,
         dir: coin?.priceDirection ?? null,
       };
     });
+    const manilaNow = new Date().toLocaleString("en-US", {
+      timeZone: "Asia/Manila",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
     const lines: string[] = [];
-    lines.push("ROLE: Neutral market-direction assistant for a Philippines spot LONG-only PHP trader.");
-    lines.push("PURPOSE: Opine on crypto risk direction using BTC, ETH, and XAUT (tokenized gold) only.");
-    lines.push("IMPORTANT: Do NOT recommend buying BTC, ETH, or XAUT. They are direction anchors only.");
-    lines.push("Trader stages alt PHP pairs separately; use anchors to advise risk-on vs risk-off.");
-    lines.push("RULES: Neutral. No leverage/short. Do not invent news. Prefer verified context if you search.");
+    lines.push("ROLE");
+    lines.push(
+      "You are a neutral market-regime analyst for a Philippines-based crypto trader using PHP spot pairs. The trader is LONG-only: no shorting, leverage, or margin."
+    );
     lines.push("");
-    lines.push("ANCHORS (app prices):");
+    lines.push("PURPOSE");
+    lines.push(
+      "Assess whether the current market environment favors taking altcoin risk, staying selective, or protecting cash."
+    );
+    lines.push(
+      "Use BTC, ETH, and XAUT (tokenized gold) as market-direction anchors only. Do NOT recommend buying, selling, or trading BTC, ETH, or XAUT. Do not provide an altcoin buy signal."
+    );
+    lines.push("");
+    lines.push("INPUT DATA");
+    lines.push("My app's current readings:");
     for (const a of anchors) {
       const px = a.price != null ? String(a.price) : "n/a";
-      const mv =
-        a.pct != null ? `${a.pct >= 0 ? "+" : ""}${a.pct.toFixed(2)}%` : a.dir || "n/a";
-      lines.push(`- ${a.name} (${a.sym}): price ${px} · move ${mv}`);
+      const dir = a.dir || "n/a";
+      const ch = a.pct != null ? `${a.pct >= 0 ? "+" : ""}${a.pct.toFixed(2)}%` : "n/a";
+      lines.push(
+        `* ${a.name} (${a.sym}): ${px} · direction ${dir} · change ${ch} · measurement period: recent app signal / last price update (exact horizon may be partial)`
+      );
     }
+    lines.push(`Snapshot timestamp: ${manilaNow} Manila`);
     lines.push("");
-    lines.push("ANSWER FORMAT:");
-    lines.push("1. Direction verdict: RISK-ON / MIXED / RISK-OFF (for alts context)");
-    lines.push("2. Why (max 3 bullets, BTC/ETH/XAUT relationship)");
-    lines.push("3. What a spot alt buyer should do: wait / selective / avoid chasing");
-    lines.push("4. Recheck by (date)");
+    lines.push("Optional historical readings:");
+    lines.push("* Previous 3-hour snapshot: not provided by app in this copy");
+    lines.push("* Previous 24-hour change: only if reflected in change % above; otherwise n/a");
+    lines.push("* Previous 7-day change: not provided");
+    lines.push("");
+    lines.push("ANALYSIS RULES");
+    lines.push(
+      "1. Check data quality first. Identify missing timestamps, measurement periods, percentage changes, or conflicting readings. Never assume that \"up\" means a sustained uptrend."
+    );
+    lines.push("2. Assess three horizons separately:");
+    lines.push("  * Short-term: approximately 3 hours");
+    lines.push("  * Daily: approximately 24 hours");
+    lines.push("  * Broader context: approximately 7 days, if data is available");
+    lines.push("3. Interpret BTC and ETH together.");
+    lines.push("  * Both rising with sustained strength: potentially supportive of altcoin risk.");
+    lines.push("  * Diverging directions: mixed conditions.");
+    lines.push("  * Both weakening: defensive conditions.");
+    lines.push("  * A single upward snapshot is not sufficient to establish a trend.");
+    lines.push("4. Use XAUT as a secondary context signal.");
+    lines.push(
+      "  * BTC/ETH rising while XAUT is flat or falling may be consistent with stronger crypto risk appetite, but does not prove it."
+    );
+    lines.push(
+      "  * BTC/ETH rising alongside XAUT may indicate mixed demand or independent asset-specific moves."
+    );
+    lines.push(
+      "  * BTC/ETH falling while XAUT rises may be consistent with defensive positioning."
+    );
+    lines.push("  * Do not infer causation from correlation or direction alone.");
+    lines.push(
+      "5. Verify market context when web search is available. Prefer recent, credible sources from the last 24–72 hours for ETF flows, macroeconomic developments, liquidations, regulatory events, and major crypto-specific news. Cite sources and publication dates. Distinguish verified facts from speculation. If you cannot verify a catalyst, state \"none verified.\""
+    );
+    lines.push(
+      "6. Do not invent missing market data. If only prices and direction labels are provided, give a provisional verdict with low confidence as appropriate. Do not fabricate percentage changes, technical levels, news, or trend confirmation."
+    );
+    lines.push(
+      "7. Do not confuse anchor strength with altcoin strength. BTC and ETH can rise while individual altcoins remain weak. State whether the available evidence supports broad risk-taking, selective exposure, or waiting for confirmation."
+    );
+    lines.push("8. This is a market-regime assessment, not investment advice or a buy signal.");
+    lines.push("");
+    lines.push("VERDICT RULES");
+    lines.push("Choose exactly one:");
+    lines.push(
+      "* RISK-ON: Multiple horizons support sustained BTC/ETH strength, with no strong contradictory evidence."
+    );
+    lines.push(
+      "* MIXED: Conflicting anchors, conflicting time horizons, insufficient confirmation, or meaningful uncertainty."
+    );
+    lines.push(
+      "* RISK-OFF: Sustained BTC/ETH weakness or verified broad risk deterioration outweighs supportive evidence."
+    );
+    lines.push(
+      "When evidence is insufficient, prefer MIXED rather than forcing a directional conclusion."
+    );
+    lines.push("");
+    lines.push("REQUIRED OUTPUT");
+    lines.push("1. Verdict");
+    lines.push("RISK-ON / MIXED / RISK-OFF");
+    lines.push("Confidence: Low / Medium / High");
+    lines.push("Data quality: Good / Partial / Poor");
+    lines.push("2. Evidence");
+    lines.push("Maximum 3 bullets. Explain:");
+    lines.push("* BTC and ETH alignment and persistence");
+    lines.push("* What XAUT adds or fails to confirm");
+    lines.push("* The strongest verified supporting or opposing market factor, if available");
+    lines.push("Label observations separately from interpretations.");
+    lines.push("3. Implication for PHP spot altcoin exposure");
+    lines.push("Choose one:");
+    lines.push("* WAIT: Insufficient confirmation or deteriorating conditions.");
+    lines.push(
+      "* SELECTIVE: Conditions are mixed; evaluate individual altcoins independently and keep risk controlled."
+    );
+    lines.push(
+      "* RISK-ON, NOT A BUY SIGNAL: Broad conditions are supportive, but individual entries still require their own confirmation."
+    );
+    lines.push(
+      "* DEFENSIVE: Broad conditions are weak; prioritize capital preservation and avoid chasing rebounds."
+    );
+    lines.push(
+      "Give 1–2 specific observable conditions that would strengthen or weaken this stance. Do not prescribe position sizes or guarantee outcomes."
+    );
+    lines.push("4. Next recheck");
+    lines.push(
+      "Give the next practical Manila-time checkpoint and explain which readings should be compared. Do not imply that a specific time predicts a market move."
+    );
+    lines.push("");
+    lines.push("STYLE");
+    lines.push(
+      "Concise, neutral, evidence-led. No hype, no unsupported price targets, no buy signals for BTC, ETH, XAUT, or individual altcoins."
+    );
     try {
       await navigator.clipboard.writeText(lines.join("\n"));
       setDirectionCopied(true);
@@ -194,7 +299,6 @@ export default function HomeTable() {
       /* ignore */
     }
   };
-
 
   useEffect(() => {
     let cancelled = false;
