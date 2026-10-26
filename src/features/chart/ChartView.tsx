@@ -7,7 +7,7 @@ import JournalSidebar from "./JournalSidebar";
 import TradingInsightCard from "./TradingInsightCard";
 import { useChartLogic, type ChartRange } from "./useChartLogic";
 import { formatPhp } from "@/lib/format";
-import { getSupportResistance, BIAS_BADGE_CLASSES, BIAS_PRIORITY, isLongExtended, isWatchlistBuyLowHit, isNearSupportWorthCheck } from "./Technicals";
+import { getSupportResistance, BIAS_BADGE_CLASSES, BIAS_PRIORITY, isLongExtended, isWatchlistBuyLowHit, isNearSupportWorthCheck , buildStructureKeyLevels } from "./Technicals";
 import { useCoinScanner, formatScanResultsForJournal, formatSingleScanResult } from "./useCoinScanner";
 import MacroDayBanner from "./MacroDayBanner";
 import PositionAndTradesCard from "./PositionAndTradesCard";
@@ -57,6 +57,7 @@ export default function ChartView() {
   const [showHigh, setShowHigh] = useState(true);
   const [showLow, setShowLow] = useState(true);
   const [showKeyLevels, setShowKeyLevels] = useState(true);
+  const [showStructureLevels, setShowStructureLevels] = useState(true);
   const [showAllScanResults, setShowAllScanResults] = useState(false);
   const [scanCopied, setScanCopied] = useState(false);
   const [cardCopiedSymbol, setCardCopiedSymbol] = useState<string | null>(null);
@@ -246,12 +247,14 @@ export default function ChartView() {
       else if (last != null) price = last;
       const isCurrent = i === cursors.length - 1;
       if (isCurrent && currentPrice > 0) price = currentPrice;
+      const sameHourAsNow = hour === SLOT_HOURS[currentSlotIdx];
       return {
         dayKey: c.dayKey,
         hour,
         label: SLOT_LABELS[hour],
         price,
         isCurrent,
+        sameHourAsNow,
         delta: null as number | null,
       };
     });
@@ -314,6 +317,7 @@ export default function ChartView() {
       label: string;
       price: number | null;
       isCurrent: boolean;
+      sameHourAsNow?: boolean;
       delta: number | null;
     },
     dayTag: string,
@@ -322,19 +326,22 @@ export default function ChartView() {
     const hasPrice = s.price != null;
     const up = s.delta != null && s.delta > 0.005;
     const down = s.delta != null && s.delta < -0.005;
+    const sameHour = Boolean(s.sameHourAsNow) && !s.isCurrent;
     return (
       <div
         key={`${dayTag}-${s.hour}`}
-        title={`${dayTag} ${s.label} Manila`}
+        title={`${dayTag} ${s.label} Manila${sameHour ? " · same hour as now" : ""}`}
         style={{ containerType: "inline-size" }}
         className={`relative flex w-[5.75rem] sm:w-[6.75rem] flex-none flex-col items-center justify-center rounded-xl px-1.5 py-3 text-center shadow-sm transition-colors sm:px-2.5 ${
           s.isCurrent
             ? "border-2 border-emerald-500 bg-gradient-to-b from-emerald-50 to-emerald-100/80 ring-2 ring-emerald-200/80"
-            : hasPrice
-              ? muted
-                ? "border border-gray-200 bg-gray-50"
-                : "border border-gray-200 bg-white hover:border-gray-300 hover:shadow"
-              : "border border-dashed border-gray-200 bg-gray-50/60"
+            : sameHour
+              ? "border-2 border-emerald-300 bg-emerald-50/70 ring-1 ring-emerald-100"
+              : hasPrice
+                ? muted
+                  ? "border border-gray-200 bg-gray-50"
+                  : "border border-gray-200 bg-white hover:border-gray-300 hover:shadow"
+                : "border border-dashed border-gray-200 bg-gray-50/60"
         }`}
       >
         {s.isCurrent && (
@@ -349,7 +356,7 @@ export default function ChartView() {
 
         <div
           className={`text-[11px] sm:text-xs font-bold tabular-nums tracking-wide ${
-            s.isCurrent ? "text-emerald-700" : "text-gray-500"
+            s.isCurrent || sameHour ? "text-emerald-700" : "text-gray-500"
           }`}
         >
           {s.label}
@@ -434,6 +441,26 @@ export default function ChartView() {
     if (points.length === 0) return { support: null, resistance: null };
     return getSupportResistance(points, 30);
   }, [points]);
+
+  const structureExtraLevels = useMemo(() => {
+    if (!showStructureLevels || points.length < 5) return null;
+    const sup = technicals.support ?? 0;
+    const res = technicals.resistance ?? 0;
+    const px = currentPrice > 0 ? currentPrice : (points[points.length - 1] ? (points[points.length - 1].high + points[points.length - 1].low) / 2 : 0);
+    const series = intradayPoints && intradayPoints.length > 10 ? intradayPoints : points;
+    try {
+      return buildStructureKeyLevels(series, px, sup, res).map((l) => ({
+        price: l.price,
+        label: l.label,
+        shortLabel: l.shortLabel,
+        color: l.color,
+        dashed: l.dashed,
+      }));
+    } catch {
+      return null;
+    }
+  }, [showStructureLevels, points, intradayPoints, technicals.support, technicals.resistance, currentPrice]);
+
 
   return (
     <div className="flex flex-col gap-6">
@@ -711,7 +738,7 @@ export default function ChartView() {
             <button
               type="button"
               onClick={() => setShowHigh(!showHigh)}
-              className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+              className={`rounded px-2 py-1 text-[11px] sm:text-xs sm:px-2.5 sm:py-1.5 font-medium transition-colors ${
                 showHigh ? "bg-green-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
               }`}
             >
@@ -720,7 +747,7 @@ export default function ChartView() {
             <button
               type="button"
               onClick={() => setShowLow(!showLow)}
-              className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+              className={`rounded px-2 py-1 text-[11px] sm:text-xs sm:px-2.5 sm:py-1.5 font-medium transition-colors ${
                 showLow ? "bg-red-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
               }`}
             >
@@ -729,13 +756,25 @@ export default function ChartView() {
             <button
               type="button"
               onClick={() => setShowKeyLevels(!showKeyLevels)}
-              className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+              className={`rounded px-2 py-1 text-[11px] sm:text-xs sm:px-2.5 sm:py-1.5 font-medium transition-colors ${
                 showKeyLevels
                   ? "bg-purple-600 text-white"
                   : "bg-gray-100 text-gray-600 hover:bg-gray-200"
               }`}
             >
-              Key Levels
+              Key
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowStructureLevels(!showStructureLevels)}
+              className={`rounded px-2 py-1 text-[11px] sm:text-xs sm:px-2.5 sm:py-1.5 font-medium transition-colors ${
+                showStructureLevels
+                  ? "bg-teal-600 text-white"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+              title="S1/S2 support · R1/R2 resistance"
+            >
+              S/R
             </button>
           </div>
         </div>
@@ -847,6 +886,7 @@ export default function ChartView() {
                 }
                 support={technicals.support}
                 resistance={technicals.resistance}
+                extraLevels={structureExtraLevels}
                 intradayPoints={intradayPoints}
                 buyMarks={buyMarks}
               />

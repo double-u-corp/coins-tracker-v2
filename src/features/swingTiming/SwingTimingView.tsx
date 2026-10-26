@@ -118,7 +118,7 @@ function etToManilaSlot(
   const mH = manila.getUTCHours();
   const mM = manila.getUTCMinutes();
   // Slot window that would capture reaction: first poll label at or after Manila time
-  let slot: (typeof SLOT_HOURS)[number] = SLOT_HOURS[0];
+  let slot = SLOT_HOURS[0];
   for (const h of SLOT_HOURS) {
     if (h * 60 + 5 >= mH * 60 + mM) {
       slot = h;
@@ -470,21 +470,168 @@ async function loadMacroEventsFromApp(): Promise<{
   return { eventTableLines, macroSlotLines, slotByLabel: new Map() };
 }
 
+
+type RecentPollPoint = { day: string; slotLabel: string; price: number };
+type RecentPollSeries = { symbol: string; points: RecentPollPoint[] };
+
+async function fetchRecentPollsStructured(symbols: string[]): Promise<RecentPollSeries[]> {
+  const SLOT = [2, 5, 8, 11, 14, 17, 20, 23];
+  const out: RecentPollSeries[] = [];
+  for (const symbol of symbols.slice(0, 5)) {
+    try {
+      const res = await fetch(
+        `/api/coins?type=chart&symbol=${encodeURIComponent(symbol)}&granularity=3h&hours=48`
+      );
+      if (!res.ok) continue;
+      const json = await res.json();
+      const pointsRaw = Array.isArray(json.points) ? json.points : [];
+      if (!pointsRaw.length) continue;
+      const points: RecentPollPoint[] = [];
+      for (const pt of pointsRaw.slice(-16)) {
+        const raw = pt.period || pt.label;
+        const tms = new Date(raw).getTime();
+        if (!Number.isFinite(tms)) continue;
+        const manila = new Date(tms + 8 * 3600000);
+        const day = manila.toISOString().slice(0, 10);
+        const hour = manila.getUTCHours();
+        let slot = hour;
+        let best = 99;
+        for (const h of SLOT) {
+          const d = Math.min(Math.abs(hour - h), 24 - Math.abs(hour - h));
+          if (d < best) {
+            best = d;
+            slot = h;
+          }
+        }
+        const px =
+          typeof pt.close === "number"
+            ? pt.close
+            : typeof pt.high === "number"
+              ? pt.high
+              : null;
+        if (px == null) continue;
+        points.push({
+          day,
+          slotLabel: `${String(slot).padStart(2, "0")}:05`,
+          price: px,
+        });
+      }
+      if (points.length) out.push({ symbol, points });
+    } catch {
+      /* skip */
+    }
+  }
+  return out;
+}
+
+function formatRecentPollsBlock(series: RecentPollSeries[]): string {
+  if (!series.length) return "";
+  return series
+    .map((s) => {
+      const lines = [`### ${s.symbol}`];
+      for (const pt of s.points) {
+        lines.push(`- ${pt.day} ${pt.slotLabel} · ${pt.price}`);
+      }
+      return lines.join("\n");
+    })
+    .join("\n\n");
+}
+
+
+function formatWhyMovingPrompt(
+  data: TimingResponse,
+  series: RecentPollSeries[]
+): string {
+  const hot = data.hottestSlot;
+  const lines: string[] = [];
+  lines.push(`ROLE`);
+  lines.push(
+    `You are a neutral research assistant for a Philippines spot LONG-only PHP trader (no short, no leverage). No buy signals.`
+  );
+  lines.push(``);
+  lines.push(`PURPOSE`);
+  lines.push(
+    `Explain **why prices moved** over the last ~2 days using our **3h Manila poll prints only**. This is separate from the 14/30/60-day activity ranking.`
+  );
+  lines.push(``);
+  lines.push(`HOTTEST ACTIVITY SLOT (from long window — context only)`);
+  if (hot) {
+    lines.push(
+      `- ${hot.label}: avg |move| ${hot.avgAbsPct}%, >1% ${hot.pctMovesAbove1}%, intensity ${hot.intensity}`
+    );
+  } else {
+    lines.push(`- (unknown)`);
+  }
+  lines.push(``);
+  lines.push(`RECENT 3h POLL PATH (~2 days, Manila)`);
+  lines.push(
+    `Each line is one poll print. Compare consecutive prints to see up/down into the hot slot.`
+  );
+  lines.push(``);
+  if (series.length) {
+    for (const s of series) {
+      lines.push(`### ${s.symbol}`);
+      let prev: number | null = null;
+      for (const pt of s.points) {
+        let tag = "";
+        if (prev != null && prev > 0) {
+          const pct = ((pt.price - prev) / prev) * 100;
+          tag = ` · ${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
+        }
+        lines.push(`- ${pt.day} ${pt.slotLabel} · ${pt.price}${tag}`);
+        prev = pt.price;
+      }
+      lines.push(``);
+    }
+  } else {
+    lines.push(`- (no poll series)`);
+    lines.push(``);
+  }
+  lines.push(`RESEARCH TASKS (live search; no training memory)`);
+  lines.push(
+    `1. For each coin above, explain the path in plain language (grind up, dump, chop, gap).`
+  );
+  lines.push(
+    `2. Search verified news last 48–72h that could explain the moves (unlock, listing, hack, macro). Unverified → "none verified".`
+  );
+  lines.push(
+    `3. Say whether the move lines up with the hottest slot or looks random/thin liquidity.`
+  );
+  lines.push(``);
+  lines.push(`RULES`);
+  lines.push(`- Neutral. Do not recommend buys.`);
+  lines.push(`- Do not invent news. Cite source + URL when possible.`);
+  lines.push(`- Spot only.`);
+  lines.push(``);
+  lines.push(`ANSWER FORMAT`);
+  lines.push(`0. Data status (search available?)`);
+  lines.push(`1. Per-coin path read (max 3 bullets each)`);
+  lines.push(`2. News table: Coin | Item | Date | Source | Posture (WATCH/IGNORE/RISK)`);
+  lines.push(`3. Does this justify extra attention at the hot slot? Yes/No + why`);
+  lines.push(`Recheck by: next session`);
+  return lines.join("\n");
+}
+
 export default function SwingTimingView() {
   const [days, setDays] = useState(30);
   const [data, setData] = useState<TimingResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
-  const [agentCopied, setAgentCopied] = useState<"timing" | "macro" | null>(null);
+  const [agentCopied, setAgentCopied] = useState<"timing" | "macro" | "why" | null>(null);
+  const [recentPolls, setRecentPolls] = useState<RecentPollSeries[]>([]);
+  const [recentPollsLoading, setRecentPollsLoading] = useState(false);
 
   const copyTimingPrompt = async () => {
     if (!data) return;
     try {
       const { macroSlotLines } = await loadMacroEventsFromApp();
-      // Enrich macro lines with slot avg if we can match label
       const enriched = macroSlotLines.map((line) => {
-        const slot = data.slots.find((s) => line.includes(s.label.slice(0, 5)) || line.includes("23:05") && s.label.includes("23"));
+        const slot = data.slots.find(
+          (s) =>
+            line.includes(s.label.slice(0, 5)) ||
+            (line.includes("23:05") && s.label.includes("23"))
+        );
         if (!slot) return line;
         return `${line} (slot avg ${slot.avgAbsPct}%, >1% ${slot.pctMovesAbove1}%)`;
       });
@@ -494,6 +641,32 @@ export default function SwingTimingView() {
       setTimeout(() => setAgentCopied(null), 2000);
     } catch {
       setError("Could not copy timing prompt");
+    }
+  };
+
+  const copyWhyMovingPrompt = async () => {
+    if (!data) return;
+    try {
+      let series = recentPolls;
+      if (!series.length) {
+        const symbols = [
+          ...new Set(
+            [
+              ...(data.topMoversByHotSlot || []).map((c) => c.symbol),
+              "BTCPHP",
+              "ETHPHP",
+            ].filter(Boolean)
+          ),
+        ].slice(0, 5);
+        series = await fetchRecentPollsStructured(symbols);
+        setRecentPolls(series);
+      }
+      const text = formatWhyMovingPrompt(data, series);
+      await navigator.clipboard.writeText(text);
+      setAgentCopied("why");
+      setTimeout(() => setAgentCopied(null), 2000);
+    } catch {
+      setError("Could not copy why-moving prompt");
     }
   };
 
@@ -542,6 +715,34 @@ export default function SwingTimingView() {
     void load(days);
   }, [days, load]);
 
+  useEffect(() => {
+    if (!data) {
+      setRecentPolls([]);
+      return;
+    }
+    let cancelled = false;
+    const symbols = [
+      ...new Set(
+        [
+          ...(data.topMoversByHotSlot || []).map((c) => c.symbol),
+          "BTCPHP",
+          "ETHPHP",
+        ].filter(Boolean)
+      ),
+    ].slice(0, 5);
+    setRecentPollsLoading(true);
+    void fetchRecentPollsStructured(symbols)
+      .then((rows) => {
+        if (!cancelled) setRecentPolls(rows);
+      })
+      .finally(() => {
+        if (!cancelled) setRecentPollsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [data]);
+
   const maxSlotAvg = data ? Math.max(...data.slots.map((s) => s.avgAbsPct), 0.01) : 1;
   const maxDayAvg = data?.weekdays?.length
     ? Math.max(...data.weekdays.map((s) => s.avgAbsPct), 0.01)
@@ -562,6 +763,9 @@ export default function SwingTimingView() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mr-1">
+            Activity (slots/weekdays)
+          </span>
           {[14, 30, 60].map((d) => (
             <button
               key={d}
@@ -771,6 +975,70 @@ export default function SwingTimingView() {
                   );
                 })}
             </div>
+          </div>
+
+
+          <div className="rounded-lg border-2 border-teal-200 bg-teal-50/30 p-4 shadow-sm">
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-sm font-bold text-teal-950">2d · 3h path</h2>
+                <p className="text-[11px] text-teal-900/80 mt-0.5">
+                  Separate from 14/30/60 activity ranking — why is the hottest coin (and peers) moving
+                  now?
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void copyWhyMovingPrompt()}
+                disabled={!data || recentPollsLoading}
+                className="rounded-md border border-teal-400 bg-teal-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-700 disabled:opacity-50"
+              >
+                {agentCopied === "why" ? "✅ Copied" : "📋 Why moving (2d)"}
+              </button>
+            </div>
+            <p className="text-[11px] text-gray-600 mb-3">
+              Last ~16 Manila 3h prints for hot-slot coins + BTC/ETH. Green/red tiles = up/down vs prior
+              print.
+            </p>
+            {recentPollsLoading ? (
+              <p className="text-xs text-gray-400">Loading 3h series…</p>
+            ) : recentPolls.length === 0 ? (
+              <p className="text-xs text-gray-500">No 3h series available yet.</p>
+            ) : (
+              <div className="space-y-3 max-h-72 overflow-y-auto">
+                {recentPolls.map((s) => (
+                  <div key={s.symbol}>
+                    <div className="text-xs font-bold text-indigo-900 mb-1 font-mono">{s.symbol}</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {s.points.map((pt, i) => {
+                        const prev = i > 0 ? s.points[i - 1].price : null;
+                        const up = prev != null && pt.price > prev * 1.0005;
+                        const down = prev != null && pt.price < prev * 0.9995;
+                        return (
+                          <div
+                            key={`${pt.day}-${pt.slotLabel}-${i}`}
+                            className={`rounded-md border px-1.5 py-1 text-center min-w-[4.25rem] ${
+                              up
+                                ? "border-emerald-200 bg-emerald-50"
+                                : down
+                                  ? "border-rose-200 bg-rose-50"
+                                  : "border-gray-100 bg-gray-50"
+                            }`}
+                          >
+                            <div className="text-[9px] font-semibold text-gray-500">
+                              {pt.day.slice(5)} {pt.slotLabel}
+                            </div>
+                            <div className="text-[11px] font-bold tabular-nums text-gray-900">
+                              {pt.price}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {data.topMoversByHotSlot.length > 0 && data.hottestSlot && (

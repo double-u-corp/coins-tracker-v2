@@ -55,6 +55,8 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [watchError, setWatchError] = useState<string | null>(null);
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
+  const [outletCopied, setOutletCopied] = useState(false);
+  const [rssCopied, setRssCopied] = useState(false);
 
   const applyPayload = (data: {
     items?: OutletNewsRow[];
@@ -129,6 +131,54 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
   }, []);
 
   const articleItems = items.filter((item) => !isPriceMoveSignalHeadline(item.headline));
+
+  const copyOutletAgent = async () => {
+    const lines: string[] = [];
+    lines.push("ROLE: Neutral crypto news assistant for a Philippines spot LONG-only PHP trader (no short/leverage).");
+    lines.push("PURPOSE: Summarize the Core outlet headlines below. One overall verdict: BULLISH / BEARISH / NEUTRAL for crypto risk appetite over the next few days.");
+    lines.push("RULES: Do not invent news. Prefer the linked themes only. Not investment advice. No buy signals.");
+    lines.push("");
+    lines.push("HEADLINES:");
+    for (const row of rows.slice(0, 20)) {
+      lines.push(`- [${row.label || row.domain}] ${row.title || row.url} (${row.newsDate || "date n/a"})`);
+      if (row.url) lines.push(`  URL: ${row.url}`);
+    }
+    if (!rows.length) lines.push("- (none)");
+    lines.push("");
+    lines.push("ANSWER: 1) Verdict 2) 3 bullet themes 3) What a spot buyer should watch (not chase)");
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      setOutletCopied(true);
+      setTimeout(() => setOutletCopied(false), 2000);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const copyRssAgent = async () => {
+    const lines: string[] = [];
+    lines.push("ROLE: Neutral crypto news assistant for a Philippines spot LONG-only PHP trader (no short/leverage).");
+    lines.push("PURPOSE: Summarize Price & RSS signals from our app. Overall verdict: BULLISH / BEARISH / NEUTRAL.");
+    lines.push("RULES: Do not invent news. Use only items listed. Not a buy signal.");
+    lines.push("");
+    lines.push("SIGNALS:");
+    for (const item of articleItems.slice(0, 20)) {
+      lines.push(`- ${item.symbol || "?"} · ${item.sentiment || "neutral"} · ${item.headline}`);
+      if (item.summary) lines.push(`  ${String(item.summary).slice(0, 200)}`);
+      if (item.url) lines.push(`  URL: ${item.url}`);
+    }
+    if (!articleItems.length) lines.push("- (none)");
+    lines.push("");
+    lines.push("ANSWER: 1) Verdict 2) Themes (max 3) 3) Coins mentioned that need caution");
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      setRssCopied(true);
+      setTimeout(() => setRssCopied(false), 2000);
+    } catch {
+      /* ignore */
+    }
+  };
+
 
   return (
     <section className="mt-8 space-y-6">
@@ -215,74 +265,68 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
             yesterday from core outlets.
           </p>
         ) : rows.length > 0 ? (
-          <div className="overflow-x-auto rounded-md border border-gray-200">
-            <table className="min-w-full text-left text-xs">
-              <thead className="bg-slate-50 border-b border-gray-200">
-                <tr>
-                  <th className="px-3 py-2 font-bold text-slate-600 uppercase tracking-wide">
-                    Domain
-                  </th>
-                  <th className="px-3 py-2 font-bold text-slate-600 uppercase tracking-wide">
-                    Headline
-                  </th>
-                  <th className="px-3 py-2 font-bold text-slate-600 uppercase tracking-wide whitespace-nowrap">
-                    Date
-                  </th>
-                  <th className="px-3 py-2 font-bold text-slate-600 uppercase tracking-wide w-10">
-                    {" "}
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {rows.map((row) => {
-                  const scannedDay = row.scannedAt.slice(0, 10);
-                  const same = row.newsDate === scannedDay;
-                  return (
-                    <tr key={row.id} className="hover:bg-slate-50/80">
-                      <td className="px-3 py-2 align-top">
-                        <span className="font-semibold text-teal-900">{row.label}</span>
-                        <div className="text-[10px] text-slate-400 font-mono">{row.domain}</div>
-                      </td>
-                      <td className="px-3 py-2 align-top max-w-[28rem]">
-                        <a
-                          href={row.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="font-medium text-slate-900 underline decoration-dotted hover:text-teal-800"
-                        >
-                          {row.title}
-                        </a>
-                      </td>
-                      <td className="px-3 py-2 align-top whitespace-nowrap text-slate-700">
-                        <div className="font-mono text-xs">{row.newsDate}</div>
-                        {!same && (
-                          <div className="text-[10px] text-slate-400">
-                            scanned {scannedDay}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-2 py-2 align-top">
-                        <button
-                          type="button"
-                          onClick={() => void deleteRow(row)}
-                          disabled={deletingId === row.id}
-                          title="Delete this row"
-                          className="rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[11px] font-bold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
-                        >
-                          {deletingId === row.id ? "…" : "✕"}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="space-y-2">
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => void copyOutletAgent()}
+                className="rounded-md border border-teal-200 bg-teal-50 px-2.5 py-1 text-[11px] font-bold text-teal-900 hover:bg-teal-100"
+              >
+                {outletCopied ? "✅ Copied" : "📋 Summarize outlet news"}
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {rows.map((row) => (
+                <article
+                  key={row.id}
+                  className="relative rounded-lg border border-teal-100 bg-white p-3 shadow-sm hover:border-teal-200"
+                >
+                  <button
+                    type="button"
+                    onClick={() => void deleteRow(row)}
+                    disabled={deletingId === row.id}
+                    className="absolute top-2 right-2 rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                    title="Delete"
+                  >
+                    {deletingId === row.id ? "…" : "🗑"}
+                  </button>
+                  <div className="pr-8">
+                    <span className="inline-block rounded-full bg-teal-50 border border-teal-100 px-2 py-0.5 text-[10px] font-bold text-teal-800">
+                      {row.label || row.domain}
+                    </span>
+                    <a
+                      href={row.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-1.5 block text-sm font-semibold text-gray-900 hover:text-teal-800 hover:underline leading-snug"
+                    >
+                      {row.title || row.url}
+                    </a>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      {[row.newsDate, row.scannedAt ? `scanned ${String(row.scannedAt).slice(0, 10)}` : ""]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                  </div>
+                </article>
+              ))}
+            </div>
           </div>
         ) : null}
       </div>
 
       <div>
-        <h3 className="mb-2 text-sm font-semibold text-gray-800">Price &amp; RSS signals</h3>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-gray-800">Price &amp; RSS signals</h3>
+          <button
+            type="button"
+            onClick={() => void copyRssAgent()}
+            disabled={articleItems.length === 0}
+            className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-slate-800 hover:bg-slate-100 disabled:opacity-50"
+          >
+            {rssCopied ? "✅ Copied" : "📋 Summarize RSS signals"}
+          </button>
+        </div>
         {error && <AlertBanner variant="error" message={`Failed to load signals: ${error}`} />}
 
         {loading ? (

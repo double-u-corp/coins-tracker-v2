@@ -149,6 +149,52 @@ export default function HomeTable() {
   } = useHomeLogic();
 
   const [movePctBySymbol, setMovePctBySymbol] = useState<Record<string, number>>({});
+  const [directionCopied, setDirectionCopied] = useState(false);
+
+  const copyDirectionAgent = async () => {
+    const anchors = (["BTCPHP", "ETHPHP", "XAUTPHP"] as const).map((sym) => {
+      const coin =
+        allCoins.find((c) => c.symbol.toUpperCase() === sym) ||
+        coins.find((c) => c.symbol.toUpperCase() === sym);
+      const pct =
+        movePctBySymbol[sym] ?? movePctBySymbol[sym.replace(/PHP$/i, "")];
+      return {
+        sym,
+        name: coin?.name || sym,
+        price: coin?.currentPrice ?? null,
+        pct: pct != null && Number.isFinite(pct) ? pct : null,
+        dir: coin?.priceDirection ?? null,
+      };
+    });
+    const lines: string[] = [];
+    lines.push("ROLE: Neutral market-direction assistant for a Philippines spot LONG-only PHP trader.");
+    lines.push("PURPOSE: Opine on crypto risk direction using BTC, ETH, and XAUT (tokenized gold) only.");
+    lines.push("IMPORTANT: Do NOT recommend buying BTC, ETH, or XAUT. They are direction anchors only.");
+    lines.push("Trader stages alt PHP pairs separately; use anchors to advise risk-on vs risk-off.");
+    lines.push("RULES: Neutral. No leverage/short. Do not invent news. Prefer verified context if you search.");
+    lines.push("");
+    lines.push("ANCHORS (app prices):");
+    for (const a of anchors) {
+      const px = a.price != null ? String(a.price) : "n/a";
+      const mv =
+        a.pct != null ? `${a.pct >= 0 ? "+" : ""}${a.pct.toFixed(2)}%` : a.dir || "n/a";
+      lines.push(`- ${a.name} (${a.sym}): price ${px} · move ${mv}`);
+    }
+    lines.push("");
+    lines.push("ANSWER FORMAT:");
+    lines.push("1. Direction verdict: RISK-ON / MIXED / RISK-OFF (for alts context)");
+    lines.push("2. Why (max 3 bullets, BTC/ETH/XAUT relationship)");
+    lines.push("3. What a spot alt buyer should do: wait / selective / avoid chasing");
+    lines.push("4. Recheck by (date)");
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      setDirectionCopied(true);
+      setTimeout(() => setDirectionCopied(false), 2000);
+    } catch {
+      /* ignore */
+    }
+  };
+
 
   useEffect(() => {
     let cancelled = false;
@@ -474,95 +520,70 @@ export default function HomeTable() {
         )}
       </div>
 
-      {/* Mobile chip filter */}
-      {!loading && allCoins.length > 0 && (
-        <div className="mb-6">
-          <div className="mb-2 flex items-center justify-between flex-wrap gap-2">
-            <span className="text-sm font-medium text-gray-700">
-              Filter Coins {selectedCoins.length > 0 ? `(${selectedCoins.length} selected)` : ""}
-            </span>
-
-            {selectedCoins.length > 0 && (
-              <button
-                onClick={() => setSelectedCoins([])}
-                className="text-xs font-medium text-gray-500 hover:text-gray-900 underline"
-              >
-                Clear All
-              </button>
-            )}
+      {/* Direction anchors — not trade ideas */}
+      {!loading && (
+        <div className="mb-6 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">Market direction anchors</h3>
+              <p className="text-[11px] text-slate-500 max-w-xl">
+                BTC · ETH · XAUT only — <span className="font-semibold">do not buy these here</span>.
+                Use them to read crypto risk direction before staging alts.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void copyDirectionAgent()}
+              className="rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-bold text-indigo-900 hover:bg-indigo-100"
+            >
+              {directionCopied ? "✅ Copied" : "📋 Direction agent"}
+            </button>
           </div>
-
-          <div className="flex flex-wrap gap-2">
-            {allCoins.map((coin) => {
-              const isSelected = selectedCoins.includes(coin.symbol);
-
-              const activePortfolio = portfolio?.find((p) => p.symbol === coin.symbol);
-              const hasHoldings = activePortfolio && activePortfolio.holdings > 0;
-
-              let chipClasses = "";
-              if (isSelected) {
-                chipClasses = "bg-brand-600 border-brand-600 text-white";
-              } else if (hasHoldings) {
-                chipClasses = "bg-indigo-50 border-indigo-300 text-indigo-800 hover:bg-indigo-100 shadow-sm font-bold";
-              } else {
-                chipClasses = "bg-white border-gray-300 text-gray-700 hover:bg-gray-50 shadow-sm";
-              }
-
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {(["BTCPHP", "ETHPHP", "XAUTPHP"] as const).map((sym) => {
+              const coin =
+                allCoins.find((c) => c.symbol.toUpperCase() === sym) ||
+                coins.find((c) => c.symbol.toUpperCase() === sym);
+              const pct =
+                movePctBySymbol[sym] ??
+                movePctBySymbol[sym.replace(/PHP$/i, "")];
+              const up = pct != null && pct > 0;
+              const down = pct != null && pct < 0;
               return (
-                <button
-                  key={coin.symbol}
-                  onClick={() => {
-                    if (isSelected) {
-                      setSelectedCoins(selectedCoins.filter((c) => c !== coin.symbol));
-                    } else {
-                      setSelectedCoins([...selectedCoins, coin.symbol]);
-
-                      setTimeout(() => {
-                        document.getElementById(`coin-card-${coin.symbol}`)?.scrollIntoView({
-                          behavior: "smooth",
-                          block: "start",
-                        });
-                      }, 150);
-                    }
-                  }}
-                  className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs transition-colors border ${chipClasses}`}
+                <div
+                  key={sym}
+                  className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2.5"
                 >
-                  {hasHoldings && !isSelected && <span className="text-indigo-500">●</span>}
-
-                  <span>{coin.symbol}</span>
-                  <span className={isSelected ? "text-brand-300" : hasHoldings ? "text-indigo-300" : "text-gray-300"}>|</span>
-                  <span>{formatPhp(coin.currentPrice)}</span>
-                  {(() => {
-                    const pct =
-                      movePctBySymbol[coin.symbol.toUpperCase()] ??
-                      movePctBySymbol[coin.symbol.replace(/PHP$/i, "").toUpperCase()];
-                    if (pct == null || !Number.isFinite(pct)) {
-                      // Fallback: direction only when no recent signal %
-                      return (
-                        <PriceDirectionArrow direction={coin.priceDirection} inverse={isSelected} />
-                      );
-                    }
-                    const up = pct > 0;
-                    const down = pct < 0;
-                    const color = isSelected
-                      ? up
-                        ? "text-green-200"
-                        : down
-                        ? "text-red-200"
-                        : "text-brand-200"
-                      : up
-                      ? "text-green-600"
-                      : down
-                      ? "text-red-600"
-                      : "text-gray-500";
-                    return (
-                      <span className={`font-bold tabular-nums ${color}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-bold text-slate-900">
+                      {coin?.name || sym.replace("PHP", "")}{" "}
+                      <span className="font-mono text-[10px] text-slate-500">{sym}</span>
+                    </span>
+                    <Link
+                      href={`/chart?symbol=${encodeURIComponent(sym)}`}
+                      className="text-[10px] font-bold text-indigo-700 hover:underline"
+                    >
+                      Spot →
+                    </Link>
+                  </div>
+                  <div className="mt-1 flex items-center gap-2">
+                    <span className="text-sm font-bold tabular-nums text-slate-900">
+                      {coin?.currentPrice != null ? formatPhp(coin.currentPrice) : "—"}
+                    </span>
+                    {pct != null && Number.isFinite(pct) ? (
+                      <span
+                        className={`text-xs font-bold tabular-nums ${
+                          up ? "text-green-600" : down ? "text-red-600" : "text-gray-500"
+                        }`}
+                      >
                         {up ? "+" : ""}
                         {pct.toFixed(1)}%
                       </span>
-                    );
-                  })()}
-                </button>
+                    ) : (
+                      <PriceDirectionArrow direction={coin?.priceDirection ?? null} />
+                    )}
+                  </div>
+                </div>
               );
             })}
           </div>
@@ -604,7 +625,7 @@ export default function HomeTable() {
       ) : (
         <>
           <p className="mb-3 text-xs text-gray-500">
-            Use the card action buttons to view calendar schedules, interactive charts, or manually log coin prices.
+            Open Spot on a card for chart and technicals. Direction anchors above are not buy targets.
           </p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {coins.map((coin) => (
