@@ -92,6 +92,7 @@ export default function LongScanView() {
   const [journalPrice, setJournalPrice] = useState<number | null>(null);
   const [journalName, setJournalName] = useState<string | null>(null);
   const [priceBySymbol, setPriceBySymbol] = useState<Record<string, number>>({});
+  const [journalCountBySymbol, setJournalCountBySymbol] = useState<Record<string, number>>({});
   const [journalEntries, setJournalEntries] = useState<JournalEntryView[]>([]);
   const [journalLoading, setJournalLoading] = useState(false);
   const [journalError, setJournalError] = useState<string | null>(null);
@@ -196,10 +197,40 @@ export default function LongScanView() {
     }
   }, []);
 
+  const loadJournalCounts = useCallback(async (symbols: string[]) => {
+    const unique = [...new Set(symbols.map((s) => s.toUpperCase()))];
+    if (!unique.length) return;
+    const from = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const next: Record<string, number> = {};
+    await Promise.all(
+      unique.map(async (sym) => {
+        try {
+          const res = await fetch(
+            `/api/journal?symbol=${encodeURIComponent(sym)}&from=${from}`
+          );
+          if (!res.ok) return;
+          const data = (await res.json()) as { entries?: { symbol: string | null }[] };
+          const n = (data.entries || []).filter(
+            (e) => e.symbol && e.symbol.toUpperCase() === sym
+          ).length;
+          next[sym] = n;
+        } catch {
+          /* ignore */
+        }
+      })
+    );
+    setJournalCountBySymbol((prev) => ({ ...prev, ...next }));
+  }, []);
+
   useEffect(() => {
     void load();
     void loadLivePrices();
   }, [load, loadLivePrices]);
+
+  useEffect(() => {
+    const syms = runs.flatMap((r) => (r.hits || []).map((h) => h.symbol));
+    if (syms.length) void loadJournalCounts(syms);
+  }, [runs, loadJournalCounts]);
 
   const runNow = async () => {
     setRunning(true);
@@ -368,6 +399,13 @@ export default function LongScanView() {
         throw new Error((data as { error?: string }).error || `Delete failed (${res.status})`);
       }
       setJournalEntries((prev) => prev.filter((e) => e.id !== id));
+      if (journalSymbol) {
+        const key = journalSymbol.toUpperCase();
+        setJournalCountBySymbol((prev) => ({
+          ...prev,
+          [key]: Math.max(0, (prev[key] ?? 1) - 1),
+        }));
+      }
     } catch (err) {
       setJournalError((err as Error).message);
     } finally {
@@ -456,6 +494,11 @@ export default function LongScanView() {
                       <span className="font-mono text-sm font-bold text-indigo-700">
                         {g.symbol}
                       </span>
+                      {priceBySymbol[g.symbol.toUpperCase()] != null ? (
+                        <span className="ml-2 font-bold tabular-nums text-sky-800">
+                          {formatPhp(priceBySymbol[g.symbol.toUpperCase()])}
+                        </span>
+                      ) : null}
                     </h2>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
@@ -466,6 +509,13 @@ export default function LongScanView() {
                       title={`Journal notes for ${g.symbol}`}
                     >
                       📓 Journal
+                      {(journalCountBySymbol[g.symbol.toUpperCase()] ?? 0) > 0 ? (
+                        <span className="ml-1 rounded-full bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                          {journalCountBySymbol[g.symbol.toUpperCase()]}
+                        </span>
+                      ) : (
+                        <span className="ml-1 text-[10px] font-semibold text-slate-400">0</span>
+                      )}
                     </button>
                     <Link
                       href={`/chart?symbol=${encodeURIComponent(g.symbol)}`}
