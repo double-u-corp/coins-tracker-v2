@@ -199,13 +199,15 @@ function buildAgentPrompt(args: {
   });
   lines.push(`## Final journal note (REQUIRED — pure markdown, copy-paste ready)`);
   lines.push(
-    `End with ONLY this block (real newlines, no HTML). Fill fields; "n/a" if needed. Must still make sense in 3–7 days without the rest of the chat. **Always fill Agent** with your product name (e.g. ChatGPT, Grok, Gemini) and model if known.`
+    `End with ONLY this block (real newlines, no HTML). Fill fields; "n/a" if needed. Must still make sense in 3–7 days without the rest of the chat. **Always fill Agent** with your product name (e.g. ChatGPT, Grok, Gemini) and model if known. **Keep the Prompt line exactly as given** so the trader knows which Spot button was used.`
   );
   lines.push(``);
   lines.push("```markdown");
   if (args.holding) {
     lines.push(`## ${args.symbol} · hold/exit note · ${todayManila} (Manila)`);
     lines.push(``);
+    lines.push(`- **Agent:** (ChatGPT / Grok / Gemini / other — name the model)`);
+    lines.push(`- **Prompt:** Spot · Position & trades · hold/sell research`);
     lines.push(`- **Verdict:** HOLD | WAIT | TRIM | EXIT`);
     lines.push(`- **Price now:** …`);
     lines.push(`- **Avg cost / unrealized:** …`);
@@ -218,6 +220,8 @@ function buildAgentPrompt(args: {
   } else {
     lines.push(`## ${args.symbol} · entry note · ${todayManila} (Manila)`);
     lines.push(``);
+    lines.push(`- **Agent:** (ChatGPT / Grok / Gemini / other — name the model)`);
+    lines.push(`- **Prompt:** Spot · Position & trades · buy/sizing research`);
     lines.push(`- **Verdict:** BUY | WAIT | SKIP`);
     lines.push(`- **Price now:** …`);
     lines.push(`- **Last pump / local high:** date · peak · why price may be down now (or n/a)`);

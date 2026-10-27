@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
+import type { JournalEntryView } from "@/validators/journalSchema";
+import FormattedAiResponse from "@/components/FormattedAiResponse";
 
 type LadderLevel = { price: number; basis: string; allocationPct: number };
 
@@ -85,6 +87,16 @@ export default function LongScanView() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
+  const [journalOpen, setJournalOpen] = useState(false);
+  const [journalSymbol, setJournalSymbol] = useState<string | null>(null);
+  const [journalPrice, setJournalPrice] = useState<number | null>(null);
+  const [journalName, setJournalName] = useState<string | null>(null);
+  const [priceBySymbol, setPriceBySymbol] = useState<Record<string, number>>({});
+  const [journalEntries, setJournalEntries] = useState<JournalEntryView[]>([]);
+  const [journalLoading, setJournalLoading] = useState(false);
+  const [journalError, setJournalError] = useState<string | null>(null);
+  const [journalDeletingId, setJournalDeletingId] = useState<number | null>(null);
+
 
   /** Flatten hits across runs → group by coin (newest first). */
   const coinGroups = useMemo(() => {
@@ -109,18 +121,28 @@ export default function LongScanView() {
       });
       return g;
     });
-    // Sort coins: best LONG bias in history first, then best score, then newest scan
+    // Sort: STRONG LONG / LONG first (among them: stronger bias, then newest).
+    // All other biases: newest result only (no score ranking).
     groups.sort((a, b) => {
       const bestBias = (rows: typeof a.rows) =>
         Math.min(...rows.map((r) => biasRank(r.bias)), 99);
-      const bestScore = (rows: typeof a.rows) =>
-        Math.max(...rows.map((r) => r.score ?? -999), -999);
-      const biasCmp = bestBias(a.rows) - bestBias(b.rows);
-      if (biasCmp !== 0) return biasCmp;
-      const scoreCmp = bestScore(b.rows) - bestScore(a.rows);
-      if (scoreCmp !== 0) return scoreCmp;
-      const at = a.rows[0]?.scannedAt || "";
-      const bt = b.rows[0]?.scannedAt || "";
+      const newest = (rows: typeof a.rows) =>
+        rows.reduce((m, r) => (r.scannedAt > m ? r.scannedAt : m), "");
+      const aRank = bestBias(a.rows);
+      const bRank = bestBias(b.rows);
+      const aIsLong = aRank <= 1;
+      const bIsLong = bRank <= 1;
+      if (aIsLong !== bIsLong) return aIsLong ? -1 : 1;
+      if (aIsLong && bIsLong) {
+        if (aRank !== bRank) return aRank - bRank; // STRONG LONG before LONG
+        const at = newest(a.rows);
+        const bt = newest(b.rows);
+        if (at !== bt) return bt.localeCompare(at);
+        return a.symbol.localeCompare(b.symbol);
+      }
+      // Non-LONG: pure newest scan first
+      const at = newest(a.rows);
+      const bt = newest(b.rows);
       if (at !== bt) return bt.localeCompare(at);
       return a.symbol.localeCompare(b.symbol);
     });
@@ -155,9 +177,29 @@ export default function LongScanView() {
     }
   }, []);
 
+  const loadLivePrices = useCallback(async () => {
+    try {
+      const res = await fetch("/api/coins");
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        coins?: { symbol: string; currentPrice: number | null }[];
+      };
+      const map: Record<string, number> = {};
+      for (const c of data.coins || []) {
+        if (c.currentPrice != null && Number.isFinite(c.currentPrice)) {
+          map[c.symbol.toUpperCase()] = c.currentPrice;
+        }
+      }
+      setPriceBySymbol(map);
+    } catch {
+      /* ignore — journal still works without live price */
+    }
+  }, []);
+
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadLivePrices();
+  }, [load, loadLivePrices]);
 
   const runNow = async () => {
     setRunning(true);
@@ -251,6 +293,89 @@ export default function LongScanView() {
     }
   };
 
+  const loadJournalForSymbol = useCallback(async (symbol: string) => {
+    setJournalLoading(true);
+    setJournalError(null);
+    try {
+      const from = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const sym = encodeURIComponent(symbol.toUpperCase());
+      const res = await fetch(`/api/journal?symbol=${sym}&from=${from}`);
+      if (!res.ok) throw new Error(`Failed to load journal (${res.status})`);
+      const data = (await res.json()) as { entries: JournalEntryView[] };
+      const all = data.entries || [];
+      // API may include general (null symbol) when filtering by coin — keep only this coin
+      const only = all.filter(
+        (e) => e.symbol && e.symbol.toUpperCase() === symbol.toUpperCase()
+      );
+      setJournalEntries(only);
+    } catch (err) {
+      setJournalError((err as Error).message);
+      setJournalEntries([]);
+    } finally {
+      setJournalLoading(false);
+    }
+  }, []);
+
+  const openJournal = (symbol: string, opts?: { name?: string | null }) => {
+    const key = symbol.toUpperCase();
+    setJournalSymbol(symbol);
+    setJournalName(opts?.name ?? null);
+    setJournalPrice(priceBySymbol[key] ?? null);
+    setJournalOpen(true);
+    void loadJournalForSymbol(symbol);
+    // refresh live price when opening
+    void (async () => {
+      try {
+        const res = await fetch("/api/coins");
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          coins?: { symbol: string; currentPrice: number | null }[];
+        };
+        const coin = (data.coins || []).find((c) => c.symbol.toUpperCase() === key);
+        if (coin?.currentPrice != null && Number.isFinite(coin.currentPrice)) {
+          setJournalPrice(coin.currentPrice);
+          setPriceBySymbol((prev) => ({ ...prev, [key]: coin.currentPrice as number }));
+        }
+      } catch {
+        /* keep prior */
+      }
+    })();
+  };
+
+  const closeJournal = () => {
+    setJournalOpen(false);
+    setJournalSymbol(null);
+    setJournalName(null);
+    setJournalPrice(null);
+    setJournalEntries([]);
+    setJournalError(null);
+  };
+
+
+
+  const deleteJournalEntry = async (id: number) => {
+    if (!window.confirm("Delete this journal note? This cannot be undone.")) return;
+    setJournalDeletingId(id);
+    setJournalError(null);
+    try {
+      const res = await fetch("/api/journal", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error || `Delete failed (${res.status})`);
+      }
+      setJournalEntries((prev) => prev.filter((e) => e.id !== id));
+    } catch (err) {
+      setJournalError((err as Error).message);
+    } finally {
+      setJournalDeletingId(null);
+    }
+  };
+
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -313,7 +438,10 @@ export default function LongScanView() {
       ) : (
         <div className="space-y-6">
           <p className="text-[11px] text-gray-500">
-            {coinGroups.length} coin(s) · LONG bias first · then score · newest inside each card
+            {coinGroups.length} coin(s) with saved hits (not full watchlist size — BTC/ETH/XAUT skipped in
+            scan; only coins that matched a run appear here) ·{" "}
+            <span className="font-semibold text-slate-700">STRONG LONG / LONG first</span>, then newest
+            non-LONG · newest hit first inside each card
           </p>
           {coinGroups.map((g) => {
             return (
@@ -330,14 +458,24 @@ export default function LongScanView() {
                       </span>
                     </h2>
                   </div>
-                  <Link
-                    href={`/chart?symbol=${encodeURIComponent(g.symbol)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="shrink-0 rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-indigo-700"
-                  >
-                    Spot →
-                  </Link>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => openJournal(g.symbol, { name: g.name })}
+                      className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-800 hover:bg-slate-50"
+                      title={`Journal notes for ${g.symbol}`}
+                    >
+                      📓 Journal
+                    </button>
+                    <Link
+                      href={`/chart?symbol=${encodeURIComponent(g.symbol)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-indigo-700"
+                    >
+                      Spot →
+                    </Link>
+                  </div>
                 </div>
 
                 <div className="divide-y divide-gray-100">
@@ -436,6 +574,116 @@ export default function LongScanView() {
           })}
         </div>
       )}
+
+      {journalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Journal notes"
+          onClick={closeJournal}
+        >
+          <div
+            className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-t-2xl sm:rounded-xl border border-gray-200 bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-gray-100 px-4 py-3">
+              <div>
+                <h2 className="text-base font-bold text-gray-900">
+                  Journal · {journalName || journalSymbol || "—"}
+                  {journalSymbol ? (
+                    <span className="ml-1 font-mono text-sm font-bold text-indigo-700">
+                      {journalSymbol}
+                    </span>
+                  ) : null}
+                </h2>
+                <p className="text-[11px] text-gray-500 mt-0.5">
+                  {journalPrice != null ? (
+                    <>
+                      Current price:{" "}
+                      <span className="font-bold tabular-nums text-slate-800">
+                        {formatPhp(journalPrice)}
+                      </span>
+                      {" · "}
+                    </>
+                  ) : null}
+                  Notes for this coin only · read-only · delete if outdated. Add/edit on Spot or Home.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeJournal}
+                className="rounded-md border border-gray-200 px-2 py-1 text-sm font-bold text-gray-600 hover:bg-gray-50"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="overflow-y-auto px-4 py-3 space-y-3">
+              {journalError && (
+                <p className="text-xs text-rose-700 bg-rose-50 border border-rose-100 rounded-md px-2 py-1.5">
+                  {journalError}
+                </p>
+              )}
+              {journalLoading ? (
+                <div className="space-y-2 animate-pulse">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="h-16 rounded-lg bg-gray-100" />
+                  ))}
+                </div>
+              ) : journalEntries.length === 0 ? (
+                <p className="text-sm text-gray-500 py-6 text-center">No journal notes for this coin yet.</p>
+              ) : (
+                journalEntries.map((e) => (
+                  <article
+                    key={e.id}
+                    className="rounded-lg border border-gray-200 bg-slate-50/80 p-3"
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div className="min-w-0">
+                        <div className="text-sm font-bold text-gray-900 truncate">{e.title}</div>
+                        <div className="text-[10px] text-gray-500 mt-0.5">
+                          {e.symbol ? (
+                            <span className="font-semibold text-indigo-700">{e.symbol}</span>
+                          ) : (
+                            <span className="font-semibold text-slate-600">General</span>
+                          )}
+                          {" · "}
+                          {new Date(e.entryDate).toLocaleDateString(undefined, {
+                            timeZone: "Asia/Manila",
+                            year: "numeric",
+                            month: "short",
+                            day: "numeric",
+                          })}
+                          {" · saved "}
+                          {new Date(e.createdAt).toLocaleString(undefined, {
+                            timeZone: "Asia/Manila",
+                            dateStyle: "medium",
+                            timeStyle: "short",
+                          })}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void deleteJournalEntry(e.id)}
+                        disabled={journalDeletingId === e.id}
+                        className="shrink-0 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                        title="Delete this note"
+                      >
+                        {journalDeletingId === e.id ? "…" : "🗑 Delete"}
+                      </button>
+                    </div>
+                    <div className="mt-2">
+                      <FormattedAiResponse text={e.notes} />
+                    </div>
+                  </article>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

@@ -338,13 +338,15 @@ export function formatEntryReviewPrompt(
     `End your answer with ONLY this block (use real newlines, no HTML). Fill every field; use "n/a" if not applicable.`
   );
   lines.push(
-    `The trader will **copy this markdown into General / coin journal** as the decision record — write it so it still makes sense in 3–7 days without the rest of the chat. **Always fill Agent** with your product name (e.g. ChatGPT, Grok, Gemini) and model if known.`
+    `The trader will **copy this markdown into General / coin journal** as the decision record — write it so it still makes sense in 3–7 days without the rest of the chat. **Always fill Agent** with your product name (e.g. ChatGPT, Grok, Gemini) and model if known. **Keep the Prompt line exactly as given** so the trader knows which Spot button was used.`
   );
   lines.push(``);
   lines.push('```markdown');
   if (isAllocated) {
     lines.push(`## ${pair} · hold/exit note · ${todayManila} (Manila)`);
     lines.push(``);
+    lines.push(`- **Agent:** (ChatGPT / Grok / Gemini / other — name the model)`);
+    lines.push(`- **Prompt:** Spot Insights · Copy hold/exit review (full confluence)`);
     lines.push(`- **Verdict:** HOLD | WAIT | TRIM | SELL`);
     lines.push(`- **Price now:** …`);
     lines.push(`- **Break-even / avg cost:** …`);
@@ -360,6 +362,8 @@ export function formatEntryReviewPrompt(
   } else {
     lines.push(`## ${pair} · entry note · ${todayManila} (Manila)`);
     lines.push(``);
+    lines.push(`- **Agent:** (ChatGPT / Grok / Gemini / other — name the model)`);
+    lines.push(`- **Prompt:** Spot Insights · Copy entry review (full confluence)`);
     lines.push(`- **Verdict:** READY TO STAGE | WAIT FOR PULLBACK | SKIP`);
     lines.push(`- **Price now:** …`);
     lines.push(`- **Ladder levels:**`);
@@ -473,11 +477,11 @@ export function formatEntryReviewPromptForGoogle(
 
   if (isAllocated) {
     parts.push(
-      `Answer: 1) HOLD | WAIT | TRIM | SELL  2) why  3) sell/trim trigger price  4) invalidation  5) Timeframe: valid until + review by YYYY-MM-DD (today Manila ${todayManila})  6) news  7) End with a markdown journal note block (Agent name e.g. ChatGPT/Grok/Gemini, verdict, levels, timeframe, news). Neutral stance. Do not invent news.`
+      `Answer: 1) HOLD | WAIT | TRIM | SELL  2) why  3) sell/trim trigger price  4) invalidation  5) Timeframe: valid until + review by YYYY-MM-DD (today Manila ${todayManila})  6) news  7) End with markdown journal note: **Agent**, **Prompt: Spot Insights · Google review mini**, verdict, levels, timeframe, news. Neutral stance. Do not invent news.`
     );
   } else {
     parts.push(
-      `Answer: 1) READY TO STAGE | WAIT FOR PULLBACK | SKIP  2) why  3) ladder + invalidation  4) Timeframe: valid until / review by YYYY-MM-DD (today Manila ${todayManila})  5) news  6) End with markdown journal note (Agent name e.g. ChatGPT/Grok/Gemini, verdict, ladder, invalidation, timeframe, news). Neutral. Do not invent news.`
+      `Answer: 1) READY TO STAGE | WAIT FOR PULLBACK | SKIP  2) why  3) ladder + invalidation  4) Timeframe: valid until / review by YYYY-MM-DD (today Manila ${todayManila})  5) news  6) End with markdown journal note: **Agent**, **Prompt: Spot Insights · Google review mini**, verdict, ladder, invalidation, timeframe, news. Neutral. Do not invent news.`
     );
   }
 
