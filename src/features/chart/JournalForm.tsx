@@ -31,9 +31,8 @@ export default function JournalForm({ defaultSymbol, onSubmit }: JournalFormProp
       return;
     }
 
-    const fallbackTitle = defaultSymbol ? `${defaultSymbol} Log` : "Trade Log";
-    // Keep title short — long agent prompts belong in notes, not title
-    const finalTitle = (title.trim() || fallbackTitle).slice(0, 200);
+    // Title optional — leave blank if empty (no auto "${symbol} Log")
+    const finalTitle = title.trim().slice(0, 120);
 
     setSubmitting(true);
     try {
@@ -97,7 +96,7 @@ export default function JournalForm({ defaultSymbol, onSubmit }: JournalFormProp
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           maxLength={200}
-          placeholder={`e.g. Agent review (defaults to ${defaultSymbol || "Trade Log"})`}
+          placeholder="Optional — leave blank if you only need notes"
           className="rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
       </label>

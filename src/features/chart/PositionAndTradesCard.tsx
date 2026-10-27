@@ -131,10 +131,10 @@ function buildAgentPrompt(args: {
     lines.push(``);
     lines.push(`## Question`);
     lines.push(
-      `Given this open bag, when is a sensible time to **trim / sell** vs **hold**, and is **averaging down** justified only on a clear pullback?`
+      `Primary question: is it reasonable to **add / buy more** of ${base} now, or only on a deeper pullback, or **not add** at all?`
     );
     lines.push(
-      `Cover: invalidation, profit-take zones near resistance, and risk if support fails. Stay neutral — if the bag looks wrong, say exit/trim.`
+      `This is an **add / size** decision, not a default hold/exit review. Mention trim/exit only if the existing bag's thesis is clearly broken. Cover: levels for any add, size vs current holdings, invalidation, and risk if support fails. Stay neutral.`
     );
   } else {
     lines.push(``);
@@ -173,7 +173,7 @@ function buildAgentPrompt(args: {
   lines.push(``);
   lines.push(`## Answer format`);
   lines.push(
-    `1. Verdict: BUY / WAIT / SKIP` + (args.holding ? ` / HOLD / TRIM / EXIT` : ``)
+    `1. Verdict: ` + (args.holding ? `ADD / ADD ONLY ON PULLBACK / DO NOT ADD / TRIM` : `BUY / WAIT / SKIP`)
   );
   lines.push(`2. Why (max 3 bullets) — neutral; include downside if relevant`);
   lines.push(`3. Levels to watch (entry / invalidation / take-profit) or "none — stay in cash"`);
@@ -204,11 +204,11 @@ function buildAgentPrompt(args: {
   lines.push(``);
   lines.push("```markdown");
   if (args.holding) {
-    lines.push(`## ${args.symbol} · hold/exit note · ${todayManila} (Manila)`);
+    lines.push(`## ${args.symbol} · add / size note · ${todayManila} (Manila)`);
     lines.push(``);
     lines.push(`- **Agent:** (ChatGPT / Grok / Gemini / other — name the model)`);
-    lines.push(`- **Prompt:** Spot · Position & trades · hold/sell research`);
-    lines.push(`- **Verdict:** HOLD | WAIT | TRIM | EXIT`);
+    lines.push(`- **Prompt:** Spot · Position & trades · add/size research`);
+    lines.push(`- **Verdict:** ADD | ADD ONLY ON PULLBACK | DO NOT ADD | TRIM`);
     lines.push(`- **Price now:** …`);
     lines.push(`- **Avg cost / unrealized:** …`);
     lines.push(`- **Last pump / local high:** date · peak · why it may have faded (or n/a)`);
@@ -317,7 +317,7 @@ export default function PositionAndTradesCard({
           onClick={() => void copyPrompt()}
           className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-900 hover:bg-indigo-100"
         >
-          {copied ? "✅ Copied" : holding ? "📋 Agent: hold / sell?" : "📋 Agent: buy advice?"}
+          {copied ? "✅ Copied" : holding ? "📋 Agent: add more?" : "📋 Agent: buy advice?"}
         </button>
       </div>
 

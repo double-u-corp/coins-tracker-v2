@@ -452,7 +452,7 @@ export default function HomeTable() {
           <div className="flex items-center gap-3 flex-wrap">
             <Link
               href="/long-scan"
-              className="text-xs font-bold text-indigo-700 hover:underline"
+              className="inline-flex items-center gap-1.5 rounded-md border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-bold text-indigo-900 shadow-sm hover:bg-indigo-100"
             >
               📡 LONG scan →
             </Link>
@@ -791,13 +791,13 @@ export default function HomeTable() {
         </>
       )}
 
-      <p className="mt-2 mb-2 text-xs text-gray-500">Target prices are set from the Manage Coins page.</p>
+                  <p className="mt-2 text-xs text-gray-500">Target prices are set from the Manage Coins page.</p>
 
-      {/* 1) Macro watch — after market signals */}
-      <HomeMacroWatch />
-
-      {/* 2) Market Signals (Core outlet + Price & RSS) */}
+      {/* 1) Market Signals (Core outlet + Price & RSS) */}
       <NewsSection />
+
+      {/* 2) Macro watch — after market signals */}
+      <HomeMacroWatch />
 
       {/* 3) General journal */}
       <div className="mt-8 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">

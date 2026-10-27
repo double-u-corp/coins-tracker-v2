@@ -691,7 +691,7 @@ export default function LongScanView() {
                   >
                     <div className="flex items-start justify-between gap-2 mb-1">
                       <div className="min-w-0">
-                        <div className="text-sm font-bold text-gray-900 truncate">{e.title}</div>
+                        <div className="text-sm font-bold text-gray-900 truncate">{e.title?.trim() || ""}</div>
                         <div className="text-[10px] text-gray-500 mt-0.5">
                           {e.symbol ? (
                             <span className="font-semibold text-indigo-700">{e.symbol}</span>

@@ -162,7 +162,7 @@ export default function JournalSidebar({
                             {formatDate(entry.entryDate)}
                             {entry.symbol && <span className="ml-1 text-gray-400">· {entry.symbol}</span>}
                           </div>
-                          <div className="text-sm font-semibold text-gray-900">{entry.title}</div>
+                          <div className="text-sm font-semibold text-gray-900">{entry.title?.trim() ?? ""}</div>
                         </div>
                         {authenticated && (
                           <div className="flex items-center gap-1 shrink-0">

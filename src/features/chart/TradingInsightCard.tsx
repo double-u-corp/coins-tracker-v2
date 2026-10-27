@@ -160,9 +160,9 @@ export function formatEntryReviewPrompt(
   const lines: string[] = [];
 
   if (isAllocated) {
-    lines.push(`You are reviewing an **open spot LONG** in **${label}**.`);
+    lines.push(`You are reviewing an **open spot LONG** in **${label}** for a possible **add (buy more)**.`);
     lines.push(`Local PHP spot pair symbol in the app: **${pair}** (underlying asset ticker: **${base}**). When searching news, use **${base}** / the crypto project name — not “${pair}” and not non-crypto meanings of “${base}”.`);
-    lines.push(`The trader **already holds** this coin. **No shorting. No leverage.** Question: **hold, trim/sell, or wait** — not "should I open a new bag from zero."`);
+    lines.push(`The trader **already holds** this coin. **No shorting. No leverage.** Primary question: is it reasonable to **add / buy more** at current levels (or only on a deeper pullback) — not a fresh bag from zero, and **not** primarily a hold/exit review.`);
   } else {
     lines.push(`You are reviewing a **spot LONG-only** entry for **${label}**.`);
     lines.push(`Local PHP spot pair symbol in the app: **${pair}** (underlying asset ticker: **${base}**). When searching news, use **${base}** / the crypto project name — not “${pair}” and not non-crypto meanings of “${base}”.`);
@@ -200,22 +200,22 @@ export function formatEntryReviewPrompt(
       lines.push(`  - Long hold underwater with no catalyst → patience or thesis review, not revenge adds.`);
       lines.push(`  - Short hold + extended into resistance → trims more reasonable than waiting forever.`);
     }
-    lines.push(`- Use this to judge **trim / full exit / hold** — average-down only if technicals + verified news support it.`);
+    lines.push(`- Use this to judge **whether to ADD more size** — average-down only if technicals + verified news support it; otherwise DO NOT ADD.`);
     lines.push(``);
   }
 
   lines.push(`## Rules`);
   lines.push(`- **Stance: NEUTRAL.** Do not default to bullish or "talk the trader into staying long."`);
-  lines.push(`- If technicals and/or verified news are weak, risk-off, or bearish → say so clearly (WAIT / SKIP / TRIM / SELL as fits). Do not soften a bearish read into HOLD out of optimism.`);
+  lines.push(`- If technicals and/or verified news are weak, risk-off, or bearish → say so clearly (DO NOT ADD / SKIP / WAIT as fits). Do not soften a weak case into ADD out of optimism.`);
   lines.push(`- Primary filter = technical snapshot below; news is secondary and only when verified.`);
   lines.push(`- You MAY search live **crypto-specific** news (protocol, exchange, regulation, ETF, unlocks, exploits); do NOT use training-memory headlines.`);
   lines.push(`- Skip routine macro calendars unless a clear, timely crypto link. Do not invent news. Unverified → "none verified".`);
   lines.push(`- Balanced view: list both supportive and negative factors when both exist; do not cherry-pick only bullish points.`);
   if (isAllocated) {
-    lines.push(`- **Verified positive catalysts** may support HOLD or a short wait — only when they outweigh technical risk.`);
-    lines.push(`- **Verified bad news** (unlock dump, delist risk, exploit, regulatory hit) → lean TRIM or SELL even if price has not fully reacted.`);
-    lines.push(`- Extended into resistance with empty/mixed news → consider TRIM, not hopeful HOLD.`);
-    lines.push(`- Underwater with no catalyst → patient hold or adds only on weakness are options; never revenge-buy. Selling is allowed when thesis is broken.`);
+    lines.push(`- **Verified positive catalysts** may support a small ADD or ADD ONLY ON PULLBACK — only when they outweigh technical risk and concentration risk.`);
+    lines.push(`- **Verified bad news** → lean DO NOT ADD (and TRIM only if the existing bag thesis is broken).`);
+    lines.push(`- Extended into resistance with empty/mixed news → DO NOT ADD; do not average up into strength without a plan.`);
+    lines.push(`- Underwater with no catalyst → DO NOT ADD / only consider adds on clear weakness with invalidation; never revenge-buy.`);
   } else {
     lines.push(`- SHORT / risk-off bias → hold cash / do not buy (never recommend shorting).`);
     lines.push(`- Price extended above the ladder → WAIT FOR PULLBACK over chasing.`);
@@ -305,18 +305,15 @@ export function formatEntryReviewPrompt(
   });
 
   if (isAllocated) {
-    lines.push(`## Answer format (position open)`);
-    lines.push(`1. Verdict: **HOLD** | **WAIT A FEW MORE DAYS** | **TRIM (partial sell)** | **SELL (exit)**`);
-    lines.push(`2. Why (max 3 technical bullets; max 2 verified news bullets)`);
-    lines.push(`3. If TRIM/SELL: urgency (now vs into resistance) and what would justify holding instead`);
-    lines.push(`4. If HOLD/WAIT: price or event that should flip you to sell`);
-    lines.push(`5. Relate to break-even and days held when relevant`);
-    lines.push(`6. **Timeframe (required):** give a calendar window anchored to today **${todayManila} (Manila)**.`);
-    lines.push(`   - Prefer: **valid until YYYY-MM-DD** and/or **review again by YYYY-MM-DD**.`);
-    lines.push(`   - Also state a rough hold horizon if useful (e.g. 3–7 days, 1–2 weeks) — must still include at least one concrete date.`);
-    lines.push(`   - If uncertain, say so and give a short default review date (e.g. +3 or +7 Manila days), not an open-ended hold.`);
+    lines.push(`## Answer format (already holding — add / size decision)`);
+    lines.push(`1. Verdict: **ADD** | **ADD ONLY ON PULLBACK** | **DO NOT ADD** | **TRIM** (only if size is already too large / thesis broken)`);
+    lines.push(`2. Why (max 3 technical bullets; max 2 verified news bullets) — focus on **whether buying more is justified**`);
+    lines.push(`3. If ADD / ADD ONLY ON PULLBACK: which levels (ladder / support), suggested size relative to current bag (e.g. smaller tranche), and what invalidates the add`);
+    lines.push(`4. If DO NOT ADD: whether to leave the bag as-is (no new buy) — mention exit only if thesis is clearly broken`);
+    lines.push(`5. Relate to avg cost, unrealized %, and days held when relevant (averaging down only if technicals + verified news support it)`);
+    lines.push(`6. **Timeframe (required):** calendar window anchored to today **${todayManila} (Manila)** — **valid until** and/or **review again by YYYY-MM-DD**`);
     lines.push(`7. News: verified only, or "none verified"`);
-    lines.push(`8. Then output the **Final journal note** block exactly as specified below — this is the text the trader **copies into the app journal**. Keep it short, factual, and ready to paste.`);
+    lines.push(`8. Then output the **Final journal note** block exactly as specified below — text the trader **copies into the app journal**.`);
   } else {
     lines.push(`## Answer format (no position)`);
     lines.push(`1. Verdict: **READY TO STAGE** | **WAIT FOR PULLBACK** | **SKIP**`);
@@ -343,17 +340,16 @@ export function formatEntryReviewPrompt(
   lines.push(``);
   lines.push('```markdown');
   if (isAllocated) {
-    lines.push(`## ${pair} · hold/exit note · ${todayManila} (Manila)`);
+    lines.push(`## ${pair} · add / size note · ${todayManila} (Manila)`);
     lines.push(``);
     lines.push(`- **Agent:** (ChatGPT / Grok / Gemini / other — name the model)`);
-    lines.push(`- **Prompt:** Spot Insights · Copy hold/exit review (full confluence)`);
-    lines.push(`- **Verdict:** HOLD | WAIT | TRIM | SELL`);
+    lines.push(`- **Prompt:** Spot Insights · Copy add/size review (full confluence)`);
+    lines.push(`- **Verdict:** ADD | ADD ONLY ON PULLBACK | DO NOT ADD | TRIM`);
     lines.push(`- **Price now:** …`);
-    lines.push(`- **Break-even / avg cost:** …`);
-    lines.push(`- **Unrealized:** …% / … PHP`);
+    lines.push(`- **Avg cost / unrealized:** …`);
+    lines.push(`- **Add levels / size note:** …`);
     lines.push(`- **Last pump / local high (if relevant):** date · peak · why it may have faded`);
-    lines.push(`- **Sell / trim if price hits:** …`);
-    lines.push(`- **Invalidation (thesis broken if):** …`);
+    lines.push(`- **Invalidation (add thesis broken if):** …`);
     lines.push(`- **Timeframe — valid until:** YYYY-MM-DD`);
     lines.push(`- **Review again by:** YYYY-MM-DD`);
     lines.push(`- **News (verified only):** …`);
@@ -409,7 +405,7 @@ export function formatEntryReviewPromptForGoogle(
 
   if (isAllocated) {
     parts.push(
-      `Spot LONG review (already holding) ${label}. Pair ${pair}; search news as ${base} crypto not index/other meanings. No short/leverage. Be NEUTRAL — do not default bullish; if bearish/weak say TRIM/SELL/WAIT. Hold, trim, or wait?`
+      `Spot LONG review (already holding) ${label}. Pair ${pair}; search news as ${base} crypto. No short/leverage. Be NEUTRAL. Primary question: ADD more / ADD only on pullback / DO NOT ADD? Exit/trim only if thesis broken.`
     );
     if (avgCost != null) {
       parts.push(`Avg cost ~${avgCost.toFixed(4)}; price ${c.currentPrice}; holdings ${holdings}.`);
@@ -477,7 +473,7 @@ export function formatEntryReviewPromptForGoogle(
 
   if (isAllocated) {
     parts.push(
-      `Answer: 1) HOLD | WAIT | TRIM | SELL  2) why  3) sell/trim trigger price  4) invalidation  5) Timeframe: valid until + review by YYYY-MM-DD (today Manila ${todayManila})  6) news  7) End with markdown journal note: **Agent**, **Prompt: Spot Insights · Google review mini**, verdict, levels, timeframe, news. Neutral stance. Do not invent news.`
+      `Answer: 1) ADD | ADD ONLY ON PULLBACK | DO NOT ADD | TRIM  2) why  3) add levels/size or why not  4) invalidation  5) Timeframe valid until/review by YYYY-MM-DD (today Manila ${todayManila})  6) news  7) Journal note with Agent + Prompt: Spot Insights · Google review mini. Neutral. Do not invent news.`
     );
   } else {
     parts.push(
@@ -604,7 +600,7 @@ export default function TradingInsightCard({
             {agentCopied
               ? "✅ Copied"
               : activePortfolio && activePortfolio.holdings > 0
-                ? "📋 Copy hold/exit review"
+                ? "📋 Copy add/size review"
                 : "📋 Copy entry review"}
           </button>
           <button
