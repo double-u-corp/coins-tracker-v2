@@ -314,41 +314,37 @@ export default function ManageCoinsView() {
     <div className="flex flex-col gap-8">
       {actionError && <AlertBanner variant="error" message={actionError} />}
       
-      {/* Navigation Header in Manage View */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-        <Link 
-          href="/" 
-          className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors"
+      {/* Navigation — same button size/style as Spot & Calendar */}
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
+        <Link
+          href="/"
+          className="inline-flex items-center justify-center gap-1 rounded-md border border-slate-200 bg-white text-slate-700 px-2.5 py-1.5 text-[11px] sm:text-xs font-semibold whitespace-nowrap shadow-sm hover:bg-slate-50 transition-colors"
         >
-          <span>←</span>
-          <span>Back to Home</span>
+          <span aria-hidden>←</span>
+          <span>Home</span>
         </Link>
-
-        {/* 2. Dynamically forward active symbol to View Chart and View Calendar buttons */}
-        <div className="flex items-center gap-2">
-          <Link
-            href={
-              activeCoinFilter
-                ? `/chart?symbol=${encodeURIComponent(activeCoinFilter.toUpperCase())}`
-                : "/chart"
-            }
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-3 py-1.5 rounded-md hover:bg-blue-100 transition-colors"
-          >
-            <span>📈</span>
-            <span>View Chart</span>
-          </Link>
-          <Link
-            href={
-              activeCoinFilter
-                ? `/calendar?symbol=${encodeURIComponent(activeCoinFilter.toUpperCase())}`
-                : "/calendar"
-            }
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-md hover:bg-purple-100 transition-colors"
-          >
-            <span>📅</span>
-            <span>View Calendar</span>
-          </Link>
-        </div>
+        <Link
+          href={
+            activeCoinFilter
+              ? `/chart?symbol=${encodeURIComponent(activeCoinFilter.toUpperCase())}`
+              : "/chart"
+          }
+          className="inline-flex items-center justify-center gap-1 rounded-md border border-blue-200 bg-blue-50 text-blue-800 px-2.5 py-1.5 text-[11px] sm:text-xs font-semibold whitespace-nowrap shadow-sm hover:bg-blue-100 transition-colors"
+        >
+          <span aria-hidden>📈</span>
+          <span>Spot</span>
+        </Link>
+        <Link
+          href={
+            activeCoinFilter
+              ? `/calendar?symbol=${encodeURIComponent(activeCoinFilter.toUpperCase())}`
+              : "/calendar"
+          }
+          className="inline-flex items-center justify-center gap-1 rounded-md border border-purple-200 bg-purple-50 text-purple-800 px-2.5 py-1.5 text-[11px] sm:text-xs font-semibold whitespace-nowrap shadow-sm hover:bg-purple-100 transition-colors"
+        >
+          <span aria-hidden>📅</span>
+          <span>Calendar</span>
+        </Link>
       </div>
       
       {/* Currently Monitored Cards Section */}
