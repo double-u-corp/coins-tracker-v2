@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/features/auth/useAuth";
 import type { CoinSummary, NewRecordAlert } from "@/validators/recordSchema";
+import type { JournalEntryView } from "@/validators/journalSchema";
 
 interface HomeState {
   coins: CoinSummary[];
@@ -88,6 +89,11 @@ export function useHomeLogic() {
 
   const [portfolio, setPortfolio] = useState<any[]>([]);
   const [cronTriggering, setCronTriggering] = useState(false);
+
+  const [journalEntries, setJournalEntries] = useState<JournalEntryView[]>([]);
+  const [journalLoading, setJournalLoading] = useState(false);
+  const [journalError, setJournalError] = useState<string | null>(null);
+
 
   const loadSummary = useCallback(async () => {
     try {
@@ -506,6 +512,78 @@ export function useHomeLogic() {
     }
   }
 
+  const loadJournal = useCallback(async () => {
+    setJournalLoading(true);
+    setJournalError(null);
+    try {
+      const from = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      // empty symbol → general notes only (server/client filter)
+      const res = await fetch(`/api/journal?symbol=&from=${from}`);
+      if (!res.ok) throw new Error(`Failed to load journal (${res.status})`);
+      const data = (await res.json()) as { entries: JournalEntryView[] };
+      const general = (data.entries || []).filter((e) => !e.symbol);
+      setJournalEntries(general);
+    } catch (err) {
+      setJournalError((err as Error).message);
+      setJournalEntries([]);
+    } finally {
+      setJournalLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadJournal();
+  }, [loadJournal]);
+
+  async function addJournalEntry(input: {
+    symbol: string | null;
+    entryDate: string;
+    title: string;
+    notes: string;
+  }) {
+    const res = await fetch("/api/journal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...input, symbol: input.symbol || null }),
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(
+        (errData as { error?: string; message?: string }).error ||
+          (errData as { message?: string }).message ||
+          "Failed to save journal entry"
+      );
+    }
+    await loadJournal();
+  }
+
+  async function updateJournalEntry(id: number, input: { title?: string; notes?: string }) {
+    const res = await fetch("/api/journal", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, ...input }),
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(
+        (errData as { error?: string; message?: string }).error ||
+          (errData as { message?: string }).message ||
+          "Failed to update entry"
+      );
+    }
+    await loadJournal();
+  }
+
+  async function deleteJournalEntry(id: number) {
+    const res = await fetch("/api/journal", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    if (!res.ok) throw new Error("Failed to delete journal entry");
+    await loadJournal();
+  }
+
   return {
     ...state,
     allCoins: state.coins,
@@ -517,6 +595,13 @@ export function useHomeLogic() {
     setSelectedCoins,
     portfolio,
     canUpdatePrice: authenticated,
+    authenticated,
+    journalEntries,
+    journalLoading,
+    journalError,
+    addJournalEntry,
+    updateJournalEntry,
+    deleteJournalEntry,
     priceUpdateCoin,
     priceUpdateModalOpen,
     priceUpdateValue,

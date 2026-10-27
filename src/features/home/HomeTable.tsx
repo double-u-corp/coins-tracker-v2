@@ -6,6 +6,7 @@ import { useHomeLogic } from "./useHomeLogic";
 import NewRecordModal from "./NewRecordModal";
 import HomeMacroWatch from "./HomeMacroWatch";
 import NewsSection from "./NewsSection";
+import JournalSidebar from "@/features/chart/JournalSidebar";
 import PriceUpdateModal from "./PriceUpdateModal";
 import type { CoinSummary } from "@/validators/recordSchema";
 import { parsePriceMovePercents } from "./priceMoveSignals";
@@ -146,7 +147,14 @@ export default function HomeTable() {
     closeAlertModal,
     cronTriggering,
     triggerCronManually,
-  } = useHomeLogic();
+    authenticated,
+    journalEntries,
+    journalLoading,
+    journalError,
+    addJournalEntry,
+    updateJournalEntry,
+    deleteJournalEntry,
+} = useHomeLogic();
 
   const [movePctBySymbol, setMovePctBySymbol] = useState<Record<string, number>>({});
   const [directionCopied, setDirectionCopied] = useState(false);
@@ -424,17 +432,6 @@ export default function HomeTable() {
       <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-gray-900">Coin Prices</h1>
-          {canUpdatePrice && (
-            <button
-              type="button"
-              onClick={triggerCronManually}
-              disabled={cronTriggering}
-              className="inline-flex items-center justify-center gap-1 rounded bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-50 transition-colors shadow-sm"
-              title="Manually trigger cron job execution"
-            >
-              <span>{cronTriggering ? "⏳ Running..." : "⚡ Run Cron"}</span>
-            </button>
-          )}
         </div>
       </div>
 
@@ -551,6 +548,41 @@ export default function HomeTable() {
                           })()}
                         </div>
                       )}
+                      {(() => {
+                        const pos = portfolio?.find(
+                          (p: { symbol?: string }) =>
+                            p.symbol?.toUpperCase() === card.symbol.toUpperCase()
+                        ) as
+                          | { holdings?: number; spent?: number }
+                          | undefined;
+                        const holdings = pos?.holdings ?? 0;
+                        const spent = pos?.spent ?? 0;
+                        if (!(holdings > 0 && spent > 0 && card.currentPrice != null && card.currentPrice > 0))
+                          return null;
+                        const avg = spent / holdings;
+                        const mtm = holdings * card.currentPrice;
+                        const pnlPhp = mtm - spent;
+                        const pnlPct = ((card.currentPrice - avg) / avg) * 100;
+                        const up = pnlPct >= 0;
+                        return (
+                          <div
+                            className={`mt-1 text-[11px] font-semibold tabular-nums ${
+                              up ? "text-emerald-700" : "text-rose-700"
+                            }`}
+                          >
+                            Unrealized vs average{" "}
+                            <span className="font-bold">
+                              {up ? "+" : ""}
+                              {pnlPct.toFixed(2)}%
+                            </span>
+                            <span className="text-gray-500 font-medium">
+                              {" "}
+                              ({up ? "+" : "−"}
+                              {formatPhp(Math.abs(pnlPhp))})
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </div>
                     <Link
                       href={`/chart?symbol=${encodeURIComponent(card.symbol)}`}
@@ -759,11 +791,37 @@ export default function HomeTable() {
         </>
       )}
 
-      <p className="mt-2 text-xs text-gray-500">Target prices are set from the Manage Coins page.</p>
+      <p className="mt-2 mb-2 text-xs text-gray-500">Target prices are set from the Manage Coins page.</p>
 
+      {/* 1) Macro watch — after market signals */}
       <HomeMacroWatch />
 
+      {/* 2) Market Signals (Core outlet + Price & RSS) */}
       <NewsSection />
+
+      {/* 3) General journal */}
+      <div className="mt-8 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex items-center justify-between border-b border-gray-100 pb-3">
+          <div>
+            <h3 className="text-base font-semibold text-gray-900">
+              🌍 General Market Journal &amp; Notes
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Track macro updates, news, and notes not tied to a specific coin.
+            </p>
+          </div>
+        </div>
+        <JournalSidebar
+          entries={journalEntries}
+          loading={journalLoading}
+          error={journalError}
+          defaultSymbol=""
+          authenticated={authenticated}
+          onAdd={addJournalEntry}
+          onDelete={deleteJournalEntry}
+          onUpdate={updateJournalEntry}
+        />
+      </div>
     </div>
   );
 }

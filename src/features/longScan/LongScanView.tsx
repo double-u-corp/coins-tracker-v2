@@ -33,8 +33,6 @@ type Run = {
   hits: Hit[];
 };
 
-const MANILA_RUN_HOURS = [2, 5, 8, 11, 14, 17, 20, 23];
-
 function formatWhen(iso: string) {
   try {
     return new Date(iso).toLocaleString(undefined, {
@@ -47,24 +45,14 @@ function formatWhen(iso: string) {
   }
 }
 
-function nextScheduledRun(from = new Date()): Date {
-  const manilaMs = from.getTime() + 8 * 60 * 60 * 1000;
-  const d = new Date(manilaMs);
-  const y = d.getUTCFullYear();
-  const mo = d.getUTCMonth();
-  const day = d.getUTCDate();
-
-  for (let add = 0; add <= 1; add++) {
-    const base = new Date(Date.UTC(y, mo, day + add));
-    for (const hour of MANILA_RUN_HOURS) {
-      const candidateManila = new Date(
-        Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(), hour, 10, 0)
-      );
-      const utc = new Date(candidateManila.getTime() - 8 * 60 * 60 * 1000);
-      if (utc.getTime() > from.getTime() + 30_000) return utc;
-    }
-  }
-  return new Date(from.getTime() + 3 * 60 * 60 * 1000);
+/** Lower = higher priority (LONG bias first). */
+function biasRank(bias: string): number {
+  const b = (bias || "").toUpperCase();
+  if (b.includes("STRONG LONG")) return 0;
+  if (b.includes("LONG") && !b.includes("SHORT")) return 1;
+  if (b.includes("NEUTRAL")) return 2;
+  if (b.includes("SHORT")) return 3;
+  return 4;
 }
 
 function tierLabel(tier: string) {
@@ -96,14 +84,7 @@ export default function LongScanView() {
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
-  const [now, setNow] = useState(() => new Date());
 
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 60_000);
-    return () => clearInterval(t);
-  }, []);
-
-  const nextRun = useMemo(() => nextScheduledRun(now), [now]);
 
   /** Flatten hits across runs → group by coin (newest first). */
   const coinGroups = useMemo(() => {
@@ -121,11 +102,23 @@ export default function LongScanView() {
       }
     }
     const groups = [...map.values()].map((g) => {
-      g.rows.sort((a, b) => b.scannedAt.localeCompare(a.scannedAt));
+      g.rows.sort((a, b) => {
+        const biasCmp = biasRank(a.bias) - biasRank(b.bias);
+        if (biasCmp !== 0) return biasCmp;
+        return b.scannedAt.localeCompare(a.scannedAt);
+      });
       return g;
     });
-    // Sort coins: most recent hit first, then symbol
+    // Sort coins: best LONG bias in history first, then best score, then newest scan
     groups.sort((a, b) => {
+      const bestBias = (rows: typeof a.rows) =>
+        Math.min(...rows.map((r) => biasRank(r.bias)), 99);
+      const bestScore = (rows: typeof a.rows) =>
+        Math.max(...rows.map((r) => r.score ?? -999), -999);
+      const biasCmp = bestBias(a.rows) - bestBias(b.rows);
+      if (biasCmp !== 0) return biasCmp;
+      const scoreCmp = bestScore(b.rows) - bestScore(a.rows);
+      if (scoreCmp !== 0) return scoreCmp;
       const at = a.rows[0]?.scannedAt || "";
       const bt = b.rows[0]?.scannedAt || "";
       if (at !== bt) return bt.localeCompare(at);
@@ -138,6 +131,14 @@ export default function LongScanView() {
     () => runs.filter((r) => !r.hits?.length).length,
     [runs]
   );
+
+  const lastScanAt = useMemo(() => {
+    if (!runs.length) return null;
+    return runs
+      .map((r) => r.scannedAt)
+      .filter(Boolean)
+      .sort((a, b) => b.localeCompare(a))[0] || null;
+  }, [runs]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -179,7 +180,7 @@ export default function LongScanView() {
       setInfo(
         totalSaved > 0
           ? `Done · ${totalSaved} hit(s) across ${CHUNKS} chunks`
-          : `Done · no hits · next ~${formatWhen(nextScheduledRun().toISOString())}`
+          : `Done · no hits · last scan ${formatWhen(new Date().toISOString())}`
       );
       await load();
     } catch (err) {
@@ -256,8 +257,15 @@ export default function LongScanView() {
         <div>
           <h1 className="text-xl font-bold text-gray-900">LONG scan log</h1>
           <p className="text-sm text-gray-600 mt-1">
-            Schedule: every 3 hours at :10 Manila (14:10, 17:10, 20:10, …). Next:{" "}
-            <span className="font-bold text-indigo-800">{formatWhen(nextRun.toISOString())}</span>
+            {lastScanAt ? (
+              <>
+                Last scan:{" "}
+                <span className="font-bold text-indigo-800">{formatWhen(lastScanAt)}</span>
+                <span className="text-gray-500"> · Manila</span>
+              </>
+            ) : (
+              <>No scans yet — use Run scan now.</>
+            )}
           </p>
         </div>
         <button
@@ -292,16 +300,20 @@ export default function LongScanView() {
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
           <p className="font-semibold text-slate-800">No coin hits stored yet</p>
           <p className="mt-1 text-xs">
-            {runs.length} run(s) logged · {emptyRunCount} empty. Next:{" "}
-            <span className="font-semibold text-indigo-800">
-              {formatWhen(nextRun.toISOString())}
-            </span>
+            {runs.length} run(s) logged · {emptyRunCount} empty
+            {lastScanAt ? (
+              <>
+                {" "}
+                · Last scan:{" "}
+                <span className="font-semibold text-indigo-800">{formatWhen(lastScanAt)}</span>
+              </>
+            ) : null}
           </p>
         </div>
       ) : (
         <div className="space-y-6">
           <p className="text-[11px] text-gray-500">
-            {coinGroups.length} coin(s) · grouped by symbol · newest scan first inside each card
+            {coinGroups.length} coin(s) · LONG bias first · then score · newest inside each card
           </p>
           {coinGroups.map((g) => {
             return (
@@ -346,7 +358,13 @@ export default function LongScanView() {
                             >
                               {tlab.text}
                             </span>
-                            <span className="text-[10px] font-bold text-slate-600">
+                            <span
+                              className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                                biasRank(h.bias) <= 1
+                                  ? "bg-emerald-600 text-white"
+                                  : "bg-slate-100 text-slate-700"
+                              }`}
+                            >
                               {h.bias} · {h.score >= 0 ? "+" : ""}
                               {h.score}/±{h.maxScore}
                             </span>

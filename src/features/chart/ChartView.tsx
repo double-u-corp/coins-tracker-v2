@@ -21,6 +21,11 @@ const PriceLineChart = dynamic(() => import("./PriceLineChart"), {
   ),
 });
 
+const pageNavBtn =
+  "inline-flex items-center justify-center gap-1 rounded-md border px-2.5 py-1.5 text-[11px] sm:text-xs font-semibold whitespace-nowrap transition-colors shadow-sm";
+const pageNavHome =
+  "inline-flex items-center justify-center gap-1 rounded-md border border-slate-200 bg-white text-slate-700 px-2.5 py-1.5 text-[11px] sm:text-xs font-semibold whitespace-nowrap transition-colors shadow-sm hover:bg-slate-50";
+
 const RANGE_OPTIONS: { label: string; value: ChartRange }[] = [
   { label: "1M", value: "1m" },
   { label: "3M", value: "3m" },
@@ -481,42 +486,63 @@ export default function ChartView() {
 
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Link
-          href="/"
-          className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors"
+    <div className="flex flex-col gap-6 relative pb-16 sm:pb-0">
+      {symbol && currentPrice > 0 && (
+        <div
+          className="floating-spot-price fixed bottom-3 left-3 right-3 z-40 sm:sticky sm:top-2 sm:bottom-auto sm:left-auto sm:right-auto sm:self-end sm:w-auto sm:z-30"
+          aria-live="polite"
         >
-          <span>←</span>
-          <span>Back to Home</span>
+          <div className="mx-auto flex max-w-lg items-center justify-between gap-3 rounded-xl border border-sky-300 bg-sky-50/95 px-3 py-2.5 shadow-lg backdrop-blur sm:mx-0 sm:max-w-none sm:shadow-md">
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold uppercase tracking-wide text-sky-800">
+                {coinRank != null ? `#${coinRank} · ` : ""}
+                {selectedCoin?.name || symbol}
+                <span className="font-mono font-semibold text-sky-700/80">
+                  {" "}
+                  {symbol}
+                </span>
+              </div>
+              <div className="text-base sm:text-lg font-extrabold tabular-nums text-sky-950">
+                {formatPhp(currentPrice)}
+              </div>
+            </div>
+            <span className="shrink-0 rounded-full bg-sky-600 px-2 py-0.5 text-[10px] font-bold uppercase text-white">
+              Now
+            </span>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+        <Link href="/" className={pageNavHome}>
+          <span aria-hidden>←</span>
+          <span>Home</span>
         </Link>
-
         {symbol && (
-          <div className="flex items-center gap-2">
+          <>
             <Link
-              href={`/calendar?symbol=${symbol}`}
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-md hover:bg-purple-100 transition-colors"
+              href={`/calendar?symbol=${encodeURIComponent(symbol)}`}
+              className={`${pageNavBtn} border-purple-200 bg-purple-50 text-purple-800 hover:bg-purple-100`}
             >
-              <span>📅</span>
-              <span>View Calendar</span>
+              <span aria-hidden>📅</span>
+              <span>Calendar</span>
             </Link>
-
             <Link
-              href={`/manage?symbol=${symbol}`}
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-md hover:bg-emerald-100 transition-colors"
+              href={`/manage?symbol=${encodeURIComponent(symbol)}`}
+              className={`${pageNavBtn} border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100`}
             >
-              <span>⚙️</span>
-              <span>Manage Coin</span>
+              <span aria-hidden>⚙️</span>
+              <span>Manage</span>
             </Link>
             <Link
               href="/long-scan"
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-md hover:bg-indigo-100 transition-colors"
-              title="LONG scan log — near-support + rising setups"
+              className={`${pageNavBtn} border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100`}
+              title="LONG scan log"
             >
-              <span>📡</span>
+              <span aria-hidden>📡</span>
               <span>LONG scan</span>
             </Link>
-          </div>
+          </>
         )}
       </div>
 

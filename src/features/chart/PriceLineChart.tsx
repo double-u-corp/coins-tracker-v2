@@ -240,7 +240,6 @@ export default function PriceLineChart({
         const hit = manilaH != null && m.hours.includes(manilaH);
         sessionFields[`sessionPrice${mi}`] = hit ? px : null;
       });
-      const isLast = index === points.length - 1;
       let buyPrice: number | null = null;
       if (buyMarks?.length && rawPeriod) {
         const tms = new Date(rawPeriod).getTime();
@@ -252,16 +251,12 @@ export default function PriceLineChart({
           }
         }
       }
-      const live =
-        currentPrice != null && Number.isFinite(currentPrice) ? Number(currentPrice) : null;
       return {
         ...p,
         price: px,
         buyPrice,
         hotPrice: isHotSlot ? px : null,
         isHotSlot,
-        // Distinct marker for live price on the latest bar only
-        currentDot: isLast && live != null ? live : null,
         ...sessionFields,
         sma20: sma20Series[index] ?? undefined,
         sma50: sma50Series[index] ?? undefined,
@@ -360,12 +355,6 @@ export default function PriceLineChart({
             <IndicatorPill active={overlayControls.showR2} onClick={overlayControls.onToggleR2} color="red" label="R2" />
           </>
         )}
-        {currentPrice != null && Number.isFinite(currentPrice) && (
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-900">
-            <span className="h-2.5 w-2.5 rounded-full bg-sky-500 ring-2 ring-white shadow" />
-            Now {formatPhp(Number(currentPrice))}
-          </span>
-        )}
       </div>
 
       <div className="h-[22rem] sm:h-[28rem] w-full -ml-2 sm:ml-0">
@@ -438,28 +427,6 @@ export default function PriceLineChart({
               connectNulls={false}
               isAnimationActive={false}
             />
-            {currentPrice != null && Number.isFinite(currentPrice) && (
-              <Line
-                type="monotone"
-                dataKey="currentDot"
-                stroke="none"
-                dot={{
-                  r: isMobile ? 3.5 : 5,
-                  fill: "#0ea5e9",
-                  stroke: "#fff",
-                  strokeWidth: isMobile ? 1.5 : 2,
-                }}
-                activeDot={{
-                  r: isMobile ? 4 : 6,
-                  fill: "#0284c7",
-                  stroke: "#fff",
-                  strokeWidth: 1.5,
-                }}
-                name="Current price"
-                connectNulls={false}
-                isAnimationActive={false}
-              />
-            )}
             {highlightHotSlots && (
               <Line
                 type="monotone"

@@ -53,6 +53,11 @@ function buildPollsByDay(points: unknown[] | null): Map<string, Map<number, Poll
   return byDay;
 }
 
+const pageNavBtn =
+  "inline-flex items-center justify-center gap-1 rounded-md border px-2.5 py-1.5 text-[11px] sm:text-xs font-semibold whitespace-nowrap transition-colors shadow-sm";
+const pageNavHome =
+  "inline-flex items-center justify-center gap-1 rounded-md border border-slate-200 bg-white text-slate-700 px-2.5 py-1.5 text-[11px] sm:text-xs font-semibold whitespace-nowrap transition-colors shadow-sm hover:bg-slate-50";
+
 export default function CalendarView() {
   const {
     coinOptions,
@@ -227,50 +232,68 @@ export default function CalendarView() {
   };
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5 pb-10">
-      {/* Top bar — same button style as Chart page (rounded-md, not pills) */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <Link
-          href="/"
-          className="inline-flex w-fit items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors"
+    <div className="mx-auto flex max-w-6xl flex-col gap-5 pb-20 sm:pb-10 relative">
+      {selectedSymbol && nowPrice != null && nowPrice > 0 && (
+        <div
+          className="fixed bottom-3 left-3 right-3 z-40 sm:sticky sm:top-2 sm:bottom-auto sm:self-end sm:w-auto sm:z-30"
+          aria-live="polite"
         >
-          <span>←</span>
-          <span>Back to Home</span>
-        </Link>
+          <div className="mx-auto flex max-w-lg items-center justify-between gap-3 rounded-xl border border-sky-300 bg-sky-50/95 px-3 py-2.5 shadow-lg backdrop-blur sm:mx-0 sm:max-w-none sm:shadow-md">
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold uppercase tracking-wide text-sky-800">
+                {currentSortedCoin ? `#${currentSortedCoin.rank} · ` : ""}
+                {coinOptions.find((c) => c.symbol === selectedSymbol)?.name || selectedSymbol}
+                <span className="font-mono font-semibold text-sky-700/80"> {selectedSymbol}</span>
+              </div>
+              <div className="text-base sm:text-lg font-extrabold tabular-nums text-sky-950">
+                {formatPhp(nowPrice)}
+              </div>
+            </div>
+            <span className="shrink-0 rounded-full bg-sky-600 px-2 py-0.5 text-[10px] font-bold uppercase text-white">
+              Now
+            </span>
+          </div>
+        </div>
+      )}
 
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+        <Link href="/" className={pageNavHome}>
+          <span aria-hidden>←</span>
+          <span>Home</span>
+        </Link>
         {selectedSymbol && (
-          <div className="flex flex-wrap items-center gap-2">
+          <>
             <button
               type="button"
               onClick={handleCopySummary}
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-md hover:bg-purple-100 transition-colors"
+              className={`${pageNavBtn} border-violet-200 bg-violet-50 text-violet-800 hover:bg-violet-100`}
             >
-              <span>📋</span>
-              <span>{copied ? "Copied!" : "Copy Summary"}</span>
+              <span aria-hidden>📋</span>
+              <span>{copied ? "Copied!" : "Copy"}</span>
             </button>
             <Link
               href={`/chart?symbol=${encodeURIComponent(selectedSymbol)}`}
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-3 py-1.5 rounded-md hover:bg-blue-100 transition-colors"
+              className={`${pageNavBtn} border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100`}
             >
-              <span>📈</span>
-              <span>View Chart</span>
+              <span aria-hidden>📈</span>
+              <span>Spot</span>
             </Link>
             <Link
               href={`/manage?symbol=${encodeURIComponent(selectedSymbol)}`}
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-md hover:bg-emerald-100 transition-colors"
+              className={`${pageNavBtn} border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100`}
             >
-              <span>⚙️</span>
-              <span>Manage Coin</span>
+              <span aria-hidden>⚙️</span>
+              <span>Manage</span>
             </Link>
             <button
               type="button"
               onClick={() => setSelectedSymbol("")}
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-md hover:bg-purple-100 transition-colors"
+              className={`${pageNavBtn} border-purple-200 bg-purple-50 text-purple-800 hover:bg-purple-100`}
             >
-              <span>🌐</span>
-              <span>Market Overview</span>
+              <span aria-hidden>🌐</span>
+              <span>Overview</span>
             </button>
-          </div>
+          </>
         )}
       </div>
 
@@ -330,7 +353,7 @@ export default function CalendarView() {
       {/* Single-coin stats */}
       {!loading && !error && selectedSymbol && (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          {/* <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex flex-wrap items-center gap-2 min-w-0">
               {currentSortedCoin && (
                 <span className="rounded-full bg-violet-100 px-2.5 py-0.5 text-[11px] font-bold text-violet-800">
@@ -355,7 +378,7 @@ export default function CalendarView() {
                 </div>
               </div>
             )}
-          </div>
+          </div> */}
 
           {recordsWithData.length > 0 && (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
