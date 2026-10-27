@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { formatPhp } from "@/lib/format";
+import { findLastPumpContext } from "./TradingInsightCard";
 
 type Tx = {
   id: number | string;
@@ -24,6 +25,8 @@ type Props = {
   transactions: Tx[];
   support?: number | null;
   resistance?: number | null;
+  /** Daily chart points — used for last local high / pump context in agent prompt */
+  points?: { period?: string; high?: number; low?: number; close?: number }[] | null;
 };
 
 function recoveryTargets(avg: number) {
@@ -48,6 +51,7 @@ function buildAgentPrompt(args: {
   support: number | null | undefined;
   resistance: number | null | undefined;
   txs: Tx[];
+  points?: { period?: string; high?: number; low?: number; close?: number }[] | null;
 }): string {
   const base = args.symbol.replace(/PHP$/i, "") || args.symbol;
   const price = args.currentPrice;
@@ -78,6 +82,27 @@ function buildAgentPrompt(args: {
   lines.push(`- Price now: ${price}`);
   if (args.support != null) lines.push(`- App support ref: ~${args.support}`);
   if (args.resistance != null) lines.push(`- App resistance ref: ~${args.resistance}`);
+
+  const pump = findLastPumpContext(args.points || []);
+  if (pump) {
+    const pumpDate = pump.period
+      ? new Date(pump.period).toLocaleDateString("en-CA", {
+          timeZone: "Asia/Manila",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        })
+      : "unknown";
+    lines.push(``);
+    lines.push(`## Last local high / pump (app daily series)`);
+    lines.push(`- Peak ~**${pump.peak}** on **${pumpDate}** Manila (~${pump.daysAgo}d ago).`);
+    lines.push(
+      `- Now vs that peak: **−${Math.abs(pump.dropPct).toFixed(2)}%** (our poll data).`
+    );
+    lines.push(
+      `- Research: search **verified** news around **${pumpDate}** and after that may explain a run-up and why price is lower now (unlock, listing, exploit, regulatory, project news). Do not invent causes. If nothing verified, say "none verified".`
+    );
+  }
 
   if (args.holding && args.avg != null) {
     lines.push(``);
@@ -152,8 +177,8 @@ function buildAgentPrompt(args: {
   );
   lines.push(`2. Why (max 3 bullets) — neutral; include downside if relevant`);
   lines.push(`3. Levels to watch (entry / invalidation / take-profit) or "none — stay in cash"`);
-  lines.push(`4. News: verified only, or "none verified"`);
-  lines.push(`5. Timeframe note (when to recheck)`);
+  lines.push(`4. News: verified only, or "none verified" — include anything tied to the last pump date if relevant`);
+  lines.push(`5. Timeframe note (when to recheck) with at least one calendar date`);
   if (!args.holding) {
     lines.push(
       `6. Size note: ` +
@@ -162,6 +187,47 @@ function buildAgentPrompt(args: {
           : `comment on 1 coin vs more, and total PHP at risk`)
     );
   }
+  lines.push(
+    `${!args.holding ? "7" : "6"}. Then output the **Final journal note** markdown block — the trader copies it into the app journal.`
+  );
+  lines.push(``);
+  const todayManila = new Date().toLocaleDateString("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  lines.push(`## Final journal note (REQUIRED — pure markdown, copy-paste ready)`);
+  lines.push(
+    `End with ONLY this block (real newlines, no HTML). Fill fields; "n/a" if needed. Must still make sense in 3–7 days without the rest of the chat. **Always fill Agent** with your product name (e.g. ChatGPT, Grok, Gemini) and model if known.`
+  );
+  lines.push(``);
+  lines.push("```markdown");
+  if (args.holding) {
+    lines.push(`## ${args.symbol} · hold/exit note · ${todayManila} (Manila)`);
+    lines.push(``);
+    lines.push(`- **Verdict:** HOLD | WAIT | TRIM | EXIT`);
+    lines.push(`- **Price now:** …`);
+    lines.push(`- **Avg cost / unrealized:** …`);
+    lines.push(`- **Last pump / local high:** date · peak · why it may have faded (or n/a)`);
+    lines.push(`- **Sell / trim if:** …`);
+    lines.push(`- **Invalidation:** …`);
+    lines.push(`- **Review by:** YYYY-MM-DD`);
+    lines.push(`- **News (verified):** …`);
+    lines.push(`- **Why:** …`);
+  } else {
+    lines.push(`## ${args.symbol} · entry note · ${todayManila} (Manila)`);
+    lines.push(``);
+    lines.push(`- **Verdict:** BUY | WAIT | SKIP`);
+    lines.push(`- **Price now:** …`);
+    lines.push(`- **Last pump / local high:** date · peak · why price may be down now (or n/a)`);
+    lines.push(`- **Entry / invalidation / TP:** …`);
+    lines.push(`- **Size note:** …`);
+    lines.push(`- **Review by:** YYYY-MM-DD`);
+    lines.push(`- **News (verified):** …`);
+    lines.push(`- **Why:** …`);
+  }
+  lines.push("```");
   return lines.join("\n");
 }
 
@@ -172,6 +238,7 @@ export default function PositionAndTradesCard({
   transactions,
   support,
   resistance,
+  points = null,
 }: Props) {
   const [copied, setCopied] = useState(false);
 
@@ -198,6 +265,7 @@ export default function PositionAndTradesCard({
         spent,
         avg,
         pnlPct,
+        points,
         daysHeld: portfolio?.daysHeld ?? null,
         support,
         resistance,
@@ -215,6 +283,7 @@ export default function PositionAndTradesCard({
       support,
       resistance,
       transactions,
+      points,
     ]
   );
 

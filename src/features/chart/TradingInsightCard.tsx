@@ -94,6 +94,39 @@ function formatAssetLabel(symbol: string): { base: string; pair: string; label: 
 }
 
 /** Prompt for agent review — entry if flat, hold/exit if already allocated. */
+
+/** Recent peak on daily (or poll) series — "last pump" for drawdown context. */
+export function findLastPumpContext(
+  points: { period?: string; high?: number; low?: number; close?: number }[]
+): { period: string; peak: number; dropPct: number; daysAgo: number } | null {
+  if (!points?.length) return null;
+  const slice = points.slice(-90);
+  let bestIdx = -1;
+  let bestHigh = -Infinity;
+  for (let i = 0; i < slice.length; i++) {
+    const h = Number(slice[i].high ?? slice[i].close ?? 0);
+    if (Number.isFinite(h) && h > bestHigh) {
+      bestHigh = h;
+      bestIdx = i;
+    }
+  }
+  if (bestIdx < 0 || !Number.isFinite(bestHigh) || bestHigh <= 0) return null;
+  const last = slice[slice.length - 1];
+  const now = Number(last.close ?? last.high ?? last.low ?? 0);
+  if (!Number.isFinite(now) || now <= 0) return null;
+  // Only call it a pump peak if price has given back some ground since
+  const dropPct = ((bestHigh - now) / bestHigh) * 100;
+  if (dropPct < 1.5 && bestIdx >= slice.length - 2) return null;
+  const period = String(slice[bestIdx].period || "");
+  const peakMs = period ? new Date(period).getTime() : NaN;
+  const nowMs = last.period ? new Date(String(last.period)).getTime() : Date.now();
+  const daysAgo =
+    Number.isFinite(peakMs) && Number.isFinite(nowMs)
+      ? Math.max(0, Math.round((nowMs - peakMs) / 86400000))
+      : slice.length - 1 - bestIdx;
+  return { period, peak: bestHigh, dropPct: Number(dropPct.toFixed(2)), daysAgo };
+}
+
 export function formatEntryReviewPrompt(
   symbol: string,
   confluence: ReturnType<typeof computeConfluenceSignal>,
@@ -104,7 +137,8 @@ export function formatEntryReviewPrompt(
     firstBuyAt?: string | null;
     daysHeld?: number | null;
   } | null,
-  structureLevels?: StructureKeyLevel[] | null
+  structureLevels?: StructureKeyLevel[] | null,
+  chartPoints?: { period?: string; high?: number; low?: number; close?: number }[] | null
 ): string {
   const c = confluence;
   const { base, pair, label } = formatAssetLabel(symbol);
@@ -188,6 +222,29 @@ export function formatEntryReviewPrompt(
     lines.push(`- Thin history, low confidence, or bearish structure → lean WAIT or SKIP — do not force a long.`);
   }
   lines.push(``);
+  const pump = findLastPumpContext(chartPoints || []);
+  if (pump) {
+    const pumpDate = pump.period
+      ? new Date(pump.period).toLocaleDateString("en-CA", {
+          timeZone: "Asia/Manila",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        })
+      : "unknown";
+    lines.push(`## Last local high / pump (from our daily series)`);
+    lines.push(
+      `- Peak ~**${pump.peak}** on **${pumpDate}** Manila (~${pump.daysAgo}d ago).`
+    );
+    lines.push(
+      `- Now vs that peak: **${pump.dropPct >= 0 ? "−" : "+"}${Math.abs(pump.dropPct).toFixed(2)}%** (our poll data, not exchange OHLC).`
+    );
+    lines.push(
+      `- Research task: search **verified** news around **${pumpDate}** and the days after that could explain a run-up and the subsequent move down (unlock, listing, exploit, regulatory, project news). Do not invent causes.`
+    );
+    lines.push(``);
+  }
+
   lines.push(`## Technical snapshot`);
   lines.push(`- Bias: **${c.bias}** (score ${c.score >= 0 ? "+" : ""}${c.score}/±${c.maxPossibleScore}, ${(c.confidence * 100).toFixed(0)}% data)`);
   lines.push(`- Macro: ${c.macroTrend}${c.isCounterTrend ? " — short-term bias conflicts with macro" : ""}`);
@@ -259,7 +316,7 @@ export function formatEntryReviewPrompt(
     lines.push(`   - Also state a rough hold horizon if useful (e.g. 3–7 days, 1–2 weeks) — must still include at least one concrete date.`);
     lines.push(`   - If uncertain, say so and give a short default review date (e.g. +3 or +7 Manila days), not an open-ended hold.`);
     lines.push(`7. News: verified only, or "none verified"`);
-    lines.push(`8. Then output the **Final journal note** block exactly as specified below.`);
+    lines.push(`8. Then output the **Final journal note** block exactly as specified below — this is the text the trader **copies into the app journal**. Keep it short, factual, and ready to paste.`);
   } else {
     lines.push(`## Answer format (no position)`);
     lines.push(`1. Verdict: **READY TO STAGE** | **WAIT FOR PULLBACK** | **SKIP**`);
@@ -277,7 +334,12 @@ export function formatEntryReviewPrompt(
 
   lines.push(``);
   lines.push(`## Final journal note (REQUIRED — pure markdown, copy-paste ready)`);
-  lines.push(`End your answer with ONLY this block (use real newlines, no HTML). Fill every field; use "n/a" if not applicable.`);
+  lines.push(
+    `End your answer with ONLY this block (use real newlines, no HTML). Fill every field; use "n/a" if not applicable.`
+  );
+  lines.push(
+    `The trader will **copy this markdown into General / coin journal** as the decision record — write it so it still makes sense in 3–7 days without the rest of the chat. **Always fill Agent** with your product name (e.g. ChatGPT, Grok, Gemini) and model if known.`
+  );
   lines.push(``);
   lines.push('```markdown');
   if (isAllocated) {
@@ -286,6 +348,8 @@ export function formatEntryReviewPrompt(
     lines.push(`- **Verdict:** HOLD | WAIT | TRIM | SELL`);
     lines.push(`- **Price now:** …`);
     lines.push(`- **Break-even / avg cost:** …`);
+    lines.push(`- **Unrealized:** …% / … PHP`);
+    lines.push(`- **Last pump / local high (if relevant):** date · peak · why it may have faded`);
     lines.push(`- **Sell / trim if price hits:** …`);
     lines.push(`- **Invalidation (thesis broken if):** …`);
     lines.push(`- **Timeframe — valid until:** YYYY-MM-DD`);
@@ -327,7 +391,8 @@ export function formatEntryReviewPromptForGoogle(
     firstBuyAt?: string | null;
     daysHeld?: number | null;
   } | null,
-  structureLevels?: StructureKeyLevel[] | null
+  structureLevels?: StructureKeyLevel[] | null,
+  chartPoints?: { period?: string; high?: number; low?: number; close?: number }[] | null
 ): string {
   const c = confluence;
   const { base, pair, label } = formatAssetLabel(symbol);
@@ -358,6 +423,16 @@ export function formatEntryReviewPromptForGoogle(
   parts.push(
     `Snapshot: bias ${c.bias} (score ${c.score >= 0 ? "+" : ""}${c.score}/±${c.maxPossibleScore}, ${(c.confidence * 100).toFixed(0)}% conf). Macro ${c.macroTrend}. Price ${c.currentPrice}; support ${c.support}; resistance ${c.resistance}.`
   );
+
+  const pumpG = findLastPumpContext(chartPoints || []);
+  if (pumpG) {
+    const pd = pumpG.period
+      ? new Date(pumpG.period).toLocaleDateString("en-CA", { timeZone: "Asia/Manila" })
+      : "?";
+    parts.push(
+      `Last local high ~${pumpG.peak} on ${pd} (~${pumpG.daysAgo}d ago, ${pumpG.dropPct}% below peak). Search verified news around that date for why price may be down.`
+    );
+  }
 
   if (c.invalidationLevel != null) {
     parts.push(`Invalidation ~${Number(c.invalidationLevel).toFixed(2)}.`);
@@ -398,11 +473,11 @@ export function formatEntryReviewPromptForGoogle(
 
   if (isAllocated) {
     parts.push(
-      `Answer: 1) HOLD | WAIT | TRIM | SELL  2) why  3) sell/trim trigger price  4) invalidation  5) Timeframe: valid until + review by YYYY-MM-DD (today Manila ${todayManila})  6) news  7) End with a markdown journal note block (verdict, levels, timeframe, news). Neutral stance. Do not invent news.`
+      `Answer: 1) HOLD | WAIT | TRIM | SELL  2) why  3) sell/trim trigger price  4) invalidation  5) Timeframe: valid until + review by YYYY-MM-DD (today Manila ${todayManila})  6) news  7) End with a markdown journal note block (Agent name e.g. ChatGPT/Grok/Gemini, verdict, levels, timeframe, news). Neutral stance. Do not invent news.`
     );
   } else {
     parts.push(
-      `Answer: 1) READY TO STAGE | WAIT FOR PULLBACK | SKIP  2) why  3) ladder + invalidation  4) Timeframe: valid until / review by YYYY-MM-DD (today Manila ${todayManila})  5) news  6) End with markdown journal note (verdict, ladder, invalidation, timeframe, news). Neutral. Do not invent news.`
+      `Answer: 1) READY TO STAGE | WAIT FOR PULLBACK | SKIP  2) why  3) ladder + invalidation  4) Timeframe: valid until / review by YYYY-MM-DD (today Manila ${todayManila})  5) news  6) End with markdown journal note (Agent name e.g. ChatGPT/Grok/Gemini, verdict, ladder, invalidation, timeframe, news). Neutral. Do not invent news.`
     );
   }
 
@@ -465,7 +540,14 @@ export default function TradingInsightCard({
   const firstBuyAt = activePortfolio?.firstBuyAt ?? null;
 
   const buildAgentPrompt = () =>
-    formatEntryReviewPrompt(symbol, confluence, crossoverAlert, activePortfolio, structureLevels);
+    formatEntryReviewPrompt(
+      symbol,
+      confluence,
+      crossoverAlert,
+      activePortfolio,
+      structureLevels,
+      points
+    );
 
   const handleCopyAgentPrompt = () => {
     const prompt = buildAgentPrompt();
@@ -493,7 +575,8 @@ export default function TradingInsightCard({
       confluence,
       crossoverAlert,
       activePortfolio,
-      structureLevels
+      structureLevels,
+      points
     );
     const url = `https://www.google.com/search?q=${encodeURIComponent(mini)}`;
     window.open(url, "_blank", "noopener,noreferrer");

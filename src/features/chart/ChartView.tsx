@@ -929,6 +929,7 @@ export default function ChartView() {
             transactions={coinTransactions}
             support={technicals.support}
             resistance={technicals.resistance}
+            points={points}
           />
 
                     <JournalSidebar
