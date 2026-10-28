@@ -16,7 +16,18 @@ export function useNewsLogic(refreshSignal?: unknown) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /** RSS / price-signal feed paused — UI kept, no network fetch. */
+  const RSS_FETCH_ENABLED = false;
+
   const loadFirstPage = useCallback(async () => {
+    if (!RSS_FETCH_ENABLED) {
+      setItems([]);
+      setCursor(null);
+      setHasMore(false);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {

@@ -361,7 +361,7 @@ export default function HomeMacroWatch() {
   }, [events]);
 
   return (
-    <div className="mb-6 rounded-lg border border-indigo-100 bg-white p-4 shadow-sm">
+    <div className="mb-6 rounded-lg border border-indigo-100 bg-white p-4 shadow-sm mt-3">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 className="text-sm font-bold uppercase tracking-wider text-indigo-900 flex items-center gap-2">

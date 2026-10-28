@@ -256,7 +256,7 @@ export default function JournalSidebar({
               </button>
             </div>
             <div className="overflow-y-auto px-3 py-3 sm:px-4">
-              <ManageCoinsView />
+              <ManageCoinsView modalMode focusSymbol={defaultSymbol || null} />
             </div>
           </div>
         </div>
@@ -285,7 +285,7 @@ export default function JournalSidebar({
               </button>
             </div>
             <div className="overflow-y-auto px-1 py-2 sm:px-2">
-              <LongScanView />
+              <LongScanView modalMode focusSymbol={defaultSymbol || null} />
             </div>
           </div>
         </div>

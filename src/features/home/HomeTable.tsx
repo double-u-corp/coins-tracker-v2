@@ -78,6 +78,174 @@ function CoinCard({ coin, canUpdatePrice, onUpdatePriceClick }: CoinCardProps) {
   );
 }
 
+
+function MonitorCard({
+  card,
+  portfolio,
+}: {
+  card: {
+    symbol: string;
+    name: string;
+    currentPrice: number | null;
+    high: {
+      alertType: string;
+      targetPrice: number;
+      distance: number;
+    } | null;
+    low: {
+      alertType: string;
+      targetPrice: number;
+      distance: number;
+    } | null;
+    review: {
+      urgency: string;
+      daysUntil: number;
+      reviewUntil: string;
+    } | null;
+  };
+  portfolio: { symbol?: string; holdings?: number; spent?: number }[] | null | undefined;
+}) {
+  const hit =
+    card.high?.alertType === "reached" || card.low?.alertType === "reached";
+  const reviewU = card.review?.urgency;
+  const border =
+    hit || reviewU === "overdue"
+      ? "border-rose-200 bg-rose-50/40"
+      : reviewU === "today"
+        ? "border-amber-200 bg-amber-50/50"
+        : "border-gray-200 bg-white hover:shadow-md";
+
+  const reviewLabel = card.review
+    ? card.review.urgency === "overdue"
+      ? `${Math.abs(card.review.daysUntil)}d overdue`
+      : card.review.urgency === "today"
+        ? "Review today"
+        : card.review.daysUntil === 1
+          ? "Tomorrow"
+          : `In ${card.review.daysUntil}d`
+    : null;
+
+  const pos = portfolio?.find(
+    (p) => p.symbol?.toUpperCase() === card.symbol.toUpperCase()
+  );
+  const holdings = pos?.holdings ?? 0;
+  const spent = pos?.spent ?? 0;
+  let pnl: JSX.Element | null = null;
+  if (holdings > 0 && spent > 0 && card.currentPrice != null && card.currentPrice > 0) {
+    const avg = spent / holdings;
+    const pnlPhp = holdings * card.currentPrice - spent;
+    const pnlPct = ((card.currentPrice - avg) / avg) * 100;
+    const up = pnlPct >= 0;
+    pnl = (
+      <div
+        className={`mt-1 text-[11px] font-semibold tabular-nums ${
+          up ? "text-emerald-700" : "text-rose-700"
+        }`}
+        title="P&L vs average cost"
+      >
+        <span className="font-bold">
+          {up ? "+" : ""}
+          {pnlPct.toFixed(2)}%
+        </span>
+        <span className="text-gray-500 font-medium">
+          {" "}
+          ({up ? "+" : "−"}
+          {formatPhp(Math.abs(pnlPhp))})
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`rounded-lg border p-3 transition-all ${border}`}>
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="min-w-0">
+          <div className="text-base font-bold text-gray-900 truncate">
+            {card.name}{" "}
+            <span className="font-mono text-sm font-semibold text-gray-500">
+              {card.symbol}
+            </span>
+          </div>
+          {card.currentPrice != null && (
+            <div className="mt-0.5 text-sm font-bold tabular-nums text-gray-900">
+              {formatPhp(card.currentPrice)}
+            </div>
+          )}
+          {pnl}
+        </div>
+        <Link
+          href={`/chart?symbol=${encodeURIComponent(card.symbol)}`}
+          className="shrink-0 text-sm font-bold text-brand-600 hover:underline"
+        >
+          Spot →
+        </Link>
+      </div>
+
+      <div className="space-y-1.5 text-[11px]">
+        {card.high && (
+          <div className="flex justify-between gap-2 rounded-md bg-emerald-50/80 border border-emerald-100 px-2 py-1">
+            <span className="text-emerald-800 font-semibold">
+              High{" "}
+              {card.high.alertType === "reached"
+                ? "HIT"
+                : card.high.distance <= 5
+                  ? "near"
+                  : "target"}
+            </span>
+            <span className="font-mono text-gray-900">
+              {formatPhp(card.high.targetPrice)}
+              {card.high.alertType !== "reached" && (
+                <span className="text-gray-500">
+                  {" "}
+                  · {card.high.distance.toFixed(1)}% away
+                </span>
+              )}
+            </span>
+          </div>
+        )}
+        {card.low && (
+          <div className="flex justify-between gap-2 rounded-md bg-rose-50/80 border border-rose-100 px-2 py-1">
+            <span className="text-rose-800 font-semibold">
+              Low{" "}
+              {card.low.alertType === "reached"
+                ? "HIT"
+                : card.low.distance <= 5
+                  ? "near"
+                  : "target"}
+            </span>
+            <span className="font-mono text-gray-900">
+              {formatPhp(card.low.targetPrice)}
+              {card.low.alertType !== "reached" && (
+                <span className="text-gray-500">
+                  {" "}
+                  · {card.low.distance.toFixed(1)}% away
+                </span>
+              )}
+            </span>
+          </div>
+        )}
+        {card.review && (
+          <div
+            className={`flex justify-between gap-2 rounded-md border px-2 py-1 ${
+              card.review.urgency === "overdue"
+                ? "bg-rose-50 border-rose-200"
+                : card.review.urgency === "today"
+                  ? "bg-amber-50 border-amber-200"
+                  : "bg-violet-50/80 border-violet-100"
+            }`}
+          >
+            <span className="font-semibold text-violet-900">
+              Review {reviewLabel}
+            </span>
+            <span className="font-mono text-gray-700">{card.review.reviewUntil}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 export default function HomeTable() {
   const [nextCronLabel, setNextCronLabel] = useState("Calculating...");
 
@@ -155,6 +323,22 @@ export default function HomeTable() {
     updateJournalEntry,
     deleteJournalEntry,
 } = useHomeLogic();
+
+  const { heldMonitorCards, planMonitorCards } = useMemo(() => {
+    const heldSyms = new Set(
+      (portfolio || [])
+        .filter((p: { holdings?: number }) => (p.holdings ?? 0) > 0)
+        .map((p: { symbol?: string }) => (p.symbol || "").toUpperCase())
+    );
+    const held: typeof monitorCards = [];
+    const plan: typeof monitorCards = [];
+    for (const card of monitorCards || []) {
+      if (heldSyms.has(card.symbol.toUpperCase())) held.push(card);
+      else plan.push(card);
+    }
+    return { heldMonitorCards: held, planMonitorCards: plan };
+  }, [monitorCards, portfolio]);
+
 
   const [movePctBySymbol, setMovePctBySymbol] = useState<Record<string, number>>({});
   const [directionCopied, setDirectionCopied] = useState(false);
@@ -461,192 +645,41 @@ export default function HomeTable() {
               </div>
             ))}
           </div>
+        
         ) : !monitorCards || monitorCards.length === 0 ? (
           <p className="text-xs text-gray-500 py-1">
             No target proximity alerts and no review dates set. Set targets / review-by on Manage.
           </p>
         ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {monitorCards.map((card) => {
-              const hit =
-                card.high?.alertType === "reached" || card.low?.alertType === "reached";
-              const reviewU = card.review?.urgency;
-              const border =
-                hit || reviewU === "overdue"
-                  ? "border-rose-200 bg-rose-50/40"
-                  : reviewU === "today"
-                    ? "border-amber-200 bg-amber-50/50"
-                    : "border-gray-200 bg-white hover:shadow-md";
-
-              const reviewLabel = card.review
-                ? card.review.urgency === "overdue"
-                  ? `${Math.abs(card.review.daysUntil)}d overdue`
-                  : card.review.urgency === "today"
-                    ? "Review today"
-                    : card.review.daysUntil === 1
-                      ? "Tomorrow"
-                      : `In ${card.review.daysUntil}d`
-                : null;
-
-              return (
-                <div
-                  key={card.symbol}
-                  className={`rounded-lg border p-3 transition-all ${border}`}
-                >
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <div className="min-w-0">
-                      <div className="text-base font-bold text-gray-900 truncate">
-                        {card.name}{" "}
-                        <span className="font-mono text-sm font-semibold text-gray-500">
-                          {card.symbol}
-                        </span>
-                      </div>
-                      {card.currentPrice != null && (
-                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                          <span className="text-sm font-bold tabular-nums text-gray-900">
-                            {formatPhp(card.currentPrice)}
-                          </span>
-                          {(() => {
-                            // Same rules as Filter Coins pills: prefer % (color only, no ▲/▼);
-                            // if no %, fall back to direction arrow.
-                            const pct =
-                              movePctBySymbol[card.symbol.toUpperCase()] ??
-                              movePctBySymbol[card.symbol.replace(/PHP$/i, "").toUpperCase()];
-                            if (pct != null && Number.isFinite(pct)) {
-                              const up = pct > 0;
-                              const down = pct < 0;
-                              return (
-                                <span
-                                  className={`text-xs font-bold tabular-nums ${
-                                    up ? "text-green-600" : down ? "text-red-600" : "text-gray-500"
-                                  }`}
-                                >
-                                  {up ? "+" : ""}
-                                  {pct.toFixed(1)}%
-                                </span>
-                              );
-                            }
-                            const coin = coins.find(
-                              (c) => c.symbol.toUpperCase() === card.symbol.toUpperCase()
-                            );
-                            return (
-                              <PriceDirectionArrow
-                                direction={coin?.priceDirection ?? null}
-                              />
-                            );
-                          })()}
-                        </div>
-                      )}
-                      {(() => {
-                        const pos = portfolio?.find(
-                          (p: { symbol?: string }) =>
-                            p.symbol?.toUpperCase() === card.symbol.toUpperCase()
-                        ) as
-                          | { holdings?: number; spent?: number }
-                          | undefined;
-                        const holdings = pos?.holdings ?? 0;
-                        const spent = pos?.spent ?? 0;
-                        if (!(holdings > 0 && spent > 0 && card.currentPrice != null && card.currentPrice > 0))
-                          return null;
-                        const avg = spent / holdings;
-                        const mtm = holdings * card.currentPrice;
-                        const pnlPhp = mtm - spent;
-                        const pnlPct = ((card.currentPrice - avg) / avg) * 100;
-                        const up = pnlPct >= 0;
-                        return (
-                          <div
-                            className={`mt-1 text-[11px] font-semibold tabular-nums ${
-                              up ? "text-emerald-700" : "text-rose-700"
-                            }`}
-                            title="P&L vs average cost"
-                          >
-                            <span className="font-bold">
-                              {up ? "+" : ""}
-                              {pnlPct.toFixed(2)}%
-                            </span>
-                            <span className="text-gray-500 font-medium">
-                              {" "}
-                              ({up ? "+" : "−"}
-                              {formatPhp(Math.abs(pnlPhp))})
-                            </span>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                    <Link
-                      href={`/chart?symbol=${encodeURIComponent(card.symbol)}`}
-                      className="shrink-0 text-sm font-bold text-brand-600 hover:underline"
-                    >
-                      Spot →
-                    </Link>
-                  </div>
-
-                  <div className="space-y-1.5 text-[11px]">
-                    {card.high && (
-                      <div className="flex justify-between gap-2 rounded-md bg-emerald-50/80 border border-emerald-100 px-2 py-1">
-                        <span className="text-emerald-800 font-semibold">
-                          High{" "}
-                          {card.high.alertType === "reached"
-                            ? "HIT"
-                            : card.high.distance <= 5
-                              ? "near"
-                              : "target"}
-                        </span>
-                        <span className="font-mono text-gray-900">
-                          {formatPhp(card.high.targetPrice)}
-                          {card.high.alertType !== "reached" && (
-                            <span className="text-gray-500">
-                              {" "}
-                              · {card.high.distance.toFixed(1)}% away
-                            </span>
-                          )}
-                        </span>
-                      </div>
-                    )}
-                    {card.low && (
-                      <div className="flex justify-between gap-2 rounded-md bg-rose-50/80 border border-rose-100 px-2 py-1">
-                        <span className="text-rose-800 font-semibold">
-                          Low{" "}
-                          {card.low.alertType === "reached"
-                            ? "HIT"
-                            : card.low.distance <= 5
-                              ? "near"
-                              : "target"}
-                        </span>
-                        <span className="font-mono text-gray-900">
-                          {formatPhp(card.low.targetPrice)}
-                          {card.low.alertType !== "reached" && (
-                            <span className="text-gray-500">
-                              {" "}
-                              · {card.low.distance.toFixed(1)}% away
-                            </span>
-                          )}
-                        </span>
-                      </div>
-                    )}
-                    {card.review && (
-                      <div
-                        className={`flex justify-between gap-2 rounded-md border px-2 py-1 ${
-                          card.review.urgency === "overdue"
-                            ? "bg-rose-100 border-rose-200"
-                            : card.review.urgency === "today"
-                              ? "bg-amber-100 border-amber-200"
-                              : "bg-indigo-50 border-indigo-100"
-                        }`}
-                      >
-                        <span className="font-semibold text-indigo-950">
-                          Review by {card.review.reviewUntil}
-                        </span>
-                        <span className="font-bold text-indigo-900">{reviewLabel}</span>
-                      </div>
-                    )}
-                    {!card.high && !card.low && !card.review && (
-                      <span className="text-gray-400">No flags</span>
-                    )}
-                  </div>
+          <div className="space-y-5">
+            <div>
+              <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-emerald-800">
+                On hold · open positions
+              </h3>
+              {heldMonitorCards.length === 0 ? (
+                <p className="text-xs text-gray-500">No held coins in this monitor list.</p>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {heldMonitorCards.map((card) => (
+                    <MonitorCard key={card.symbol} card={card} portfolio={portfolio} />
+                  ))}
                 </div>
-              );
-            })}
+              )}
+            </div>
+            <div>
+              <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-sky-800">
+                Watch / plan to buy · not held
+              </h3>
+              {planMonitorCards.length === 0 ? (
+                <p className="text-xs text-gray-500">No watchlist / plan-to-buy cards right now.</p>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {planMonitorCards.map((card) => (
+                    <MonitorCard key={card.symbol} card={card} portfolio={portfolio} />
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

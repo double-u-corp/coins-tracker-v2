@@ -228,15 +228,29 @@ function MonitoredCoinCard({
   );
 }
 
-export default function ManageCoinsView() {
+type ManageCoinsViewProps = {
+  /** Spot modal: only this coin’s target card */
+  modalMode?: boolean;
+  focusSymbol?: string | null;
+};
+
+export default function ManageCoinsView({
+  modalMode = false,
+  focusSymbol = null,
+}: ManageCoinsViewProps = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // 1. Updated to check "symbol" first from searchParams
-  const activeCoinFilter =
-    searchParams?.get("symbol") ||
-    searchParams?.get("coin") ||
-    searchParams?.get("id");
+  const activeCoinFilter: string | null = (() => {
+    const fromProp = focusSymbol?.trim();
+    if (fromProp) return fromProp;
+    return (
+      searchParams?.get("symbol") ||
+      searchParams?.get("coin") ||
+      searchParams?.get("id") ||
+      null
+    );
+  })();
 
   const {
     monitored,
@@ -315,6 +329,7 @@ export default function ManageCoinsView() {
       {actionError && <AlertBanner variant="error" message={actionError} />}
       
       {/* Navigation — same button size/style as Spot & Calendar */}
+      {!modalMode && (
       <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
         <Link
           href="/"
@@ -346,12 +361,15 @@ export default function ManageCoinsView() {
           <span>Calendar</span>
         </Link>
       </div>
+      )}
       
       {/* Currently Monitored Cards Section */}
       <section>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-gray-900">Currently Monitored</h2>
-          {activeCoinFilter && (
+          <h2 className="text-lg font-bold text-gray-900">
+            {modalMode ? "Targets (high / low)" : "Currently Monitored"}
+          </h2>
+          {activeCoinFilter && !modalMode && (
             <div className="flex items-center gap-2">
               <span className="text-xs bg-brand-50 text-brand-700 px-2.5 py-1 rounded-md font-medium border border-brand-200">
                 Filtered: <strong>{activeCoinFilter.toUpperCase()}</strong>
@@ -376,7 +394,7 @@ export default function ManageCoinsView() {
               : "No coins yet — select an option below to add one."}
           </p>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className={`grid gap-4 ${modalMode ? "grid-cols-1 max-w-lg mx-auto" : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3"}`}>
             {filteredMonitored.map((coin) => (
               <MonitoredCoinCard
                 key={coin.symbol}
@@ -389,7 +407,9 @@ export default function ManageCoinsView() {
         )}
       </section>
 
-      {/* Action Choice Buttons */}
+      {/* Action Choice Buttons + add panels (full page only) */}
+      {!modalMode && (
+      <>
       <section className="border-t border-gray-200 pt-6">
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Add Coins</p>
         <div className="flex flex-wrap gap-3">
@@ -553,6 +573,8 @@ export default function ManageCoinsView() {
             ))}
           </ul>
         </section>
+      )}
+      </>
       )}
     </div>
   );

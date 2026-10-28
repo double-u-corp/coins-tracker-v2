@@ -315,6 +315,8 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
         ) : null}
       </div>
 
+      {/* Price & RSS signals — hidden while auto-fetch is paused */}
+      {false && (
       <div>
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-gray-800">Price &amp; RSS signals</h3>
@@ -343,7 +345,7 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
           </ul>
         ) : articleItems.length === 0 ? (
           <p className="text-sm text-gray-500">
-            No article signals yet — price % moves show on the coin filter chips above.
+            Price &amp; RSS auto-fetch is paused. Section kept for later — no news requests are made.
           </p>
         ) : (
           <ul className="space-y-3">
@@ -418,6 +420,7 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
           </button>
         )}
       </div>
+      )}
     </section>
   );
 }

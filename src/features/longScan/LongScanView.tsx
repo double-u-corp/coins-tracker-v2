@@ -4,6 +4,13 @@ import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
 import type { JournalEntryView } from "@/validators/journalSchema";
 import FormattedAiResponse from "@/components/FormattedAiResponse";
+import dynamic from "next/dynamic";
+
+const ManageCoinsView = dynamic(() => import("@/features/manage/ManageCoinsView"), {
+  ssr: false,
+  loading: () => <p className="p-4 text-sm text-gray-500">Loading Manage…</p>,
+});
+
 
 type LadderLevel = { price: number; basis: string; allocationPct: number };
 
@@ -80,6 +87,26 @@ function parseCompactSignals(note: string | null): string[] {
   return out.slice(0, 3);
 }
 
+
+function noteHasPriceBelow20(note: string | null): boolean | null {
+  if (!note) return null;
+  if (/Price below 20 SMA/i.test(note)) return true;
+  if (/Price above 20 SMA/i.test(note)) return false;
+  return null;
+}
+function noteHas20Below50(note: string | null): boolean | null {
+  if (!note) return null;
+  if (/20 SMA below 50 SMA/i.test(note)) return true;
+  if (/20 SMA above 50 SMA/i.test(note)) return false;
+  if (/20 SMA .+% below 50 SMA/i.test(note)) return true;
+  if (/20 SMA .+% above 50 SMA/i.test(note)) return false;
+  return null;
+}
+function noteNearRangeSupport(note: string | null): boolean {
+  if (!note) return false;
+  return /Near range support|discount zone|of range\)/i.test(note) && /support|\d+% of range/i.test(note);
+}
+
 function tierLabel(tier: string) {
   if (tier === "NEAR_SUPPORT_UP" || tier === "near_support_up") {
     return {
@@ -102,7 +129,17 @@ function tierLabel(tier: string) {
   return { text: "Watch", cls: "bg-slate-100 text-slate-700" };
 }
 
-export default function LongScanView() {
+export type LongScanViewProps = {
+  /** Spot modal: only this symbol's hits */
+  focusSymbol?: string | null;
+  /** Compact chrome for modal embedding */
+  modalMode?: boolean;
+};
+
+export default function LongScanView({
+  focusSymbol = null,
+  modalMode = false,
+}: LongScanViewProps = {}) {
   const [runs, setRuns] = useState<Run[]>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
@@ -121,6 +158,24 @@ export default function LongScanView() {
   const [journalError, setJournalError] = useState<string | null>(null);
   const [journalDeletingId, setJournalDeletingId] = useState<number | null>(null);
   const [coinFlags, setCoinFlags] = useState<Record<string, CoinFlag>>({});
+  const [manageOpen, setManageOpen] = useState(false);
+  const [manageSymbol, setManageSymbol] = useState<string | null>(null);
+  const [manageName, setManageName] = useState<string | null>(null);
+  const [filterFlags, setFilterFlags] = useState<{
+    bad: boolean;
+    monitor: boolean;
+    nochase: boolean;
+    neutral: boolean;
+  }>({
+    bad: false,
+    monitor: false,
+    nochase: false,
+    neutral: false,
+  });
+  const [filterBias, setFilterBias] = useState<string>("all"); // all | strong_long | long | neutral | short
+  const [filterPriceVs20, setFilterPriceVs20] = useState<string>("all"); // all | below | above
+  const [filterSma20v50, setFilterSma20v50] = useState<string>("all"); // all | below | above
+  const [filterRangeNear, setFilterRangeNear] = useState(false); // near support in note
 
   useEffect(() => {
     let cancelled = false;
@@ -215,8 +270,60 @@ export default function LongScanView() {
       if (at !== bt) return bt.localeCompare(at);
       return a.symbol.localeCompare(b.symbol);
     });
+    // Optional: single-coin focus (Spot modal)
+    const focus = focusSymbol?.trim().toUpperCase();
+    if (focus) {
+      return groups.filter((g) => g.symbol.toUpperCase() === focus);
+    }
     return groups;
-  }, [runs]);
+  }, [runs, focusSymbol]);
+
+  const displayedGroups = useMemo(() => {
+    const flagActive = (Object.entries(filterFlags) as [Exclude<CoinFlag, "">, boolean][]).filter(
+      ([, v]) => v
+    );
+    return coinGroups.filter((g) => {
+      const flag = coinFlags[g.symbol.toUpperCase()] || "";
+      if (flagActive.length > 0) {
+        if (!flagActive.some(([k]) => k === flag)) return false;
+      }
+      const best = g.rows[0];
+      const bias = (best?.bias || "").toUpperCase();
+      if (filterBias === "strong_long" && !bias.includes("STRONG LONG")) return false;
+      if (filterBias === "long" && !(bias.includes("LONG") && !bias.includes("SHORT"))) return false;
+      if (filterBias === "neutral" && !bias.includes("NEUTRAL")) return false;
+      if (filterBias === "short" && !bias.includes("SHORT")) return false;
+
+      const note = best?.signalsNote || null;
+      if (filterPriceVs20 === "below") {
+        const v = noteHasPriceBelow20(note);
+        if (v !== true) return false;
+      }
+      if (filterPriceVs20 === "above") {
+        const v = noteHasPriceBelow20(note);
+        if (v !== false) return false;
+      }
+      if (filterSma20v50 === "below") {
+        const v = noteHas20Below50(note);
+        if (v !== true) return false;
+      }
+      if (filterSma20v50 === "above") {
+        const v = noteHas20Below50(note);
+        if (v !== false) return false;
+      }
+      if (filterRangeNear && !noteNearRangeSupport(note)) return false;
+      return true;
+    });
+  }, [
+    coinGroups,
+    coinFlags,
+    filterFlags,
+    filterBias,
+    filterPriceVs20,
+    filterSma20v50,
+    filterRangeNear,
+  ]);
+
 
   const emptyRunCount = useMemo(
     () => runs.filter((r) => !r.hits?.length).length,
@@ -483,7 +590,8 @@ export default function LongScanView() {
 
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6">
+    <div className={`mx-auto max-w-6xl ${modalMode ? "px-2 py-2" : "px-4 py-6"}`}>
+      {!modalMode && (
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-gray-900">LONG scan log</h1>
@@ -508,6 +616,7 @@ export default function LongScanView() {
           {running ? "Scanning…" : "↻ Run scan now"}
         </button>
       </div>
+      )}
 
       {error && <AlertBanner variant="error" message={error} />}
       {info && (
@@ -527,6 +636,13 @@ export default function LongScanView() {
           No runs yet. Use <span className="font-semibold">Run scan now</span> or wait for the
           schedule.
         </p>
+      ) : focusSymbol && displayedGroups.length === 0 ? (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          <p className="font-semibold text-slate-800">
+            No LONG-scan hits for {focusSymbol}
+          </p>
+          <p className="mt-1 text-xs">This coin has no saved hits in the log yet.</p>
+        </div>
       ) : coinGroups.length === 0 ? (
         <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
           <p className="font-semibold text-slate-800">No coin hits stored yet</p>
@@ -544,12 +660,94 @@ export default function LongScanView() {
       ) : (
         <div className="space-y-6">
           <p className="text-[11px] text-gray-500">
-            {coinGroups.length} coin(s) with saved hits (not full watchlist size — BTC/ETH/XAUT skipped in
+            {displayedGroups.length} coin(s) with saved hits (not full watchlist size — BTC/ETH/XAUT skipped in
             scan; only coins that matched a run appear here) ·{" "}
             <span className="font-semibold text-slate-700">STRONG LONG / LONG first</span>, then newest
             non-LONG · newest hit first inside each card
           </p>
-          {coinGroups.map((g) => {
+
+          {!modalMode && !focusSymbol && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3 space-y-2.5 text-xs">
+              <div className="font-bold text-slate-700">Filters</div>
+              <div className="flex flex-wrap gap-1.5 items-center">
+                <span className="text-slate-500 font-semibold">Flag:</span>
+                {(
+                  [
+                    ["bad", "Bad news", "bg-red-100 text-red-800 border-red-200"],
+                    ["monitor", "Monitor", "bg-orange-100 text-orange-900 border-orange-200"],
+                    ["nochase", "Don't chase", "bg-purple-100 text-purple-900 border-purple-200"],
+                    ["neutral", "Neutral", "bg-slate-200 text-slate-800 border-slate-300"],
+                  ] as const
+                ).map(([id, label, cls]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() =>
+                      setFilterFlags((prev) => ({
+                        ...prev,
+                        [id]: !prev[id as keyof typeof prev],
+                      }))
+                    }
+                    className={`rounded-full border px-2 py-0.5 font-semibold ${cls} ${
+                      filterFlags[id as keyof typeof filterFlags]
+                        ? "ring-2 ring-offset-1 ring-slate-400"
+                        : "opacity-60"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2 items-center">
+                <label className="text-slate-500 font-semibold">Bias</label>
+                <select
+                  value={filterBias}
+                  onChange={(e) => setFilterBias(e.target.value)}
+                  className="rounded-md border border-slate-300 bg-white px-2 py-1 font-semibold"
+                >
+                  <option value="all">All</option>
+                  <option value="strong_long">STRONG LONG</option>
+                  <option value="long">LONG</option>
+                  <option value="neutral">NEUTRAL</option>
+                  <option value="short">SHORT</option>
+                </select>
+                <label className="text-slate-500 font-semibold">Price vs 20</label>
+                <select
+                  value={filterPriceVs20}
+                  onChange={(e) => setFilterPriceVs20(e.target.value)}
+                  className="rounded-md border border-slate-300 bg-white px-2 py-1 font-semibold"
+                >
+                  <option value="all">All</option>
+                  <option value="below">Below 20 SMA</option>
+                  <option value="above">Above 20 SMA</option>
+                </select>
+                <label className="text-slate-500 font-semibold">20 vs 50</label>
+                <select
+                  value={filterSma20v50}
+                  onChange={(e) => setFilterSma20v50(e.target.value)}
+                  className="rounded-md border border-slate-300 bg-white px-2 py-1 font-semibold"
+                >
+                  <option value="all">All</option>
+                  <option value="below">20 below 50</option>
+                  <option value="above">20 above 50</option>
+                </select>
+                <label className="inline-flex items-center gap-1 font-semibold text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={filterRangeNear}
+                    onChange={(e) => setFilterRangeNear(e.target.checked)}
+                  />
+                  Near range support
+                </label>
+              </div>
+            </div>
+          )}
+
+          {displayedGroups.length === 0 && coinGroups.length > 0 ? (
+            <p className="text-sm text-gray-500">No coins match the current filters.</p>
+          ) : null}
+
+          {displayedGroups.map((g) => {
             return (
               <section
                 key={g.symbol}
@@ -570,7 +768,7 @@ export default function LongScanView() {
                     ) : null}
                   </h2>
                   <span
-                    className="inline-flex shrink-0 items-center justify-center gap-1"
+                    className="inline-flex shrink-0 items-center justify-center gap-1 mx-auto"
                     role="group"
                     aria-label="Coin status flag"
                   >
@@ -616,6 +814,18 @@ export default function LongScanView() {
                       ) : (
                         <span className="ml-1 text-[10px] font-semibold text-slate-400">0</span>
                       )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManageSymbol(g.symbol);
+                        setManageName(g.name);
+                        setManageOpen(true);
+                      }}
+                      className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-900 hover:bg-emerald-100"
+                      title={`Manage targets for ${g.symbol}`}
+                    >
+                      ⚙️ Manage
                     </button>
                     <Link
                       href={`/chart?symbol=${encodeURIComponent(g.symbol)}`}
@@ -833,6 +1043,47 @@ export default function LongScanView() {
                   </article>
                 ))
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {manageOpen && manageSymbol && (
+        <div
+          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/45 p-0 sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Manage coin"
+          onClick={() => {
+            setManageOpen(false);
+            setManageSymbol(null);
+            setManageName(null);
+          }}
+        >
+          <div
+            className="flex max-h-[92vh] w-full max-w-lg flex-col rounded-t-2xl sm:rounded-xl border border-gray-200 bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2 border-b border-gray-100 px-4 py-3 shrink-0">
+              <h2 className="text-base font-bold text-gray-900">
+                ⚙️ Manage · {manageName || manageSymbol}{" "}
+                <span className="font-mono text-sm text-indigo-700">{manageSymbol}</span>
+              </h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setManageOpen(false);
+                  setManageSymbol(null);
+                  setManageName(null);
+                }}
+                className="rounded-md border border-gray-200 px-2.5 py-1 text-sm font-bold text-gray-600 hover:bg-gray-50"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="overflow-y-auto px-3 py-3 sm:px-4">
+              <ManageCoinsView modalMode focusSymbol={manageSymbol} />
             </div>
           </div>
         </div>
