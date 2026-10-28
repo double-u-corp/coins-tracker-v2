@@ -555,55 +555,53 @@ export default function LongScanView() {
                 key={g.symbol}
                 className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden"
               >
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 bg-gradient-to-r from-indigo-50/80 to-white px-4 py-3">
-                  <div className="min-w-0 flex-1">
-                    <h2 className="text-base font-extrabold text-slate-900 flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <span className="truncate">
-                        {g.name}{" "}
-                        <span className="font-mono text-sm font-bold text-indigo-700">
-                          {g.symbol}
-                        </span>
+                <div className="flex flex-nowrap items-center gap-2 border-b border-gray-100 bg-gradient-to-r from-indigo-50/80 to-white px-3 py-2 overflow-x-auto">
+                  <h2 className="min-w-0 shrink text-sm sm:text-base font-extrabold text-slate-900 flex items-center gap-1.5 truncate">
+                    <span className="truncate">
+                      {g.name}{" "}
+                      <span className="font-mono text-xs sm:text-sm font-bold text-indigo-700">
+                        {g.symbol}
                       </span>
-                      {priceBySymbol[g.symbol.toUpperCase()] != null ? (
-                        <span className="font-bold tabular-nums text-sky-800">
-                          {formatPhp(priceBySymbol[g.symbol.toUpperCase()])}
-                        </span>
-                      ) : null}
-                      <span
-                        className="inline-flex items-center gap-1"
-                        role="group"
-                        aria-label="Coin status flag"
-                      >
-                        {(
-                          [
-                            { id: "bad" as const, label: "Bad", title: "Bad news", cls: "bg-red-500 border-red-600", idle: "bg-red-200 border-red-300" },
-                            { id: "monitor" as const, label: "Watch", title: "Monitor", cls: "bg-orange-500 border-orange-600", idle: "bg-orange-200 border-orange-300" },
-                            { id: "nochase" as const, label: "No chase", title: "Don't chase", cls: "bg-purple-500 border-purple-600", idle: "bg-purple-200 border-purple-300" },
-                            { id: "neutral" as const, label: "Neutral", title: "Neutral", cls: "bg-slate-500 border-slate-600", idle: "bg-slate-300 border-slate-400" },
-                          ] as const
-                        ).map((f) => {
-                          const active = (coinFlags[g.symbol.toUpperCase()] || "") === f.id;
-                          return (
-                            <button
-                              key={f.id}
-                              type="button"
-                              title={f.title}
-                              aria-pressed={active}
-                              onClick={() => setCoinFlag(g.symbol, f.id)}
-                              className={`h-5 w-5 sm:h-6 sm:w-6 rounded-full border-2 transition ${
-                                active
-                                  ? `${f.cls} ring-2 ring-offset-1 ring-slate-400 scale-110 opacity-100`
-                                  : `${f.idle} opacity-40 hover:opacity-70`
-                              }`}
-                            >
-                              <span className="sr-only">{f.label}</span>
-                            </button>
-                          );
-                        })}
+                    </span>
+                    {priceBySymbol[g.symbol.toUpperCase()] != null ? (
+                      <span className="shrink-0 font-bold tabular-nums text-sky-800">
+                        {formatPhp(priceBySymbol[g.symbol.toUpperCase()])}
                       </span>
-                    </h2>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1.5">
+                    ) : null}
+                  </h2>
+                  <span
+                    className="inline-flex shrink-0 items-center justify-center gap-1"
+                    role="group"
+                    aria-label="Coin status flag"
+                  >
+                    {(
+                      [
+                        { id: "bad" as const, label: "Bad", title: "Bad news", cls: "bg-red-500 border-red-600", idle: "bg-red-200 border-red-300" },
+                        { id: "monitor" as const, label: "Watch", title: "Monitor", cls: "bg-orange-500 border-orange-600", idle: "bg-orange-200 border-orange-300" },
+                        { id: "nochase" as const, label: "No chase", title: "Don't chase", cls: "bg-purple-500 border-purple-600", idle: "bg-purple-200 border-purple-300" },
+                        { id: "neutral" as const, label: "Neutral", title: "Neutral", cls: "bg-slate-500 border-slate-600", idle: "bg-slate-300 border-slate-400" },
+                      ] as const
+                    ).map((f) => {
+                      const active = (coinFlags[g.symbol.toUpperCase()] || "") === f.id;
+                      return (
+                        <button
+                          key={f.id}
+                          type="button"
+                          title={f.title}
+                          aria-pressed={active}
+                          onClick={() => setCoinFlag(g.symbol, f.id)}
+                          className={`h-3.5 w-3.5 sm:h-4 sm:w-4 rounded-full border transition ${
+                            active
+                              ? `${f.cls} ring-1 ring-offset-1 ring-slate-400 opacity-100`
+                              : `${f.idle} opacity-45 hover:opacity-75`
+                          }`}
+                        >
+                          <span className="sr-only">{f.label}</span>
+                        </button>
+                      );
+                    })}
+                  </span>
+                  <div className="flex shrink-0 items-center gap-1.5 ml-auto">
                     <button
                       type="button"
                       onClick={() => openJournal(g.symbol, { name: g.name })}

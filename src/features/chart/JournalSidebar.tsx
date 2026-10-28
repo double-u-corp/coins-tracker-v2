@@ -3,6 +3,17 @@ import AlertBanner from "@/components/AlertBanner";
 import JournalForm from "./JournalForm";
 import type { JournalEntryView } from "@/validators/journalSchema";
 import FormattedAiResponse from "@/components/FormattedAiResponse";
+import dynamic from "next/dynamic";
+
+const ManageCoinsView = dynamic(() => import("@/features/manage/ManageCoinsView"), {
+  ssr: false,
+  loading: () => <p className="p-4 text-sm text-gray-500">Loading Manage…</p>,
+});
+const LongScanView = dynamic(() => import("@/features/longScan/LongScanView"), {
+  ssr: false,
+  loading: () => <p className="p-4 text-sm text-gray-500">Loading LONG scan…</p>,
+});
+
 
 interface JournalSidebarProps {
   entries: JournalEntryView[];
@@ -38,6 +49,8 @@ export default function JournalSidebar({
   const [editNotes, setEditNotes] = useState<string>("");
   const [savingId, setSavingId] = useState<number | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [manageOpen, setManageOpen] = useState(false);
+  const [longScanOpen, setLongScanOpen] = useState(false);
 
   async function handleDelete(id: number) {
     setDeletingId(id);
@@ -94,7 +107,27 @@ export default function JournalSidebar({
 
       {/* Column 2: The List of Entries (Takes up 8 columns on desktop) */}
       <div className="lg:col-span-8">
-        <h3 className="mb-2 text-sm font-semibold text-gray-900">Events &amp; notes in range</h3>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-gray-900">Events &amp; notes in range</h3>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setManageOpen(true)}
+              className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-900 hover:bg-emerald-100"
+            >
+              <span aria-hidden>⚙️</span>
+              Manage
+            </button>
+            <button
+              type="button"
+              onClick={() => setLongScanOpen(true)}
+              className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-bold text-indigo-900 hover:bg-indigo-100"
+            >
+              <span aria-hidden>📡</span>
+              LONG scan
+            </button>
+          </div>
+        </div>
         {error && <AlertBanner variant="error" message={`Failed to load journal: ${error}`} />}
         {deleteError && <AlertBanner variant="error" message={deleteError} />}
         {updateError && <AlertBanner variant="error" message={updateError} />}
@@ -199,6 +232,65 @@ export default function JournalSidebar({
           </ul>
         )}
       </div>
+
+      {manageOpen && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/45 p-0 sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Manage coins"
+          onClick={() => setManageOpen(false)}
+        >
+          <div
+            className="flex max-h-[92vh] w-full max-w-5xl flex-col rounded-t-2xl sm:rounded-xl border border-gray-200 bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2 border-b border-gray-100 px-4 py-3 shrink-0">
+              <h2 className="text-base font-bold text-gray-900">⚙️ Manage coins</h2>
+              <button
+                type="button"
+                onClick={() => setManageOpen(false)}
+                className="rounded-md border border-gray-200 px-2.5 py-1 text-sm font-bold text-gray-600 hover:bg-gray-50"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="overflow-y-auto px-3 py-3 sm:px-4">
+              <ManageCoinsView />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {longScanOpen && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/45 p-0 sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="LONG scan"
+          onClick={() => setLongScanOpen(false)}
+        >
+          <div
+            className="flex max-h-[92vh] w-full max-w-6xl flex-col rounded-t-2xl sm:rounded-xl border border-gray-200 bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2 border-b border-gray-100 px-4 py-3 shrink-0">
+              <h2 className="text-base font-bold text-gray-900">📡 LONG scan</h2>
+              <button
+                type="button"
+                onClick={() => setLongScanOpen(false)}
+                className="rounded-md border border-gray-200 px-2.5 py-1 text-sm font-bold text-gray-600 hover:bg-gray-50"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="overflow-y-auto px-1 py-2 sm:px-2">
+              <LongScanView />
+            </div>
+          </div>
+        </div>
+      )}
+
     </aside>
   );
 }

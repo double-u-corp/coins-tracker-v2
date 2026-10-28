@@ -449,17 +449,6 @@ export default function HomeTable() {
               <span className="h-3 w-16 animate-pulse rounded bg-violet-100" aria-hidden />
             )}
           </h2>
-          <div className="flex items-center gap-3 flex-wrap">
-            <Link
-              href="/long-scan"
-              className="inline-flex items-center gap-1.5 rounded-md border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-bold text-indigo-900 shadow-sm hover:bg-indigo-100"
-            >
-              📡 LONG scan →
-            </Link>
-            <span className="text-xs text-gray-400">
-              Targets near/hit · agent review-by dates
-            </span>
-          </div>
         </div>
 
         {loading ? (
@@ -506,9 +495,9 @@ export default function HomeTable() {
                 >
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <div className="min-w-0">
-                      <div className="text-sm font-bold text-gray-900 truncate">
+                      <div className="text-base font-bold text-gray-900 truncate">
                         {card.name}{" "}
-                        <span className="font-mono text-[10px] font-semibold text-gray-500">
+                        <span className="font-mono text-sm font-semibold text-gray-500">
                           {card.symbol}
                         </span>
                       </div>
@@ -569,8 +558,8 @@ export default function HomeTable() {
                             className={`mt-1 text-[11px] font-semibold tabular-nums ${
                               up ? "text-emerald-700" : "text-rose-700"
                             }`}
+                            title="P&L vs average cost"
                           >
-                            Unrealized vs average{" "}
                             <span className="font-bold">
                               {up ? "+" : ""}
                               {pnlPct.toFixed(2)}%
@@ -586,7 +575,7 @@ export default function HomeTable() {
                     </div>
                     <Link
                       href={`/chart?symbol=${encodeURIComponent(card.symbol)}`}
-                      className="shrink-0 text-[11px] font-bold text-brand-600 hover:underline"
+                      className="shrink-0 text-sm font-bold text-brand-600 hover:underline"
                     >
                       Spot →
                     </Link>
