@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, type ReactNode } from "react";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
 import { useHomeLogic } from "./useHomeLogic";
@@ -130,7 +130,7 @@ function MonitorCard({
   );
   const holdings = pos?.holdings ?? 0;
   const spent = pos?.spent ?? 0;
-  let pnl: JSX.Element | null = null;
+  let pnl: ReactNode = null;
   if (holdings > 0 && spent > 0 && card.currentPrice != null && card.currentPrice > 0) {
     const avg = spent / holdings;
     const pnlPhp = holdings * card.currentPrice - spent;

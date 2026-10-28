@@ -71,6 +71,7 @@ function buildAgentPrompt(args: {
     `- If evidence is bearish or unclear, say so (WAIT / SKIP / risk-off). Do not sugar-coat.`
   );
   lines.push(`- Prefer verified recent news/events; say "none verified" if unsure.`);
+  lines.push(`- Complete **Mandatory catalyst research** before any BUY/ADD verdict.`);
   lines.push(`- Do **not** invent news.`);
   lines.push(`- Do **NOT** use training-memory headlines (often stale) — only what you can verify now.`);
   lines.push(
@@ -171,13 +172,29 @@ function buildAgentPrompt(args: {
   }
 
   lines.push(``);
+  lines.push(`## Mandatory catalyst research (complete BEFORE the verdict)
+Live search required. Do **not** invent events or use training-memory headlines. If a category has nothing reliable → **"none verified"**.
+Do **not** treat a bullish catalyst as a guaranteed price rise.
+
+Scan and verify:
+1. **Official project / calendar** — launches, partnerships, conferences, roadmap milestones
+2. **Token unlocks / supply** — dates, size, circulating impact; note provider disagreements
+3. **Market / crypto news** — listings, delistings, exploits, whales, material funding/OI only if relevant to spot
+4. **Political / regulatory** — policy, court, elections (esp. politically themed tickers e.g. TRUMP) only if asset-linked
+5. **Around last local high / pump** (if a date/peak is in the snapshot) — verified items ~60d before/after that may explain the move or fade
+
+For each **relevant** catalyst (skip noise), one tight line each:
+- Date · source URL · official vs reported · already-in-price? (observed vs speculative) · uncertainty · PHP spot implication (buy / wait pullback / hold cash / reduce — **no short/leverage**)
+
+Keep the whole catalyst section short (prefer a small table or ≤6 bullets). Then give the trading verdict **informed by** these findings.`);
+  lines.push(``);
   lines.push(`## Answer format`);
+  lines.push(`1. **Catalyst check** (required first): brief findings per category or "none verified"; include links for any real items`);
   lines.push(
-    `1. Verdict: ` + (args.holding ? `ADD / ADD ONLY ON PULLBACK / DO NOT ADD / TRIM` : `BUY / WAIT / SKIP`)
+    `2. Verdict: ` + (args.holding ? `ADD / ADD ONLY ON PULLBACK / DO NOT ADD / TRIM` : `BUY / WAIT / SKIP`) + ` — must reflect catalysts + technicals; if bearish/unclear say so`
   );
-  lines.push(`2. Why (max 3 bullets) — neutral; include downside if relevant`);
-  lines.push(`3. Levels to watch (entry / invalidation / take-profit) or "none — stay in cash"`);
-  lines.push(`4. News: verified only, or "none verified" — include anything tied to the last pump date if relevant`);
+  lines.push(`3. Why (max 3 bullets) — neutral; mix technical + catalyst`);
+  lines.push(`4. Levels to watch (entry / invalidation / take-profit) or "none — stay in cash"`);
   lines.push(`5. Timeframe note (when to recheck) with at least one calendar date`);
   if (!args.holding) {
     lines.push(

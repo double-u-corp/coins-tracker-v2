@@ -205,22 +205,28 @@ export function formatEntryReviewPrompt(
   }
 
   lines.push(`## Rules`);
-  lines.push(`- **Stance: NEUTRAL.** Do not default to bullish or "talk the trader into staying long."`);
-  lines.push(`- If technicals and/or verified news are weak, risk-off, or bearish → say so clearly (DO NOT ADD / SKIP / WAIT as fits). Do not soften a weak case into ADD out of optimism.`);
-  lines.push(`- Primary filter = technical snapshot below; news is secondary and only when verified.`);
-  lines.push(`- You MAY search live **crypto-specific** news (protocol, exchange, regulation, ETF, unlocks, exploits); do NOT use training-memory headlines.`);
-  lines.push(`- Skip routine macro calendars unless a clear, timely crypto link. Do not invent news. Unverified → "none verified".`);
-  lines.push(`- Balanced view: list both supportive and negative factors when both exist; do not cherry-pick only bullish points.`);
+  lines.push(`- **Stance: NEUTRAL.** Never force a bullish/long bias. If evidence is bearish or unclear, prefer DO NOT ADD / WAIT / SKIP and preserve cash.`);
+  lines.push(`- **Spot only** — buy or sell coins; never recommend shorting or leverage.`);
+  lines.push(`- **Technicals first**; verified catalysts can **change risk assessment** but do not override a broken structure by themselves.`);
+  lines.push(`- **Do not average down** only because the bag is underwater.`);
+  lines.push(`- **TRIM** only when existing position risk/thesis warrants it — not as a soft default.`);
+  lines.push(`- Data is **poll-based** (~8x/day Manila): daily H/L aggregates for RSI/SMA/ATR/range; 3h series for swings/ladder. Do **not** treat these as exchange OHLC candles.`);
+  lines.push(`- **Incomplete / thin data:** if confidence is low, macro is ACCUMULATING DATA, or too few bars, name which signals are unreliable. Do not invent certainty. If missing data could flip the call → default **WAIT / DO NOT ADD**.`);
+  lines.push(`- **Correlated indicators:** do **not** count a liquidity sweep, RSI divergence hint, near-support, and bullish swing as independent confirmations of the same bounce. A sweep or divergence alone is **not** enough to ADD. Require price stabilization and/or a defined entry + **clear invalidation**. Weight **structure + risk/reward** over the count of green flags.`);
+  lines.push(`- Live search only for news; no training-memory headlines; never invent events. Empty category → **"none verified"**.`);
+  lines.push(`- Politically themed tickers (e.g. TRUMP): separate **token/project** news from **person/politics** news with no demonstrated link to the asset.`);
+  lines.push(`- Unlock does not equal automatic sell pressure — note amount/schedule and whether sales are confirmed.`);
+  lines.push(`- Analysis date = **today Manila** unless the user supplies a historical snapshot date (then label it explicitly and shift research windows).`);
   if (isAllocated) {
-    lines.push(`- **Verified positive catalysts** may support a small ADD or ADD ONLY ON PULLBACK — only when they outweigh technical risk and concentration risk.`);
-    lines.push(`- **Verified bad news** → lean DO NOT ADD (and TRIM only if the existing bag thesis is broken).`);
-    lines.push(`- Extended into resistance with empty/mixed news → DO NOT ADD; do not average up into strength without a plan.`);
-    lines.push(`- Underwater with no catalyst → DO NOT ADD / only consider adds on clear weakness with invalidation; never revenge-buy.`);
+    lines.push(`- Primary question: is an **ADD** justified? Ladder % = share of a **predefined additional PHP budget**, not % of coins already held.`);
+    lines.push(`- If ADD: state max additional PHP budget, each tranche PHP size + entry condition, stop-adding / invalidation, approx **new average cost** if filled, extra PHP at risk. Lower avg cost does not mean a safer trade.`);
+    lines.push(`- If catalysts + technicals do not justify an add → **PHP 0** additional spending.`);
   } else {
-    lines.push(`- SHORT / risk-off bias → hold cash / do not buy (never recommend shorting).`);
-    lines.push(`- Price extended above the ladder → WAIT FOR PULLBACK over chasing.`);
-    lines.push(`- Thin history, low confidence, or bearish structure → lean WAIT or SKIP — do not force a long.`);
+    lines.push(`- Primary question: stage ladder buys or stay in cash? SHORT/risk-off bias → cash, never short.`);
+    lines.push(`- Extended above ladder → WAIT FOR PULLBACK, not chase.`);
   }
+  lines.push(``);
+
   lines.push(``);
   const pump = findLastPumpContext(chartPoints || []);
   if (pump) {
@@ -304,29 +310,29 @@ export function formatEntryReviewPrompt(
     day: "2-digit",
   });
 
+  lines.push(`## Mandatory catalyst research (complete BEFORE the verdict)`);
+  lines.push(`Live search. Do not invent events. Category empty → "none verified". Do not treat a bullish catalyst as a guaranteed rally.`);
+  lines.push(`Cover: (1) official project announcements/events (2) unlocks/vesting + circulating impact; cross-check providers vs official docs (3) credible listings/delistings/exploits/regulatory (4) political/regulatory only if asset-linked (5) last local high: ~60d before/after peak + next 30d from analysis date.`);
+  lines.push(`Each relevant item: date · source URL · official vs reported · already in price? · uncertainty · PHP spot implication (add / pullback only / cash / reduce — no short). Max ~6 bullets. Then verdict.`);
+  lines.push(``);
   if (isAllocated) {
     lines.push(`## Answer format (already holding — add / size decision)`);
-    lines.push(`1. Verdict: **ADD** | **ADD ONLY ON PULLBACK** | **DO NOT ADD** | **TRIM** (only if size is already too large / thesis broken)`);
-    lines.push(`2. Why (max 3 technical bullets; max 2 verified news bullets) — focus on **whether buying more is justified**`);
-    lines.push(`3. If ADD / ADD ONLY ON PULLBACK: which levels (ladder / support), suggested size relative to current bag (e.g. smaller tranche), and what invalidates the add`);
-    lines.push(`4. If DO NOT ADD: whether to leave the bag as-is (no new buy) — mention exit only if thesis is clearly broken`);
-    lines.push(`5. Relate to avg cost, unrealized %, and days held when relevant (averaging down only if technicals + verified news support it)`);
-    lines.push(`6. **Timeframe (required):** calendar window anchored to today **${todayManila} (Manila)** — **valid until** and/or **review again by YYYY-MM-DD**`);
-    lines.push(`7. News: verified only, or "none verified"`);
-    lines.push(`8. Then output the **Final journal note** block exactly as specified below — text the trader **copies into the app journal**.`);
+    lines.push(`1. **Catalyst check** (or "none verified") with links where real`);
+    lines.push(`2. Verdict: **ADD** | **ADD ONLY ON PULLBACK** | **DO NOT ADD** | **TRIM** — after catalysts + technicals; incomplete data → lean DO NOT ADD / WAIT`);
+    lines.push(`3. Why (max 3 bullets) — do not over-count correlated signals`);
+    lines.push(`4. If ADD / ADD ONLY ON PULLBACK: max **additional PHP budget**; each ladder tranche as PHP amount (30/30/40 of that budget) + entry condition; invalidation / stop adding; approx **new avg cost** if filled; extra PHP risk. If not justified → **PHP 0** add.`);
+    lines.push(`5. If DO NOT ADD: leave bag as-is unless thesis broken (then TRIM)`);
+    lines.push(`6. **Timeframe:** valid until / review by YYYY-MM-DD (Manila; analysis date **${todayManila}**)`);
+    lines.push(`7. Final **journal note** markdown (required)`);
   } else {
     lines.push(`## Answer format (no position)`);
-    lines.push(`1. Verdict: **READY TO STAGE** | **WAIT FOR PULLBACK** | **SKIP**`);
-    lines.push(`2. Why (max 3 technical bullets; max 2 verified news bullets if any)`);
-    lines.push(`3. If READY or WAIT: which ladder level(s) and invalidation price`);
-    lines.push(`4. Spot risk note (LONG only — no short / no leverage)`);
-    lines.push(`5. **Timeframe (required):** anchored to today **${todayManila} (Manila)**.`);
-    lines.push(`   - If READY TO STAGE: until when the ladder plan stays valid (**valid until YYYY-MM-DD**) and when to re-check if unfilled.`);
-    lines.push(`   - If WAIT FOR PULLBACK: until when to keep waiting before the idea expires or needs a fresh review (**wait until / review by YYYY-MM-DD**).`);
-    lines.push(`   - If SKIP: optional — when this setup might be worth looking at again (date or "not in the next 1–2 weeks").`);
-    lines.push(`   - Always include at least one concrete calendar date, not only "a few days."`);
-    lines.push(`6. News: verified items only, or "none verified"`);
-    lines.push(`7. Then output the **Final journal note** block exactly as specified below.`);
+    lines.push(`1. **Catalyst check** (or "none verified") with links where real`);
+    lines.push(`2. Verdict: **READY TO STAGE** | **WAIT FOR PULLBACK** | **SKIP** — after catalysts + technicals; thin data → WAIT/SKIP`);
+    lines.push(`3. Why (max 3 bullets) — do not over-count correlated signals`);
+    lines.push(`4. If READY or WAIT: which ladder level(s) and invalidation`);
+    lines.push(`5. Spot risk note (LONG only — no short / no leverage)`);
+    lines.push(`6. **Timeframe:** valid until / review by YYYY-MM-DD (Manila; analysis date **${todayManila}**)`);
+    lines.push(`7. Final **journal note** markdown (required)`);
   }
 
   lines.push(``);
@@ -345,9 +351,12 @@ export function formatEntryReviewPrompt(
     lines.push(`- **Agent:** (ChatGPT / Grok / Gemini / other — name the model)`);
     lines.push(`- **Prompt:** Spot Insights · Copy add/size review (full confluence)`);
     lines.push(`- **Verdict:** ADD | ADD ONLY ON PULLBACK | DO NOT ADD | TRIM`);
+    lines.push(`- **Analysis date (Manila):** ${todayManila}`);
     lines.push(`- **Price now:** …`);
     lines.push(`- **Avg cost / unrealized:** …`);
-    lines.push(`- **Add levels / size note:** …`);
+    lines.push(`- **Additional budget (PHP):** … (0 if DO NOT ADD)`);
+    lines.push(`- **Tranches:** … (PHP + level; 30/30/40 of additional budget)`);
+    lines.push(`- **New avg cost if filled:** …`);
     lines.push(`- **Last pump / local high (if relevant):** date · peak · why it may have faded`);
     lines.push(`- **Invalidation (add thesis broken if):** …`);
     lines.push(`- **Timeframe — valid until:** YYYY-MM-DD`);
@@ -361,6 +370,7 @@ export function formatEntryReviewPrompt(
     lines.push(`- **Agent:** (ChatGPT / Grok / Gemini / other — name the model)`);
     lines.push(`- **Prompt:** Spot Insights · Copy entry review (full confluence)`);
     lines.push(`- **Verdict:** READY TO STAGE | WAIT FOR PULLBACK | SKIP`);
+    lines.push(`- **Analysis date (Manila):** ${todayManila}`);
     lines.push(`- **Price now:** …`);
     lines.push(`- **Ladder levels:**`);
     lines.push(`  - … (pct)`);
@@ -417,7 +427,7 @@ export function formatEntryReviewPromptForGoogle(
   }
 
   parts.push(
-    `Data: ~8 polls/day → daily H/L for RSI/SMA/ATR/range; 3h series (~14d) for swings/ladder. Bias LONG=buy bias, SHORT=hold cash (never short).`
+    `Data: ~8 polls/day daily H/L for RSI/SMA/ATR/range; 3h swings/ladder (not exchange OHLC). LONG=buy bias SHORT=cash never short. Catalysts before verdict; no correlated-signal stacking; thin data=wait; ladder%=extra PHP budget not bag size.`
   );
 
   parts.push(
@@ -477,7 +487,7 @@ export function formatEntryReviewPromptForGoogle(
     );
   } else {
     parts.push(
-      `Answer: 1) READY TO STAGE | WAIT FOR PULLBACK | SKIP  2) why  3) ladder + invalidation  4) Timeframe: valid until / review by YYYY-MM-DD (today Manila ${todayManila})  5) news  6) End with markdown journal note: **Agent**, **Prompt: Spot Insights · Google review mini**, verdict, ladder, invalidation, timeframe, news. Neutral. Do not invent news.`
+      `Answer: 1) READY TO STAGE | WAIT FOR PULLBACK | SKIP  2) why  3) ladder + invalidation  4) Timeframe: valid until / review by YYYY-MM-DD (today Manila ${todayManila})  5) news  6) Catalysts first. Thin data=wait. Journal: Agent + Prompt Spot Insights · Google review mini. Neutral. Do not invent news.`
     );
   }
 
