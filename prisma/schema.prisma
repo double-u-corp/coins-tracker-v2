@@ -11,6 +11,8 @@ model Coin {
   id             Int            @id @default(autoincrement())
   name           String
   symbol         String         @unique
+  /// LONG-scan card flag: bad | monitor | nochase | neutral | null (cleared)
+  scanFlag       String?
   records        Record[]
   transactions   Transaction[]
   priceTarget    PriceTarget?

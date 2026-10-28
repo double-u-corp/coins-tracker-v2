@@ -57,6 +57,29 @@ function biasRank(bias: string): number {
   return 4;
 }
 
+type CoinFlag = "bad" | "monitor" | "nochase" | "neutral" | "";
+
+function parseCompactSignals(note: string | null): string[] {
+  if (!note) return [];
+  // Prefer explicit segments after optional [TIER] prefix
+  const body = note.replace(/^\[[^\]]+\]\s*/, "");
+  const parts = body.split(" · ").map((s) => s.trim()).filter(Boolean);
+  const out: string[] = [];
+  for (const p of parts) {
+    if (/^RSI/i.test(p)) {
+      out.push(p.replace(/\s*\([+\-]\d+\)\s*$/, "").trim());
+    } else if (/support|range|Position/i.test(p) && /%/.test(p)) {
+      // keep "Near range support (3% of range)" style without trailing weight
+      out.push(p.replace(/\s*—\s*discount zone.*/i, "").replace(/\s*\([+\-]\d+\)\s*$/, "").trim());
+    } else if (/20 SMA|50 SMA|20\/50 SMA/i.test(p)) {
+      out.push(p);
+    }
+  }
+  // Fallback: take first 3 short parts if nothing matched
+  if (out.length === 0) return parts.slice(0, 3).map((p) => p.slice(0, 80));
+  return out.slice(0, 3);
+}
+
 function tierLabel(tier: string) {
   if (tier === "NEAR_SUPPORT_UP" || tier === "near_support_up") {
     return {
@@ -97,6 +120,51 @@ export default function LongScanView() {
   const [journalLoading, setJournalLoading] = useState(false);
   const [journalError, setJournalError] = useState<string | null>(null);
   const [journalDeletingId, setJournalDeletingId] = useState<number | null>(null);
+  const [coinFlags, setCoinFlags] = useState<Record<string, CoinFlag>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/coin-flags");
+        if (!res.ok) return;
+        const data = (await res.json()) as { flags?: Record<string, string> };
+        if (cancelled || !data.flags) return;
+        const mapped: Record<string, CoinFlag> = {};
+        for (const [k, v] of Object.entries(data.flags)) {
+          if (v === "bad" || v === "monitor" || v === "nochase" || v === "neutral") {
+            mapped[k.toUpperCase()] = v;
+          }
+        }
+        setCoinFlags(mapped);
+      } catch {
+        /* offline — leave empty */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const setCoinFlag = (symbol: string, flag: CoinFlag) => {
+    const key = symbol.toUpperCase();
+    setCoinFlags((prev) => {
+      const next = { ...prev };
+      const clearing = next[key] === flag;
+      if (clearing) delete next[key];
+      else next[key] = flag;
+      const payloadFlag = clearing ? "" : flag;
+      void fetch("/api/coin-flags", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol: key, flag: payloadFlag }),
+      }).catch(() => {
+        /* keep optimistic UI */
+      });
+      return next;
+    });
+  };
+
 
 
   /** Flatten hits across runs → group by coin (newest first). */
@@ -488,17 +556,51 @@ export default function LongScanView() {
                 className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 bg-gradient-to-r from-indigo-50/80 to-white px-4 py-3">
-                  <div className="min-w-0">
-                    <h2 className="text-base font-extrabold text-slate-900 truncate">
-                      {g.name}{" "}
-                      <span className="font-mono text-sm font-bold text-indigo-700">
-                        {g.symbol}
+                  <div className="min-w-0 flex-1">
+                    <h2 className="text-base font-extrabold text-slate-900 flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="truncate">
+                        {g.name}{" "}
+                        <span className="font-mono text-sm font-bold text-indigo-700">
+                          {g.symbol}
+                        </span>
                       </span>
                       {priceBySymbol[g.symbol.toUpperCase()] != null ? (
-                        <span className="ml-2 font-bold tabular-nums text-sky-800">
+                        <span className="font-bold tabular-nums text-sky-800">
                           {formatPhp(priceBySymbol[g.symbol.toUpperCase()])}
                         </span>
                       ) : null}
+                      <span
+                        className="inline-flex items-center gap-1"
+                        role="group"
+                        aria-label="Coin status flag"
+                      >
+                        {(
+                          [
+                            { id: "bad" as const, label: "Bad", title: "Bad news", cls: "bg-red-500 border-red-600", idle: "bg-red-200 border-red-300" },
+                            { id: "monitor" as const, label: "Watch", title: "Monitor", cls: "bg-orange-500 border-orange-600", idle: "bg-orange-200 border-orange-300" },
+                            { id: "nochase" as const, label: "No chase", title: "Don't chase", cls: "bg-purple-500 border-purple-600", idle: "bg-purple-200 border-purple-300" },
+                            { id: "neutral" as const, label: "Neutral", title: "Neutral", cls: "bg-slate-500 border-slate-600", idle: "bg-slate-300 border-slate-400" },
+                          ] as const
+                        ).map((f) => {
+                          const active = (coinFlags[g.symbol.toUpperCase()] || "") === f.id;
+                          return (
+                            <button
+                              key={f.id}
+                              type="button"
+                              title={f.title}
+                              aria-pressed={active}
+                              onClick={() => setCoinFlag(g.symbol, f.id)}
+                              className={`h-5 w-5 sm:h-6 sm:w-6 rounded-full border-2 transition ${
+                                active
+                                  ? `${f.cls} ring-2 ring-offset-1 ring-slate-400 scale-110 opacity-100`
+                                  : `${f.idle} opacity-40 hover:opacity-70`
+                              }`}
+                            >
+                              <span className="sr-only">{f.label}</span>
+                            </button>
+                          );
+                        })}
+                      </span>
                     </h2>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
@@ -611,9 +713,13 @@ export default function LongScanView() {
                           )}
                         </div>
                         {h.signalsNote && (
-                          <p className="mt-1.5 text-[10px] text-gray-500 line-clamp-2">
-                            {h.signalsNote}
-                          </p>
+                          <ul className="mt-1.5 space-y-0.5 text-[11px] text-slate-600">
+                            {parseCompactSignals(h.signalsNote).map((line, i) => (
+                              <li key={i} className="leading-snug">
+                                {line}
+                              </li>
+                            ))}
+                          </ul>
                         )}
                       </article>
                     );

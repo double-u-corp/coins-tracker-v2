@@ -110,12 +110,58 @@ function isNearSupportAndRising(
   return isPriceRising(intraday, points);
 }
 
-function signalsNote(c: ConfluenceResult): string {
-  return c.signals
-    .filter((s) => s.available && s.weight !== 0)
-    .map((s) => `${s.name}: ${s.detail} (${s.weight > 0 ? "+" : ""}${s.weight})`)
-    .join(" · ")
-    .slice(0, 500);
+function signalsNote(c: ConfluenceResult, points?: ChartPoint[]): string {
+  const bits: string[] = [];
+  const rsi = c.signals.find((s) => s.name.startsWith("RSI"));
+  if (rsi?.available) {
+    // e.g. "RSI 36 — leaning oversold"
+    const short = rsi.detail.replace(/\s*—\s*/, " — ").split(" · ")[0];
+    bits.push(`RSI (14): ${short}`);
+  }
+  const range = c.signals.find((s) => s.name.startsWith("Position in"));
+  if (range?.available) {
+    bits.push(range.detail); // "Near range support (3% of range) — discount zone"
+  }
+  // Gap between 20 SMA and 50 SMA at report time (how far they are from meeting)
+  if (points && points.length >= 50) {
+    try {
+      const closes = points
+        .map((pt) => Number(pt.close ?? pt.high ?? pt.low))
+        .filter((n) => Number.isFinite(n));
+      if (closes.length >= 50) {
+        const sma20 =
+          closes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+        const sma50 =
+          closes.slice(-50).reduce((a, b) => a + b, 0) / 50;
+        if (sma50 > 0 && Number.isFinite(sma20) && Number.isFinite(sma50)) {
+          const pct = ((sma20 - sma50) / sma50) * 100;
+          const abs = Math.abs(pct).toFixed(1);
+          const fmt = (v: number) => v.toFixed(v >= 100 ? 0 : 2);
+          if (Math.abs(pct) < 0.05) {
+            bits.push(`20/50 SMA aligned (~${fmt(sma50)})`);
+          } else if (pct < 0) {
+            bits.push(
+              `20 SMA ${abs}% below 50 SMA (20=${fmt(sma20)}, 50=${fmt(sma50)}) — gap to meet`
+            );
+          } else {
+            bits.push(
+              `20 SMA ${abs}% above 50 SMA (20=${fmt(sma20)}, 50=${fmt(sma50)})`
+            );
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  if (bits.length === 0) {
+    return c.signals
+      .filter((s) => s.available && s.weight !== 0)
+      .map((s) => `${s.name}: ${s.detail}`)
+      .join(" · ")
+      .slice(0, 400);
+  }
+  return bits.join(" · ").slice(0, 400);
 }
 
 async function loadDailyPoints(coinId: number): Promise<ChartPoint[]> {
@@ -202,17 +248,119 @@ function serializeLogStore(runs: LongScanRunPayload[]): string {
   return `<!--meta:${JSON.stringify({ version: 1, runs })}-->\n`;
 }
 
-/** Read all long-scan runs (CatalystLog — always available). */
+/** Runs from CatalystLog (new) + LongScanHit/Run tables (old) so page always matches cron. */
 export async function listLongScanRuns(): Promise<LongScanRunPayload[]> {
-  const log = await prisma.catalystLog.findUnique({ where: { promptId: LOG_PROMPT_ID } });
-  const runs = parseLogStore(log?.response);
   const cutoff = Date.now() - RETENTION_DAYS * 86_400_000;
-  return runs
-    .filter((r) => {
-      const t = Date.parse(r.scannedAt);
-      return !Number.isFinite(t) || t >= cutoff;
-    })
-    .sort((a, b) => b.scannedAt.localeCompare(a.scannedAt));
+  const byId = new Map<string, LongScanRunPayload>();
+
+  // --- New store ---
+  try {
+    const log = await prisma.catalystLog.findUnique({ where: { promptId: LOG_PROMPT_ID } });
+    for (const r of parseLogStore(log?.response)) {
+      const ts = Date.parse(r.scannedAt);
+      if (Number.isFinite(ts) && ts < cutoff) continue;
+      byId.set(r.id, r);
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // --- Old Prisma tables (if they exist and still receive writes) ---
+  try {
+    const db = prisma as typeof prisma & {
+      longScanRun?: { findMany: (args: unknown) => Promise<Array<{ id: number; scannedAt: Date; scanned: number; saved: number; pruned: number; message: string | null }>> };
+      longScanHit?: { findMany: (args: unknown) => Promise<Array<Record<string, unknown>>> };
+    };
+    if (db.longScanHit?.findMany) {
+      const hits = await db.longScanHit.findMany({
+        orderBy: [{ scannedAt: "desc" }, { symbol: "asc" }],
+        take: 300,
+      });
+      const groups = new Map<string, LongScanHitPayload[]>();
+      const times = new Map<string, string>();
+      for (const h of hits) {
+        const scannedAt =
+          h.scannedAt instanceof Date
+            ? h.scannedAt.toISOString()
+            : String(h.scannedAt);
+        const ts = Date.parse(scannedAt);
+        if (Number.isFinite(ts) && ts < cutoff) continue;
+        const key = scannedAt;
+        times.set(key, scannedAt);
+        let ladder: LadderLevel[] = [];
+        try {
+          ladder = JSON.parse(String(h.ladderJson || "[]"));
+        } catch {
+          ladder = [];
+        }
+        const payload: LongScanHitPayload = {
+          symbol: String(h.symbol),
+          name: String(h.name),
+          bias: String(h.bias),
+          score: Number(h.score) || 0,
+          maxScore: Number(h.maxScore) || 0,
+          confidence: Number(h.confidence) || 0,
+          currentPrice: Number(h.currentPrice) || 0,
+          support: h.support != null ? Number(h.support) : null,
+          resistance: h.resistance != null ? Number(h.resistance) : null,
+          isExtended: Boolean(h.isExtended),
+          ladder,
+          invalidation: h.invalidation != null ? Number(h.invalidation) : null,
+          invalidationNote: h.invalidationNote != null ? String(h.invalidationNote) : null,
+          target: h.target != null ? Number(h.target) : null,
+          targetNote: h.targetNote != null ? String(h.targetNote) : null,
+          macroTrend: h.macroTrend != null ? String(h.macroTrend) : null,
+          signalsNote: h.signalsNote != null ? String(h.signalsNote) : null,
+          tier: "BUY_LOW",
+        };
+        (groups.get(key) || groups.set(key, []).get(key)!).push(payload);
+      }
+      for (const [key, groupHits] of groups) {
+        const id = `prisma_${key}`;
+        if (byId.has(id)) continue;
+        byId.set(id, {
+          id,
+          scannedAt: times.get(key) || key,
+          scanned: groupHits.length,
+          saved: groupHits.length,
+          pruned: 0,
+          message: groupHits.length
+            ? `Saved ${groupHits.length} hit(s) (DB).`
+            : "No hits (DB).",
+          hits: groupHits,
+        });
+      }
+    }
+    if (db.longScanRun?.findMany) {
+      const runs = await db.longScanRun.findMany({
+        orderBy: { scannedAt: "desc" },
+        take: 60,
+      });
+      for (const r of runs) {
+        const scannedAt = r.scannedAt.toISOString();
+        const ts = Date.parse(scannedAt);
+        if (Number.isFinite(ts) && ts < cutoff) continue;
+        const id = `prisma_run_${r.id}`;
+        if (byId.has(id)) continue;
+        // Prefer hit-grouped rows for same timestamp
+        const existing = [...byId.values()].find((x) => x.scannedAt === scannedAt);
+        if (existing) continue;
+        byId.set(id, {
+          id,
+          scannedAt,
+          scanned: r.scanned,
+          saved: r.saved,
+          pruned: r.pruned,
+          message: r.message || (r.saved ? `Saved ${r.saved}` : "No hits"),
+          hits: [],
+        });
+      }
+    }
+  } catch {
+    /* tables may not exist on this deploy */
+  }
+
+  return [...byId.values()].sort((a, b) => b.scannedAt.localeCompare(a.scannedAt));
 }
 
 async function appendRunToLog(run: LongScanRunPayload): Promise<void> {
@@ -368,7 +516,7 @@ export async function runLongScanSnapshot(
         const buyLow = isWatchlistBuyLowHit(confluence);
         const ladder: LadderLevel[] = confluence.entrySuggestion?.ladder ?? [];
         const tier = buyLow ? "BUY_LOW" : "NEAR_SUPPORT_UP";
-        const note = `[${tier}] near support + rising (3h) · ${signalsNote(confluence)}`.slice(0, 500);
+        const note = `[${tier}] ${signalsNote(confluence, points)}`.slice(0, 500);
         const extended = isLongExtended(confluence);
 
         // Dedupe symbol within this run
@@ -433,6 +581,48 @@ export async function runLongScanSnapshot(
     message: finalMessage,
     hits: mergedHits,
   });
+
+  // Dual-write to LongScanHit so old UIs / DB browsers still see rows
+  try {
+    const db = prisma as typeof prisma & {
+      longScanHit?: { create: (args: unknown) => Promise<unknown> };
+      coin?: { findFirst: (args: unknown) => Promise<{ id: number } | null> };
+    };
+    if (db.longScanHit?.create && hitPayloads.length > 0) {
+      for (const h of hitPayloads) {
+        const coin = await prisma.coin.findFirst({
+          where: { symbol: h.symbol },
+          select: { id: true },
+        });
+        if (!coin) continue;
+        await db.longScanHit.create({
+          data: {
+            coinId: coin.id,
+            symbol: h.symbol,
+            name: h.name,
+            scannedAt: runAt,
+            bias: h.bias,
+            score: h.score,
+            maxScore: h.maxScore,
+            confidence: h.confidence,
+            currentPrice: h.currentPrice,
+            support: h.support,
+            resistance: h.resistance,
+            isExtended: h.isExtended,
+            ladderJson: JSON.stringify(h.ladder),
+            invalidation: h.invalidation,
+            invalidationNote: h.invalidationNote,
+            target: h.target,
+            targetNote: h.targetNote,
+            macroTrend: h.macroTrend,
+            signalsNote: h.signalsNote,
+          },
+        });
+      }
+    }
+  } catch {
+    /* optional legacy table */
+  }
 
   return {
     ok: true,
