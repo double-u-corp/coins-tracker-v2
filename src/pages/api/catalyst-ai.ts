@@ -5,6 +5,7 @@ type ResponseData = {
   response?: string;
   logs?: Record<string, { timestamp: number; response: string; category: string }>;
   error?: string;
+  stored?: boolean;
 };
 
 // "markdown" = human-readable analyst summary (default).
