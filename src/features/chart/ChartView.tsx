@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import Dropdown from "@/components/Dropdown";
@@ -34,6 +34,213 @@ const RANGE_OPTIONS: { label: string; value: ChartRange }[] = [
   { label: "3Y", value: "3y" },
 ];
 
+
+function PollMiniLine({
+  groups,
+  dayLabel,
+  todayKey,
+}: {
+  groups: {
+    dayKey: string;
+    tiles: {
+      hour: number;
+      label: string;
+      price: number | null;
+      isCurrent: boolean;
+      isDayStart?: boolean;
+      delta: number | null;
+    }[];
+  }[];
+  dayLabel: (key: string) => string;
+  todayKey: string;
+}) {
+  const [hover, setHover] = useState<{
+    x: number;
+    y: number;
+    label: string;
+    price: number;
+  } | null>(null);
+
+  const series = groups.flatMap((g) =>
+    g.tiles.map((tile) => ({
+      ...tile,
+      dayKey: g.dayKey,
+      xLabel: `${dayLabel(g.dayKey)} ${tile.label}`,
+    }))
+  );
+  const prices = series.map((s) => s.price).filter((p): p is number => p != null && Number.isFinite(p));
+  if (prices.length < 2) {
+    return <p className="text-xs text-gray-500">Not enough poll points for a line.</p>;
+  }
+  const min = Math.min(...prices);
+  const max = Math.max(...prices);
+  const pad = (max - min) * 0.08 || max * 0.01 || 1;
+  const y0 = min - pad;
+  const y1 = max + pad;
+  const left = 52; // room for price labels
+  const right = 6;
+  const top = 8;
+  const bottom = 14;
+  const w = 900;
+  const h = 200;
+  const plotW = w - left - right;
+  const plotH = h - top - bottom;
+  const n = series.length;
+  const yAt = (price: number) => top + plotH - ((price - y0) / (y1 - y0)) * plotH;
+  const pts = series
+    .map((s, i) => {
+      if (s.price == null || !Number.isFinite(s.price)) return null;
+      const x = n <= 1 ? left + plotW / 2 : left + (i / (n - 1)) * plotW;
+      const y = yAt(s.price);
+      return { x, y, s };
+    })
+    .filter(Boolean) as { x: number; y: number; s: (typeof series)[0] }[];
+  const path = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const ticks = [y1, (y0 + y1) / 2, y0];
+  const fmt = (v: number) =>
+    v >= 1000 ? v.toLocaleString("en-PH", { maximumFractionDigits: 0 }) : v.toLocaleString("en-PH", { maximumFractionDigits: 4 });
+
+  return (
+    <div className="relative -mx-1 flex w-[calc(100%+0.5rem)] max-w-none flex-col rounded-lg border border-violet-100 bg-violet-50/30 sm:-mx-2 sm:w-[calc(100%+1rem)]">
+      <div className="w-full p-1 pb-0 sm:p-1.5 sm:pb-0">
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        className="h-52 w-full sm:h-56"
+        role="img"
+        aria-label="3h poll prices"
+        onMouseLeave={() => setHover(null)}
+      >
+        {/* Y-axis grid + labels */}
+        {ticks.map((tv, i) => {
+          const y = yAt(tv);
+          return (
+            <g key={i}>
+              <line x1={left} x2={w - right} y1={y} y2={y} stroke="#e9d5ff" strokeWidth={1} />
+              <text
+                x={left - 6}
+                y={y + 3}
+                textAnchor="end"
+                className="fill-violet-800"
+                style={{ fontSize: 10, fontWeight: 600 }}
+              >
+                {fmt(tv)}
+              </text>
+            </g>
+          );
+        })}
+        {pts.map((p, i) =>
+          p.s.isDayStart ? (
+            <line
+              key={`day-${i}`}
+              x1={p.x}
+              x2={p.x}
+              y1={top}
+              y2={h - bottom}
+              stroke="#c4b5fd"
+              strokeWidth={1}
+              strokeDasharray="3 3"
+            />
+          ) : null
+        )}
+        <path d={path} fill="none" stroke="#7c3aed" strokeWidth={2} />
+        {pts.map((p, i) => (
+          <g key={i}>
+            {/* larger hit area for touch/hover */}
+            <circle
+              cx={p.x}
+              cy={p.y}
+              r={14}
+              fill="transparent"
+              className="cursor-pointer"
+              onMouseEnter={() =>
+                setHover({
+                  x: p.x,
+                  y: p.y,
+                  label: p.s.xLabel,
+                  price: p.s.price as number,
+                })
+              }
+              onMouseMove={() =>
+                setHover({
+                  x: p.x,
+                  y: p.y,
+                  label: p.s.xLabel,
+                  price: p.s.price as number,
+                })
+              }
+              onFocus={() =>
+                setHover({
+                  x: p.x,
+                  y: p.y,
+                  label: p.s.xLabel,
+                  price: p.s.price as number,
+                })
+              }
+            />
+            <circle
+              cx={p.x}
+              cy={p.y}
+              r={p.s.isCurrent ? 4.5 : p.s.isDayStart ? 3.5 : 2.5}
+              fill={p.s.isCurrent ? "#059669" : p.s.isDayStart ? "#7c3aed" : "#4c1d95"}
+              className="pointer-events-none"
+            />
+          </g>
+        ))}
+        {hover && (
+          <g pointerEvents="none">
+            <line
+              x1={hover.x}
+              x2={hover.x}
+              y1={top}
+              y2={h - bottom}
+              stroke="#a78bfa"
+              strokeWidth={1}
+              strokeDasharray="2 2"
+            />
+            <rect
+              x={Math.min(Math.max(hover.x - 70, left), w - right - 140)}
+              y={Math.max(hover.y - 36, 4)}
+              width={140}
+              height={32}
+              rx={6}
+              fill="#1e1b4b"
+              opacity={0.92}
+            />
+            <text
+              x={Math.min(Math.max(hover.x - 70, left), w - right - 140) + 8}
+              y={Math.max(hover.y - 36, 4) + 13}
+              fill="#e9d5ff"
+              style={{ fontSize: 9, fontWeight: 600 }}
+            >
+              {hover.label}
+            </text>
+            <text
+              x={Math.min(Math.max(hover.x - 70, left), w - right - 140) + 8}
+              y={Math.max(hover.y - 36, 4) + 25}
+              fill="#fff"
+              style={{ fontSize: 11, fontWeight: 700 }}
+            >
+              {formatPhp(hover.price)}
+            </text>
+          </g>
+        )}
+      </svg>
+      </div>
+      <div className="flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-violet-100 bg-white/70 px-2.5 py-1.5 text-[10px] text-gray-500">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+          <span className="font-semibold text-violet-700">● day start (2:05)</span>
+          <span className="font-semibold text-emerald-700">● now</span>
+          <span className="tabular-nums text-gray-600">
+            {dayLabel(series[0]?.dayKey || todayKey)} → {dayLabel(series[series.length - 1]?.dayKey || todayKey)}
+          </span>
+        </div>
+        <span className="text-gray-400">Hover a point for price</span>
+      </div>
+    </div>
+  );
+}
+
+
 export default function ChartView() {
   const {
     coinOptions,
@@ -66,6 +273,9 @@ export default function ChartView() {
   const [showS2, setShowS2] = useState(false);
   const [showR1, setShowR1] = useState(false);
   const [showR2, setShowR2] = useState(false);
+  /** Extra Manila days of 3h polls (each = 8 slots) loaded via "Load more". */
+  const [pollExtraDays, setPollExtraDays] = useState(0);
+  const [pollViewMode, setPollViewMode] = useState<"cards" | "line">("line");
   const [showAllScanResults, setShowAllScanResults] = useState(false);
   const [scanCopied, setScanCopied] = useState(false);
   const [cardCopiedSymbol, setCardCopiedSymbol] = useState<string | null>(null);
@@ -164,7 +374,11 @@ export default function ChartView() {
     return (lastPoint.high + lastPoint.low) / 2;
   }, [selectedCoin, points]);
 
-  /** Last 16 Manila poll slots ending at current; grouped by day for display. */
+  useEffect(() => {
+    setPollExtraDays(0);
+  }, [symbol]);
+
+  /** Manila poll slots ending at current; +8 slots per Load more day. */
   const pollWindow = useMemo(() => {
     const SLOT_HOURS = [2, 5, 8, 11, 14, 17, 20, 23] as const;
     const SLOT_LABELS: Record<number, string> = {
@@ -177,7 +391,7 @@ export default function ChartView() {
       20: "20:05",
       23: "23:05",
     };
-    const WINDOW = 16;
+    const WINDOW = 16 + Math.max(0, pollExtraDays) * 8;
 
     const manilaNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
     const todayKey = manilaNow.toISOString().slice(0, 10);
@@ -263,6 +477,8 @@ export default function ChartView() {
         price,
         isCurrent,
         sameHourAsNow,
+        /** First poll of the Manila calendar day (2:05) — day divider. */
+        isDayStart: hour === SLOT_HOURS[0],
         delta: null as number | null,
       };
     });
@@ -303,8 +519,8 @@ export default function ChartView() {
         timeZone: "UTC",
       });
 
-    return { groups, dayLabel, todayKey };
-  }, [intradayPoints, points, currentPrice]);
+    return { groups, dayLabel, todayKey, windowSize: WINDOW, extraDays: pollExtraDays };
+  }, [intradayPoints, points, currentPrice, pollExtraDays]);
 
   const pollPriceLen = useMemo(() => {
     let max = 6;
@@ -326,6 +542,7 @@ export default function ChartView() {
       price: number | null;
       isCurrent: boolean;
       sameHourAsNow?: boolean;
+      isDayStart?: boolean;
       delta: number | null;
     },
     dayTag: string,
@@ -335,15 +552,18 @@ export default function ChartView() {
     const up = s.delta != null && s.delta > 0.005;
     const down = s.delta != null && s.delta < -0.005;
     const sameHour = Boolean(s.sameHourAsNow) && !s.isCurrent;
+    const dayStart = Boolean(s.isDayStart);
     return (
       <div
         key={`${dayTag}-${s.hour}`}
-        title={`${dayTag} ${s.label} Manila${sameHour ? " · same hour as now" : ""}`}
+        title={`${dayTag} ${s.label} Manila${dayStart ? " · day start" : ""}${sameHour ? " · same hour as now" : ""}`}
         style={{ containerType: "inline-size" }}
         className={`relative flex w-[5.75rem] sm:w-[6.75rem] flex-none flex-col items-center justify-center rounded-xl px-1.5 py-3 text-center shadow-sm transition-colors sm:px-2.5 ${
           s.isCurrent
             ? "border-2 border-emerald-500 bg-gradient-to-b from-emerald-50 to-emerald-100/80 ring-2 ring-emerald-200/80"
-            : sameHour
+            : dayStart
+              ? "border-2 border-violet-400 bg-violet-100/90 ring-1 ring-violet-200"
+              : sameHour
               ? "border-2 border-emerald-300 bg-emerald-50/70 ring-1 ring-emerald-100"
               : hasPrice
                 ? muted
@@ -802,36 +1022,91 @@ export default function ChartView() {
 
             {currentPrice > 0 && (
               <div className="border-t border-gray-100 pt-4">
-                <div className="mb-2.5 flex items-center justify-between">
+                <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
                     3h Polls
                   </span>
-                  <span className="text-[11px] font-medium text-gray-400">Manila</span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] font-medium text-gray-400">Manila</span>
+                    <div className="inline-flex rounded-md border border-gray-200 bg-white p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setPollViewMode("cards")}
+                        className={`rounded px-2 py-0.5 text-[10px] font-bold ${
+                          pollViewMode === "cards"
+                            ? "bg-violet-600 text-white"
+                            : "text-gray-600 hover:bg-gray-50"
+                        }`}
+                      >
+                        Cards
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPollViewMode("line")}
+                        className={`rounded px-2 py-0.5 text-[10px] font-bold ${
+                          pollViewMode === "line"
+                            ? "bg-violet-600 text-white"
+                            : "text-gray-600 hover:bg-gray-50"
+                        }`}
+                      >
+                        Line
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPollExtraDays((d) => Math.min(d + 1, 14))}
+                      disabled={pollExtraDays >= 14}
+                      className="rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-bold text-violet-900 hover:bg-violet-100 disabled:opacity-40"
+                      title="Load one more Manila day (8 slots) of history"
+                    >
+                      Load +1 day
+                    </button>
+                    {pollExtraDays > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setPollExtraDays(0)}
+                        className="rounded-md border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-600 hover:bg-gray-50"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
                 </div>
+                <p className="mb-2 text-[10px] text-gray-400">
+                  Violet tile = day start (2:05 Manila) · {pollWindow.windowSize} slots
+                  {pollExtraDays > 0 ? ` (+${pollExtraDays}d)` : ""}
+                </p>
 
-                {/* Continuous sequence (snake wrap) — no gaps between days */}
-                <div className="mt-2 flex flex-wrap gap-1.5 sm:gap-2">
-                  {pollWindow.groups.flatMap((g) => {
-                    const muted = g.dayKey !== pollWindow.todayKey;
-                    const dayTitle =
-                      g.dayKey === pollWindow.todayKey
-                        ? `Today · ${pollWindow.dayLabel(g.dayKey)}`
-                        : pollWindow.dayLabel(g.dayKey);
-                    return g.tiles.map((tile, ti) => (
-                      <div key={`${g.dayKey}-${tile.hour}`} className="relative flex-none">
-                        {ti === 0 && (
-                          <div
-                            className="pointer-events-none absolute -top-3.5 left-0 z-10 max-w-[5.25rem] truncate text-[9px] font-bold uppercase tracking-wide text-gray-400"
-                            title={dayTitle}
-                          >
-                            {dayTitle}
-                          </div>
-                        )}
-                        {renderPollTile(tile, g.dayKey, muted)}
-                      </div>
-                    ));
-                  })}
-                </div>
+                {pollViewMode === "line" ? (
+                  <PollMiniLine
+                    groups={pollWindow.groups}
+                    dayLabel={pollWindow.dayLabel}
+                    todayKey={pollWindow.todayKey}
+                  />
+                ) : (
+                  <div className="mt-2 flex flex-wrap gap-1.5 sm:gap-2">
+                    {pollWindow.groups.flatMap((g) => {
+                      const muted = g.dayKey !== pollWindow.todayKey;
+                      const dayTitle =
+                        g.dayKey === pollWindow.todayKey
+                          ? `Today · ${pollWindow.dayLabel(g.dayKey)}`
+                          : pollWindow.dayLabel(g.dayKey);
+                      return g.tiles.map((tile, ti) => (
+                        <div key={`${g.dayKey}-${tile.hour}`} className="relative flex-none">
+                          {ti === 0 && (
+                            <div
+                              className="pointer-events-none absolute -top-3.5 left-0 z-10 max-w-[5.25rem] truncate text-[9px] font-bold uppercase tracking-wide text-violet-600"
+                              title={dayTitle}
+                            >
+                              {dayTitle}
+                            </div>
+                          )}
+                          {renderPollTile(tile, g.dayKey, muted)}
+                        </div>
+                      ));
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </div>
