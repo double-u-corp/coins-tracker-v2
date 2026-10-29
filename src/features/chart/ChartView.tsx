@@ -77,12 +77,13 @@ function PollMiniLine({
   const pad = (max - min) * 0.08 || max * 0.01 || 1;
   const y0 = min - pad;
   const y1 = max + pad;
-  const left = 52; // room for price labels
-  const right = 6;
-  const top = 8;
-  const bottom = 14;
-  const w = 900;
-  const h = 200;
+  const left = 48; // room for price labels
+  const right = 4;
+  const top = 10;
+  const bottom = 16;
+  // Tall viewBox so phone screens get more vertical room when scaled to 100% width
+  const w = 360;
+  const h = 280;
   const plotW = w - left - right;
   const plotH = h - top - bottom;
   const n = series.length;
@@ -105,7 +106,7 @@ function PollMiniLine({
       <div className="w-full p-1 pb-0 sm:p-1.5 sm:pb-0">
       <svg
         viewBox={`0 0 ${w} ${h}`}
-        className="h-52 w-full sm:h-56"
+        className="h-[min(58vw,320px)] w-full min-h-[240px] sm:h-64 sm:min-h-0"
         role="img"
         aria-label="3h poll prices"
         onMouseLeave={() => setHover(null)}
@@ -121,7 +122,7 @@ function PollMiniLine({
                 y={y + 3}
                 textAnchor="end"
                 className="fill-violet-800"
-                style={{ fontSize: 10, fontWeight: 600 }}
+                style={{ fontSize: 11, fontWeight: 700 }}
               >
                 {fmt(tv)}
               </text>
@@ -149,7 +150,7 @@ function PollMiniLine({
             <circle
               cx={p.x}
               cy={p.y}
-              r={14}
+              r={18}
               fill="transparent"
               className="cursor-pointer"
               onMouseEnter={() =>
@@ -161,6 +162,14 @@ function PollMiniLine({
                 })
               }
               onMouseMove={() =>
+                setHover({
+                  x: p.x,
+                  y: p.y,
+                  label: p.s.xLabel,
+                  price: p.s.price as number,
+                })
+              }
+              onClick={() =>
                 setHover({
                   x: p.x,
                   y: p.y,
@@ -180,7 +189,7 @@ function PollMiniLine({
             <circle
               cx={p.x}
               cy={p.y}
-              r={p.s.isCurrent ? 4.5 : p.s.isDayStart ? 3.5 : 2.5}
+              r={p.s.isCurrent ? 5.5 : p.s.isDayStart ? 4.5 : 3.5}
               fill={p.s.isCurrent ? "#059669" : p.s.isDayStart ? "#7c3aed" : "#4c1d95"}
               className="pointer-events-none"
             />
