@@ -64,7 +64,7 @@ function biasRank(bias: string): number {
   return 4;
 }
 
-type CoinFlag = "bad" | "monitor" | "nochase" | "neutral" | "";
+type CoinFlag = "bad" | "monitor" | "nochase" | "neutral" | "revisit" | "special" | "";
 
 function parseCompactSignals(note: string | null): string[] {
   if (!note) return [];
@@ -78,7 +78,7 @@ function parseCompactSignals(note: string | null): string[] {
     } else if (/support|range|Position/i.test(p) && /%/.test(p)) {
       // keep "Near range support (3% of range)" style without trailing weight
       out.push(p.replace(/\s*—\s*discount zone.*/i, "").replace(/\s*\([+\-]\d+\)\s*$/, "").trim());
-    } else if (/20 SMA|50 SMA|20\/50 SMA/i.test(p)) {
+    } else if (/Breakout|20 SMA|to 20 SMA/i.test(p)) {
       out.push(p);
     }
   }
@@ -90,6 +90,8 @@ function parseCompactSignals(note: string | null): string[] {
 
 function noteHasPriceBelow20(note: string | null): boolean | null {
   if (!note) return null;
+  if (/Price Breakout|Price above 20 SMA|crossed above the 20 SMA/i.test(note)) return false;
+  if (/% to 20 SMA cross/i.test(note)) return true;
   if (/Price below 20 SMA/i.test(note)) return true;
   if (/Price above 20 SMA/i.test(note)) return false;
   return null;
@@ -166,11 +168,15 @@ export default function LongScanView({
     monitor: boolean;
     nochase: boolean;
     neutral: boolean;
+    revisit: boolean;
+    special: boolean;
   }>({
     bad: false,
     monitor: false,
     nochase: false,
     neutral: false,
+    revisit: false,
+    special: false,
   });
   const [filterBias, setFilterBias] = useState<string>("all"); // all | strong_long | long | neutral | short
   const [filterPriceVs20, setFilterPriceVs20] = useState<string>("all"); // all | below | above
@@ -187,8 +193,15 @@ export default function LongScanView({
         if (cancelled || !data.flags) return;
         const mapped: Record<string, CoinFlag> = {};
         for (const [k, v] of Object.entries(data.flags)) {
-          if (v === "bad" || v === "monitor" || v === "nochase" || v === "neutral") {
-            mapped[k.toUpperCase()] = v;
+          if (
+            v === "bad" ||
+            v === "monitor" ||
+            v === "nochase" ||
+            v === "neutral" ||
+            v === "revisit" ||
+            v === "special"
+          ) {
+            mapped[k.toUpperCase()] = v as CoinFlag;
           }
         }
         setCoinFlags(mapped);
@@ -674,9 +687,11 @@ export default function LongScanView({
                 {(
                   [
                     ["bad", "Bad news", "bg-red-100 text-red-800 border-red-200"],
-                    ["monitor", "Monitor", "bg-orange-100 text-orange-900 border-orange-200"],
+                    ["monitor", "Monitor", "bg-amber-100 text-amber-900 border-amber-300"],
                     ["nochase", "Don't chase", "bg-purple-100 text-purple-900 border-purple-200"],
                     ["neutral", "Neutral", "bg-slate-200 text-slate-800 border-slate-300"],
+                    ["revisit", "Revisit", "bg-sky-100 text-sky-900 border-sky-300"],
+                    ["special", "Special", "bg-fuchsia-100 text-fuchsia-900 border-fuchsia-300"],
                   ] as const
                 ).map(([id, label, cls]) => (
                   <button
@@ -753,31 +768,34 @@ export default function LongScanView({
                 key={g.symbol}
                 className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden"
               >
-                <div className="flex flex-nowrap items-center gap-2 border-b border-gray-100 bg-gradient-to-r from-indigo-50/80 to-white px-3 py-2 overflow-x-auto">
-                  <h2 className="min-w-0 shrink text-sm sm:text-base font-extrabold text-slate-900 flex items-center gap-1.5 truncate">
-                    <span className="truncate">
+                <div className="flex flex-col gap-2 border-b border-gray-100 bg-gradient-to-r from-indigo-50/80 to-white px-3 py-2 sm:flex-row sm:flex-nowrap sm:items-center sm:gap-2 sm:overflow-x-auto">
+                  <h2 className="min-w-0 w-full sm:w-auto sm:shrink text-base font-extrabold text-slate-900">
+                    <span className="block truncate sm:inline">
                       {g.name}{" "}
-                      <span className="font-mono text-xs sm:text-sm font-bold text-indigo-700">
+                      <span className="font-mono text-sm font-bold text-indigo-700">
                         {g.symbol}
                       </span>
                     </span>
                     {priceBySymbol[g.symbol.toUpperCase()] != null ? (
-                      <span className="shrink-0 font-bold tabular-nums text-sky-800">
+                      <span className="mt-0.5 block font-bold tabular-nums text-sky-800 sm:mt-0 sm:ml-2 sm:inline">
                         {formatPhp(priceBySymbol[g.symbol.toUpperCase()])}
                       </span>
                     ) : null}
                   </h2>
+                  <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:w-auto sm:flex-1 sm:justify-end">
                   <span
-                    className="inline-flex shrink-0 items-center justify-center gap-1 mx-auto"
+                    className="inline-flex shrink-0 items-center justify-center gap-1"
                     role="group"
                     aria-label="Coin status flag"
                   >
                     {(
                       [
-                        { id: "bad" as const, label: "Bad", title: "Bad news", cls: "bg-red-500 border-red-600", idle: "bg-red-200 border-red-300" },
-                        { id: "monitor" as const, label: "Watch", title: "Monitor", cls: "bg-orange-500 border-orange-600", idle: "bg-orange-200 border-orange-300" },
+                        { id: "bad" as const, label: "Bad", title: "Bad news", cls: "bg-red-600 border-red-700", idle: "bg-red-200 border-red-300" },
+                        { id: "monitor" as const, label: "Monitor", title: "Monitor", cls: "bg-amber-400 border-amber-500", idle: "bg-amber-100 border-amber-300" },
                         { id: "nochase" as const, label: "No chase", title: "Don't chase", cls: "bg-purple-500 border-purple-600", idle: "bg-purple-200 border-purple-300" },
                         { id: "neutral" as const, label: "Neutral", title: "Neutral", cls: "bg-slate-500 border-slate-600", idle: "bg-slate-300 border-slate-400" },
+                        { id: "revisit" as const, label: "Revisit", title: "Revisit later", cls: "bg-sky-500 border-sky-600", idle: "bg-sky-200 border-sky-300" },
+                        { id: "special" as const, label: "Special", title: "Special watch", cls: "bg-fuchsia-500 border-fuchsia-600", idle: "bg-fuchsia-200 border-fuchsia-300" },
                       ] as const
                     ).map((f) => {
                       const active = (coinFlags[g.symbol.toUpperCase()] || "") === f.id;
@@ -835,6 +853,7 @@ export default function LongScanView({
                     >
                       Spot →
                     </Link>
+                  </div>
                   </div>
                 </div>
 

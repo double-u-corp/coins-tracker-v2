@@ -122,30 +122,41 @@ function signalsNote(c: ConfluenceResult, points?: ChartPoint[]): string {
   if (range?.available) {
     bits.push(range.detail); // "Near range support (3% of range) — discount zone"
   }
-  // Gap between 20 SMA and 50 SMA at report time (how far they are from meeting)
-  if (points && points.length >= 50) {
+  // Price vs 20 SMA: breakout above, or how close to cross (100% = at the line)
+  if (points && points.length >= 20) {
     try {
       const closes = points
         .map((pt) => Number(pt.close ?? pt.high ?? pt.low))
         .filter((n) => Number.isFinite(n));
-      if (closes.length >= 50) {
-        const sma20 =
-          closes.slice(-20).reduce((a, b) => a + b, 0) / 20;
-        const sma50 =
-          closes.slice(-50).reduce((a, b) => a + b, 0) / 50;
-        if (sma50 > 0 && Number.isFinite(sma20) && Number.isFinite(sma50)) {
-          const pct = ((sma20 - sma50) / sma50) * 100;
-          const abs = Math.abs(pct).toFixed(1);
+      if (closes.length >= 20) {
+        const sma20 = closes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+        const price = c.currentPrice;
+        if (
+          sma20 > 0 &&
+          price != null &&
+          Number.isFinite(price) &&
+          Number.isFinite(sma20)
+        ) {
           const fmt = (v: number) => v.toFixed(v >= 100 ? 0 : 2);
-          if (Math.abs(pct) < 0.05) {
-            bits.push(`20/50 SMA aligned (~${fmt(sma50)})`);
-          } else if (pct < 0) {
-            bits.push(
-              `20 SMA ${abs}% below 50 SMA (20=${fmt(sma20)}, 50=${fmt(sma50)}) — gap to meet`
-            );
+          if (price >= sma20) {
+            const pctAbove = ((price - sma20) / sma20) * 100;
+            if (pctAbove < 0.15) {
+              bits.push(
+                `Price Breakout! Price crossed above the 20 SMA (~${fmt(sma20)})`
+              );
+            } else {
+              bits.push(
+                `Price Breakout! Price above 20 SMA by ${pctAbove.toFixed(1)}% (SMA20 ~${fmt(sma20)})`
+              );
+            }
           } else {
+            // Distance remaining to cross: 0% far below conceptually for "progress"
+            // User asked: percentage nearest to 100% — how close to the line
+            // progress = price/sma20 * 100 → 100% means at/above the SMA
+            const progress = (price / sma20) * 100;
+            const gapPct = ((sma20 - price) / sma20) * 100;
             bits.push(
-              `20 SMA ${abs}% above 50 SMA (20=${fmt(sma20)}, 50=${fmt(sma50)})`
+              `${progress.toFixed(1)}% to 20 SMA cross (need +${gapPct.toFixed(1)}% · SMA20 ~${fmt(sma20)})`
             );
           }
         }

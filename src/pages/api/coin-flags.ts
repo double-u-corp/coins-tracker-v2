@@ -2,7 +2,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import prisma from "@/lib/prisma";
 import { isAuthenticatedRequest } from "@/lib/auth";
 
-const ALLOWED = new Set(["bad", "monitor", "nochase", "neutral", ""]);
+const ALLOWED = new Set(["bad", "monitor", "nochase", "neutral", "revisit", "special", ""]);
 
 type FlagMap = Record<string, string>;
 
@@ -33,7 +33,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       let flag = body?.flag == null ? "" : String(body.flag).trim().toLowerCase();
       if (!symbol) return res.status(400).json({ error: "symbol required" });
       if (!ALLOWED.has(flag)) {
-        return res.status(400).json({ error: "flag must be bad|monitor|nochase|neutral|empty" });
+        return res.status(400).json({ error: "flag must be bad|monitor|nochase|neutral|revisit|special|empty" });
       }
       const coin = await prisma.coin.findUnique({ where: { symbol } });
       if (!coin) return res.status(404).json({ error: `${symbol} not found` });
