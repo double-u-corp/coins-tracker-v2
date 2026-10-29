@@ -66,18 +66,13 @@ function buildAgentPrompt(args: {
   );
   lines.push(``);
   lines.push(`## Rules`);
-  lines.push(`- Be neutral. Do **not** force a bullish or long bias.`);
-  lines.push(
-    `- If evidence is bearish or unclear, say so (WAIT / SKIP / risk-off). Do not sugar-coat.`
-  );
-  lines.push(`- Prefer verified recent news/events; say "none verified" if unsure.`);
-  lines.push(`- Complete **Mandatory catalyst research** before any BUY/ADD verdict.`);
-  lines.push(`- Do **not** invent news.`);
-  lines.push(`- Do **NOT** use training-memory headlines (often stale) — only what you can verify now.`);
-  lines.push(
-    `- Platform constraint: the trader can only **buy or sell spot**. They cannot open a short/margin trade — if the case is bearish, prefer **do not buy / hold cash**, not “short it”.`
-  );
-  lines.push(`- Prefer pullbacks / staged buys over chasing when a buy is warranted.`);
+  lines.push(`- **Neutral.** Never force a long/bullish read. Softening a weak/bearish case into BUY/HOLD is a failure mode.`);
+  lines.push(`- **Spot only:** buy or sell coins. If bearish/unclear → **WAIT / SKIP / DO NOT ADD** and **hold cash**. Never recommend shorting or leverage.`);
+  lines.push(`- Prefer pullbacks / staged buys over chasing.`);
+  lines.push(`- **Anti-fabrication:** only claims with a current verifiable source. No training-memory headlines. No invented unlock dates or exploit details.`);
+  lines.push(`- **"None verified" is only valid after an explicit search** for that category — not as a default when you skipped the scan.`);
+  lines.push(`- Complete **Mandatory research** (security + category audit + past/forward windows) **before** any BUY / ADD / HOLD-style verdict.`);
+  lines.push(`- Verified exploit or major security incident → do not treat technicals alone as enough to buy or average down.`);
   lines.push(``);
   lines.push(`## Market snapshot`);
   lines.push(`- Price now: ${price}`);
@@ -172,40 +167,60 @@ function buildAgentPrompt(args: {
   }
 
   lines.push(``);
-  lines.push(`## Mandatory catalyst research (complete BEFORE the verdict)
-Live search required. Do **not** invent events or use training-memory headlines. If a category has nothing reliable → **"none verified"**.
-Do **not** treat a bullish catalyst as a guaranteed price rise.
+  lines.push(`## Mandatory research (complete BEFORE any verdict — no silent skips)
+Live search only. Training memory is not evidence. Do **not** invent events.
+**Silence is not “none verified.”** For every category below you must either list a verified item or write **“searched, none found”** (never omit the line). Distinguish **searched, none found** from **not searched**.
 
-Scan and verify:
-1. **Official project / calendar** — launches, partnerships, conferences, roadmap milestones
-2. **Token unlocks / supply** — dates, size, circulating impact; note provider disagreements
-3. **Market / crypto news** — listings, delistings, exploits, whales, material funding/OI only if relevant to spot
-4. **Political / regulatory** — policy, court, elections (esp. politically themed tickers e.g. TRUMP) only if asset-linked
-5. **Around last local high / pump** (if a date/peak is in the snapshot) — verified items ~60d before/after that may explain the move or fade
+### A) Security / exploit (last ~90 days) — MANDATORY
+Search: project name, ticker, “exploit”, “hack”, “bridge”, “security incident”, “vulnerability”.
+If a **verified** incident exists → flag it and lean **WAIT / SKIP / DO NOT ADD / TRIM** (as fits). Do not bury it under bullish technicals.
 
-For each **relevant** catalyst (skip noise), one tight line each:
-- Date · source URL · official vs reported · already-in-price? (observed vs speculative) · uncertainty · PHP spot implication (buy / wait pullback / hold cash / reduce — **no short/leverage**)
+### B) Category audit (one line each — found or “searched, none found”)
+1. Exploit / security
+2. Unlocks / vesting / circulating supply
+3. Listing / delisting
+4. Partnership / official product launch
+5. Regulatory / political (only if **asset-linked**)
 
-Keep the whole catalyst section short (prefer a small table or ≤6 bullets). Then give the trading verdict **informed by** these findings.`);
+### C) Catalyst windows
+- **Past:** ~60 days before and after last local high (if provided); else last ~90 days of material news
+- **Forward:** next **90 days** — dated unlocks, launches, governance; if no dated items → **“searched, none found”** for forward calendar (do not invent dates)
+
+### D) Output shape for catalysts
+1. **News audit** — the five category lines above (+ note of main queries used)
+2. **Table ≤6 rows** — date | source URL | official vs reported | already-in-price? | uncertainty | spot implication (buy / wait pullback / cash / reduce — **never short**)
+3. Then the trading verdict informed by this research`);
   lines.push(``);
+  if (args.holding && args.pnlPct != null && args.daysHeld != null) {
+    lines.push(`## Thesis health (open position)`);
+    lines.push(
+      `- Unrealized ~${args.pnlPct.toFixed(1)}% · held ~${args.daysHeld} day(s).`
+    );
+    lines.push(
+      `- **If underwater worse than -40% AND held > 60 days:** HOLD/ADD is only justified with at least one **verified positive catalyst** that shows ongoing token utility (not a technical bounce alone). Otherwise lean **DO NOT ADD** / consider **TRIM** if thesis is broken.`
+    );
+    lines.push(``);
+  }
   lines.push(`## Answer format`);
-  lines.push(`1. **Catalyst check** (required first): brief findings per category or "none verified"; include links for any real items`);
+
+  lines.push(`1. **News audit** (required): exploit / unlock / listing / partnership / regulatory — each **found** or **searched, none found**; list main queries`);
+  lines.push(`2. **Catalyst table** ≤6 rows (date · URL · official vs reported · in-price? · uncertainty · spot implication)`);
   lines.push(
-    `2. Verdict: ` + (args.holding ? `ADD / ADD ONLY ON PULLBACK / DO NOT ADD / TRIM` : `BUY / WAIT / SKIP`) + ` — must reflect catalysts + technicals; if bearish/unclear say so`
+    `3. Verdict: ` + (args.holding ? `ADD / ADD ONLY ON PULLBACK / DO NOT ADD / TRIM` : `BUY / WAIT / SKIP`) + ` — after audit; bearish/unclear → do not force long`
   );
-  lines.push(`3. Why (max 3 bullets) — neutral; mix technical + catalyst`);
-  lines.push(`4. Levels to watch (entry / invalidation / take-profit) or "none — stay in cash"`);
-  lines.push(`5. Timeframe note (when to recheck) with at least one calendar date`);
+  lines.push(`4. Why (max 3 bullets) — neutral; mix technical + catalyst; mention exploit/unlock if relevant`);
+  lines.push(`5. Levels (entry / invalidation / take-profit) or "none — stay in cash"`);
+  lines.push(`6. Timeframe with ≥1 calendar recheck date (Manila)`);
   if (!args.holding) {
     lines.push(
-      `6. Size note: ` +
+      `7. Size note: ` +
         (cheapCoin
           ? `comment on ~₱10,000 starter (approx coins) or smaller`
           : `comment on 1 coin vs more, and total PHP at risk`)
     );
   }
   lines.push(
-    `${!args.holding ? "7" : "6"}. Then output the **Final journal note** markdown block — the trader copies it into the app journal.`
+    `${!args.holding ? "8" : "7"}. Final **journal note** markdown (required).`
   );
   lines.push(``);
   const todayManila = new Date().toLocaleDateString("en-CA", {

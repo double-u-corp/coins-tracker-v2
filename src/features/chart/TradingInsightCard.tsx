@@ -310,29 +310,48 @@ export function formatEntryReviewPrompt(
     day: "2-digit",
   });
 
-  lines.push(`## Mandatory catalyst research (complete BEFORE the verdict)`);
-  lines.push(`Live search. Do not invent events. Category empty → "none verified". Do not treat a bullish catalyst as a guaranteed rally.`);
-  lines.push(`Cover: (1) official project announcements/events (2) unlocks/vesting + circulating impact; cross-check providers vs official docs (3) credible listings/delistings/exploits/regulatory (4) political/regulatory only if asset-linked (5) last local high: ~60d before/after peak + next 30d from analysis date.`);
-  lines.push(`Each relevant item: date · source URL · official vs reported · already in price? · uncertainty · PHP spot implication (add / pullback only / cash / reduce — no short). Max ~6 bullets. Then verdict.`);
+  lines.push(`## Mandatory research (complete BEFORE any verdict — no silent skips)`);
+  lines.push(`Live search only. Training memory is not evidence. Do not invent events.`);
+  lines.push(`Silence is not "none verified." Each category: verified item OR **searched, none found**. Distinguish from not-searched.`);
+  lines.push(`**A) Security/exploit (~90d) MANDATORY:** search project, ticker, exploit, hack, bridge, security incident. Verified hit → lean WAIT/SKIP/DO NOT ADD/TRIM.`);
+  lines.push(`**B) Audit lines:** exploit | unlocks/supply | listing/delisting | partnership/launch | regulatory if asset-linked.`);
+  lines.push(`**C) Windows:** ~60d around last high; **forward 90d** dated unlocks/launches — none dated → searched, none found.`);
+  lines.push(`**D) Output:** news audit + ≤6 catalyst rows (date·URL·official vs reported·in-price?·uncertainty·spot implication). Then verdict.`);
+  lines.push(`Correlated indicators are not independent confirms. Structure + invalidation > green-flag count.`);
   lines.push(``);
   if (isAllocated) {
+    const spentH = activePortfolio?.spent ?? 0;
+    const holdH = activePortfolio?.holdings ?? 0;
+    if (spentH > 0 && holdH > 0 && currentPrice > 0) {
+      const avgH = spentH / holdH;
+      const upnl = ((currentPrice - avgH) / avgH) * 100;
+      const daysH = activePortfolio?.firstBuyAt
+        ? Math.max(0, Math.floor((Date.now() - new Date(activePortfolio.firstBuyAt).getTime()) / 86400000))
+        : null;
+      lines.push(`## Thesis health`);
+      lines.push(`- Unrealized ~${upnl.toFixed(1)}%` + (daysH != null ? ` · held ~${daysH} day(s)` : "") + `.`);
+      lines.push(`- If underwater worse than **-40%** AND held **> 60 days**: ADD needs ≥1 verified positive catalyst with token utility — bounce alone is not enough. Else DO NOT ADD / TRIM if thesis broken.`);
+      lines.push(``);
+    }
     lines.push(`## Answer format (already holding — add / size decision)`);
-    lines.push(`1. **Catalyst check** (or "none verified") with links where real`);
-    lines.push(`2. Verdict: **ADD** | **ADD ONLY ON PULLBACK** | **DO NOT ADD** | **TRIM** — after catalysts + technicals; incomplete data → lean DO NOT ADD / WAIT`);
-    lines.push(`3. Why (max 3 bullets) — do not over-count correlated signals`);
-    lines.push(`4. If ADD / ADD ONLY ON PULLBACK: max **additional PHP budget**; each ladder tranche as PHP amount (30/30/40 of that budget) + entry condition; invalidation / stop adding; approx **new avg cost** if filled; extra PHP risk. If not justified → **PHP 0** add.`);
-    lines.push(`5. If DO NOT ADD: leave bag as-is unless thesis broken (then TRIM)`);
-    lines.push(`6. **Timeframe:** valid until / review by YYYY-MM-DD (Manila; analysis date **${todayManila}**)`);
-    lines.push(`7. Final **journal note** markdown (required)`);
+    lines.push(`1. **News audit** — exploit / unlock / listing / partnership / regulatory (found or searched-none-found)`);
+    lines.push(`2. **Catalyst table** ≤6 rows with links`);
+    lines.push(`3. Verdict: **ADD** | **ADD ONLY ON PULLBACK** | **DO NOT ADD** | **TRIM** — after audit; incomplete data → DO NOT ADD`);
+    lines.push(`4. Why (max 3 bullets) — no signal stacking; mention exploit/unlock if relevant`);
+    lines.push(`5. If ADD / ADD ONLY ON PULLBACK: max **additional PHP budget**; each tranche PHP (30/30/40 of budget) + entry; invalidation; new avg cost if filled. If not justified → **PHP 0**.`);
+    lines.push(`6. If DO NOT ADD: leave bag as-is unless thesis broken (then TRIM)`);
+    lines.push(`7. **Timeframe:** valid until / review by YYYY-MM-DD (Manila; analysis date **${todayManila}**)`);
+    lines.push(`8. Final **journal note** markdown (required)`);
   } else {
     lines.push(`## Answer format (no position)`);
-    lines.push(`1. **Catalyst check** (or "none verified") with links where real`);
-    lines.push(`2. Verdict: **READY TO STAGE** | **WAIT FOR PULLBACK** | **SKIP** — after catalysts + technicals; thin data → WAIT/SKIP`);
-    lines.push(`3. Why (max 3 bullets) — do not over-count correlated signals`);
-    lines.push(`4. If READY or WAIT: which ladder level(s) and invalidation`);
-    lines.push(`5. Spot risk note (LONG only — no short / no leverage)`);
-    lines.push(`6. **Timeframe:** valid until / review by YYYY-MM-DD (Manila; analysis date **${todayManila}**)`);
-    lines.push(`7. Final **journal note** markdown (required)`);
+    lines.push(`1. **News audit** — exploit / unlock / listing / partnership / regulatory (found or searched-none-found)`);
+    lines.push(`2. **Catalyst table** ≤6 rows with links`);
+    lines.push(`3. Verdict: **READY TO STAGE** | **WAIT FOR PULLBACK** | **SKIP** — after audit; thin data → WAIT/SKIP`);
+    lines.push(`4. Why (max 3 bullets) — no signal stacking`);
+    lines.push(`5. If READY or WAIT: which ladder level(s) and invalidation`);
+    lines.push(`6. Spot risk note (LONG only — no short / no leverage)`);
+    lines.push(`7. **Timeframe:** valid until / review by YYYY-MM-DD (Manila; analysis date **${todayManila}**)`);
+    lines.push(`8. Final **journal note** markdown (required)`);
   }
 
   lines.push(``);
@@ -361,6 +380,7 @@ export function formatEntryReviewPrompt(
     lines.push(`- **Invalidation (add thesis broken if):** …`);
     lines.push(`- **Timeframe — valid until:** YYYY-MM-DD`);
     lines.push(`- **Review again by:** YYYY-MM-DD`);
+    lines.push(`- **News audit:** exploit / unlock / listing / partnership / regulatory`);
     lines.push(`- **News (verified only):** …`);
     lines.push(`- **Why (1–3 short lines):**`);
     lines.push(`  - …`);
@@ -376,6 +396,7 @@ export function formatEntryReviewPrompt(
     lines.push(`  - … (pct)`);
     lines.push(`- **Invalidation:** …`);
     lines.push(`- **Timeframe — valid until / review by:** YYYY-MM-DD`);
+    lines.push(`- **News audit:** exploit / unlock / listing / partnership / regulatory`);
     lines.push(`- **News (verified only):** …`);
     lines.push(`- **Why (1–3 short lines):**`);
     lines.push(`  - …`);
