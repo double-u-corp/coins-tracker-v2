@@ -320,18 +320,41 @@ export function formatEntryReviewPrompt(
   lines.push(`Correlated indicators are not independent confirms. Structure + invalidation > green-flag count.`);
   lines.push(``);
   if (isAllocated) {
-    const spentH = activePortfolio?.spent ?? 0;
-    const holdH = activePortfolio?.holdings ?? 0;
-    if (spentH > 0 && holdH > 0 && currentPrice > 0) {
-      const avgH = spentH / holdH;
-      const upnl = ((currentPrice - avgH) / avgH) * 100;
-      const daysH = activePortfolio?.firstBuyAt
-        ? Math.max(0, Math.floor((Date.now() - new Date(activePortfolio.firstBuyAt).getTime()) / 86400000))
-        : null;
-      lines.push(`## Thesis health`);
-      lines.push(`- Unrealized ~${upnl.toFixed(1)}%` + (daysH != null ? ` · held ~${daysH} day(s)` : "") + `.`);
-      lines.push(`- If underwater worse than **-40%** AND held **> 60 days**: ADD needs ≥1 verified positive catalyst with token utility — bounce alone is not enough. Else DO NOT ADD / TRIM if thesis broken.`);
-      lines.push(``);
+    const priceNow = c.currentPrice;
+    if (
+      spent > 0 &&
+      holdings > 0 &&
+      priceNow != null &&
+      Number.isFinite(priceNow) &&
+      priceNow > 0
+    ) {
+      const upnl =
+        unrealizedPct != null
+          ? unrealizedPct
+          : avgCost != null && avgCost > 0
+            ? ((priceNow - avgCost) / avgCost) * 100
+            : null;
+      const daysH =
+        daysHeld != null
+          ? daysHeld
+          : firstBuyAt
+            ? Math.max(
+                0,
+                Math.floor((Date.now() - new Date(firstBuyAt).getTime()) / 86400000)
+              )
+            : null;
+      if (upnl != null) {
+        lines.push(`## Thesis health`);
+        lines.push(
+          `- Unrealized ~${upnl.toFixed(1)}%` +
+            (daysH != null ? ` · held ~${daysH} day(s)` : "") +
+            `.`
+        );
+        lines.push(
+          `- If underwater worse than **-40%** AND held **> 60 days**: ADD needs ≥1 verified positive catalyst with token utility — bounce alone is not enough. Else DO NOT ADD / TRIM if thesis broken.`
+        );
+        lines.push(``);
+      }
     }
     lines.push(`## Answer format (already holding — add / size decision)`);
     lines.push(`1. **News audit** — exploit / unlock / listing / partnership / regulatory (found or searched-none-found)`);
