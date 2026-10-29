@@ -88,6 +88,8 @@ export function useHomeLogic() {
   const [editRecordError, setEditRecordError] = useState<string | null>(null);
 
   const [portfolio, setPortfolio] = useState<any[]>([]);
+  /** Open-position hold days by symbol (current cycle). */
+  const [daysHeldBySymbol, setDaysHeldBySymbol] = useState<Record<string, number>>({});
   const [cronTriggering, setCronTriggering] = useState(false);
 
   const [journalEntries, setJournalEntries] = useState<JournalEntryView[]>([]);
@@ -176,7 +178,46 @@ export function useHomeLogic() {
         return res.json();
       })
       .then((data) => {
-        if (!cancelled) setPortfolio(data.portfolio || []);
+        if (cancelled) return;
+        setPortfolio(data.portfolio || []);
+        const txs = (data.transactions || []) as {
+          symbol?: string;
+          type?: string;
+          coinAmount?: number;
+          transactedAt?: string;
+        }[];
+        // Sort oldest → newest
+        const sorted = [...txs].sort(
+          (a, b) =>
+            new Date(a.transactedAt || 0).getTime() - new Date(b.transactedAt || 0).getTime()
+        );
+        const units: Record<string, number> = {};
+        const cycleStart: Record<string, string | null> = {};
+        for (const tx of sorted) {
+          const sym = (tx.symbol || "").toUpperCase();
+          if (!sym) continue;
+          const type = (tx.type || "").toLowerCase();
+          const amt = Number(tx.coinAmount) || 0;
+          if (!units[sym]) units[sym] = 0;
+          if (type === "buy") {
+            if (units[sym] <= 0) cycleStart[sym] = tx.transactedAt || null;
+            units[sym] += amt;
+          } else if (type === "sell") {
+            units[sym] = Math.max(0, units[sym] - amt);
+            if (units[sym] <= 1e-12) {
+              units[sym] = 0;
+              cycleStart[sym] = null;
+            }
+          }
+        }
+        const now = Date.now();
+        const days: Record<string, number> = {};
+        for (const [sym, start] of Object.entries(cycleStart)) {
+          if (!start || (units[sym] || 0) <= 0) continue;
+          const ms = now - new Date(start).getTime();
+          days[sym] = Math.max(0, Math.floor(ms / (24 * 60 * 60 * 1000)));
+        }
+        setDaysHeldBySymbol(days);
       })
       .catch((err) => console.error(err));
 
@@ -594,6 +635,7 @@ export function useHomeLogic() {
     selectedCoins,
     setSelectedCoins,
     portfolio,
+    daysHeldBySymbol,
     canUpdatePrice: authenticated,
     authenticated,
     journalEntries,

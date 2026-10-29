@@ -5,7 +5,6 @@ type ResponseData = {
   response?: string;
   logs?: Record<string, { timestamp: number; response: string; category: string }>;
   error?: string;
-  stored?: boolean;
 };
 
 // "markdown" = human-readable analyst summary (default).
@@ -29,7 +28,7 @@ type ResponseFormat = "markdown" | "json";
 //   "none" is rejected with a 400 for this model family).
 const MODELS: Record<ResponseFormat, string> = {
   markdown: "qwen/qwen3.8-27b",
-  json: "openai/gpt-oss-120b",
+  json: "openai/gpt-oss-20b",
 };
 
 // Max output tokens per format. Deliberately NOT a shared constant:
@@ -42,7 +41,14 @@ const MODELS: Record<ResponseFormat, string> = {
 //   reasoning overhead even at "low," so keeps a larger budget.
 const MAX_OUTPUT_TOKENS: Record<ResponseFormat, number> = {
   markdown: 800,
-  json: 2000,
+  // Keep headroom under gpt-oss-120b on_demand TPM (8k input+output shared pressure)
+  json: 1200,
+};
+
+/** Approx char budget for SEARCH CONTEXT so system+user stay under Groq TPM (8k for gpt-oss-120b). */
+const SEARCH_CONTEXT_CHAR_BUDGET: Record<ResponseFormat, number> = {
+  markdown: 10000,
+  json: 5500,
 };
 
 const MACRO_EVENT_SCHEMA = {
@@ -56,10 +62,14 @@ const MACRO_EVENT_SCHEMA = {
         items: {
           type: "object",
           properties: {
-            date: { type: "string", description: "YYYY-MM-DD, official US Eastern Time (ET) calendar date" },
-            timeET: { type: "string", description: "HH:mm 24-hour ET release time; empty string if not confidently known" },
+            date: { type: "string", description: "YYYY-MM-DD ET" },
+            timeET: { type: "string", description: "HH:mm ET or empty" },
             title: { type: "string" },
-            type: { type: "string", enum: ["NFP", "CPI", "PCE", "FOMC", "EXPIRY", "OTHER"] },
+            type: {
+              type: "string",
+              description:
+                "Prefer one of: NFP, CPI, PCE, FOMC, EXPIRY, OTHER. If none fit, use a short uppercase label (e.g. GDP, PPI, CLAIMS).",
+            },
             severity: { type: "string", enum: ["high", "medium"] },
           },
           // Groq's strict mode requires every property listed here, even
@@ -98,10 +108,8 @@ function getTavilySearchParams(profile: SearchProfile) {
       // benefits from deeper search than a quick news skim.
       return { topic: "news", search_depth: "advanced", days: 7 };
     case "authoritative":
-      // Scheduled/roadmap facts (unlock dates, FOMC calendar) — accuracy
-      // matters more than recency; a hard day-window can exclude the one
-      // official announcement page that's actually correct.
-      return { topic: "general", search_depth: "advanced", days: undefined };
+      // Macro calendar: prefer smaller, denser context (TPM limits on gpt-oss-120b).
+      return { topic: "general", search_depth: "basic", days: 60 };
     default:
       return { topic: "general", search_depth: "basic", days: undefined };
   }
@@ -123,7 +131,7 @@ async function fetchTavilySearch(searchQuery: string, searchProfile: SearchProfi
       search_depth,
       ...(days ? { days } : {}),
       include_answer: true,
-      max_results: 5,
+      max_results: 4,
     }),
   });
 
@@ -133,10 +141,20 @@ async function fetchTavilySearch(searchQuery: string, searchProfile: SearchProfi
   }
 
   const data = await response.json();
-  const results = data.results || [];
-  const directAnswer = data.answer ? `Direct Summary: ${data.answer}\n\n` : "";
+  const results = (data.results || []).slice(0, 5);
+  const directAnswer = data.answer
+    ? `Direct Summary: ${String(data.answer).slice(0, 500)}\n\n`
+    : "";
   const snippets = results
-    .map((item: any) => `- ${item.title}: ${item.content} (${item.url})`)
+    .map((item: any) => {
+      const title = String(item.title || "").slice(0, 120);
+      const content = String(item.content || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 420);
+      const url = String(item.url || "");
+      return `- ${title}: ${content} (${url})`;
+    })
     .join("\n");
 
   // Give the model an explicit, honest signal about how much it actually
@@ -155,11 +173,12 @@ function getSystemPrompt(responseFormat: ResponseFormat): string {
   if (responseFormat === "json") {
     return `You are a data extraction engine. Read the SEARCH CONTEXT and extract only the requested scheduled events into the "events" array.
 
-GROUNDING (highest priority):
-1. Only include events that are explicitly present in the SEARCH CONTEXT. Do not add events, dates, or times from general knowledge or plausible-sounding guesses.
-2. If you are not confident about "timeET" for a given event, set it to an empty string "" rather than guessing.
-3. If the SEARCH CONTEXT contains no qualifying events at all, return an empty "events" array.
-The response format (keys, types) is enforced automatically — focus only on getting the content right.`;
+GROUNDING:
+1. Only include events explicitly present in SEARCH CONTEXT. Do not invent dates or times.
+2. timeET: HH:mm ET or "" if unknown.
+3. type: use NFP, CPI, PCE, FOMC, EXPIRY, or OTHER when possible. GDP/PPI/CLAIMS ok if needed. Never invent enum-breaking long phrases.
+4. If nothing qualifies, return {"events":[]}.
+Focus on correct content; schema handles structure.`;
   }
 
   return `You are a real-time crypto intelligence analyst. Synthesize ONLY the information present in the provided SEARCH CONTEXT to answer the user query. You are extracting and organizing facts that are already in the search context — you are not permitted to add facts, figures, or claims that are not explicitly present in it.
@@ -178,6 +197,48 @@ FORMATTING REQUIREMENTS (subject to the anti-fabrication rules above):
 3. Every fact, announcement, or metric MUST cite its source using inline bracket links like [Source Title](URL), where the URL is copied from the SEARCH CONTEXT — never invented.`;
 }
 
+function truncateSearchContext(searchContext: string, responseFormat: ResponseFormat): string {
+  const budget = SEARCH_CONTEXT_CHAR_BUDGET[responseFormat];
+  if (searchContext.length <= budget) return searchContext;
+  return (
+    searchContext.slice(0, budget) +
+    "\n\n[SEARCH CONTEXT truncated to fit model token limits — prefer events still visible above.]"
+  );
+}
+
+
+const KNOWN_EVENT_TYPES = new Set(["NFP", "CPI", "PCE", "FOMC", "EXPIRY", "OTHER"]);
+
+/** Coerce model type labels into a safe short string for UI badges. */
+function normalizeMacroEventsJson(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw);
+    const events = Array.isArray(parsed?.events) ? parsed.events : Array.isArray(parsed) ? parsed : [];
+    const cleaned = events.map((e: any) => {
+      let type = String(e?.type || "OTHER").trim().toUpperCase();
+      // Common aliases
+      if (type === "FED" || type === "RATE" || type === "RATES" || type === "FOMC DECISION") type = "FOMC";
+      if (type === "JOBS" || type === "PAYROLL" || type === "PAYROLLS" || type === "EMPLOYMENT") type = "NFP";
+      if (type === "INFLATION" && /pce/i.test(String(e?.title || ""))) type = "PCE";
+      if (type === "INFLATION") type = "CPI";
+      if (type === "OPTIONS" || type === "OPX") type = "EXPIRY";
+      if (!type) type = "OTHER";
+      // Keep short free-form labels (GDP, PPI, etc.) — UI has default badge
+      if (type.length > 12) type = "OTHER";
+      return {
+        date: String(e?.date || "").slice(0, 10),
+        timeET: e?.timeET != null ? String(e.timeET) : "",
+        title: String(e?.title || "Event"),
+        type,
+        severity: e?.severity === "medium" ? "medium" : "high",
+      };
+    });
+    return JSON.stringify({ events: cleaned });
+  } catch {
+    return raw;
+  }
+}
+
 async function summarizeWithGroq(
   prompt: string,
   searchContext: string,
@@ -187,6 +248,12 @@ async function summarizeWithGroq(
   if (!groqApiKey) throw new Error("GROQ_API_KEY is missing.");
 
   const systemPrompt = getSystemPrompt(responseFormat);
+  // Cap prompt size for TPM limits (gpt-oss-120b on_demand ≈ 8k TPM)
+  const cappedPrompt =
+    responseFormat === "json" && prompt.length > 900
+      ? prompt.slice(0, 900) + "…"
+      : prompt;
+  const cappedContext = truncateSearchContext(searchContext, responseFormat);
 
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
@@ -198,7 +265,10 @@ async function summarizeWithGroq(
       model: MODELS[responseFormat],
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `SEARCH CONTEXT:\n${searchContext}\n\nUSER QUERY:\n${prompt}` },
+        {
+          role: "user",
+          content: `SEARCH CONTEXT:\n${cappedContext}\n\nUSER QUERY:\n${cappedPrompt}`,
+        },
       ],
       temperature: responseFormat === "json" ? 0 : 0.1,
       max_tokens: MAX_OUTPUT_TOKENS[responseFormat],
@@ -313,7 +383,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       }
 
       const searchContext = await fetchTavilySearch(effectiveSearchQuery, effectiveSearchProfile);
-      const summary = await summarizeWithGroq(prompt, searchContext, format);
+      let summary = await summarizeWithGroq(prompt, searchContext, format);
+      if (format === "json") {
+        summary = normalizeMacroEventsJson(summary);
+      }
 
       await prisma.catalystLog.upsert({
         where: { promptId },

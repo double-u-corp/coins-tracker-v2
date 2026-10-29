@@ -82,6 +82,7 @@ function CoinCard({ coin, canUpdatePrice, onUpdatePriceClick }: CoinCardProps) {
 function MonitorCard({
   card,
   portfolio,
+  daysHeld,
 }: {
   card: {
     symbol: string;
@@ -104,6 +105,7 @@ function MonitorCard({
     } | null;
   };
   portfolio: { symbol?: string; holdings?: number; spent?: number }[] | null | undefined;
+  daysHeld?: number | null;
 }) {
   const hit =
     card.high?.alertType === "reached" || card.low?.alertType === "reached";
@@ -172,6 +174,11 @@ function MonitorCard({
             </div>
           )}
           {pnl}
+          {daysHeld != null && daysHeld >= 0 && holdings > 0 ? (
+            <div className="mt-0.5 text-[11px] font-semibold text-slate-600">
+              Held {daysHeld} day{daysHeld === 1 ? "" : "s"}
+            </div>
+          ) : null}
         </div>
         <Link
           href={`/chart?symbol=${encodeURIComponent(card.symbol)}`}
@@ -285,6 +292,7 @@ export default function HomeTable() {
     selectedCoins,
     setSelectedCoins,
     portfolio,
+    daysHeldBySymbol,
     lastCronRun,
     lastCronStatus,
     loading,
@@ -661,7 +669,12 @@ export default function HomeTable() {
               ) : (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {heldMonitorCards.map((card) => (
-                    <MonitorCard key={card.symbol} card={card} portfolio={portfolio} />
+                    <MonitorCard
+                      key={card.symbol}
+                      card={card}
+                      portfolio={portfolio}
+                      daysHeld={daysHeldBySymbol[card.symbol.toUpperCase()] ?? null}
+                    />
                   ))}
                 </div>
               )}
@@ -675,7 +688,12 @@ export default function HomeTable() {
               ) : (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {planMonitorCards.map((card) => (
-                    <MonitorCard key={card.symbol} card={card} portfolio={portfolio} />
+                    <MonitorCard
+                      key={card.symbol}
+                      card={card}
+                      portfolio={portfolio}
+                      daysHeld={null}
+                    />
                   ))}
                 </div>
               )}

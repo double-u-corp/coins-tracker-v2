@@ -817,43 +817,6 @@ export default function LongScanView({
                       );
                     })}
                   </span>
-                  <div className="flex shrink-0 items-center gap-1.5 ml-auto">
-                    <button
-                      type="button"
-                      onClick={() => openJournal(g.symbol, { name: g.name })}
-                      className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-800 hover:bg-slate-50"
-                      title={`Journal notes for ${g.symbol}`}
-                    >
-                      📓 Journal
-                      {(journalCountBySymbol[g.symbol.toUpperCase()] ?? 0) > 0 ? (
-                        <span className="ml-1 rounded-full bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                          {journalCountBySymbol[g.symbol.toUpperCase()]}
-                        </span>
-                      ) : (
-                        <span className="ml-1 text-[10px] font-semibold text-slate-400">0</span>
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setManageSymbol(g.symbol);
-                        setManageName(g.name);
-                        setManageOpen(true);
-                      }}
-                      className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-900 hover:bg-emerald-100"
-                      title={`Manage targets for ${g.symbol}`}
-                    >
-                      ⚙️ Manage
-                    </button>
-                    <Link
-                      href={`/chart?symbol=${encodeURIComponent(g.symbol)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-indigo-700"
-                    >
-                      Spot →
-                    </Link>
-                  </div>
                   </div>
                 </div>
 
@@ -952,6 +915,44 @@ export default function LongScanView({
                     );
                   })}
                 </div>
+                <div className="flex flex-wrap items-center gap-1.5 border-t border-gray-100 bg-slate-50/80 px-3 py-2 justify-start sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => openJournal(g.symbol, { name: g.name })}
+                    className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-800 hover:bg-slate-50"
+                    title={`Journal notes for ${g.symbol}`}
+                  >
+                    📓 Journal
+                    {(journalCountBySymbol[g.symbol.toUpperCase()] ?? 0) > 0 ? (
+                      <span className="ml-1 rounded-full bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                        {journalCountBySymbol[g.symbol.toUpperCase()]}
+                      </span>
+                    ) : (
+                      <span className="ml-1 text-[10px] font-semibold text-slate-400">0</span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManageSymbol(g.symbol);
+                      setManageName(g.name);
+                      setManageOpen(true);
+                    }}
+                    className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-900 hover:bg-emerald-100"
+                    title={`Manage targets for ${g.symbol}`}
+                  >
+                    ⚙️ Manage
+                  </button>
+                  <Link
+                    href={`/chart?symbol=${encodeURIComponent(g.symbol)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-indigo-700"
+                  >
+                    Spot →
+                  </Link>
+                </div>
+
               </section>
             );
           })}
