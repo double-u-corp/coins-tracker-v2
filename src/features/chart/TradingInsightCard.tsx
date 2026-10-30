@@ -380,13 +380,27 @@ export function formatEntryReviewPrompt(
   lines.push(``);
   lines.push(`## Final journal note (REQUIRED — pure markdown, copy-paste ready)`);
   lines.push(
-    `End your answer with ONLY this block (use real newlines, no HTML). Fill every field; use "n/a" if not applicable.`
+    `End with ONLY the fenced markdown block below. Home Target monitor **parses these exact labels** — do not rename, translate, or merge them into one sentence.`
+  );
+  lines.push(`**STRICT field rules (machine-readable):**`);
+  lines.push(
+    `1. **Agent:** one line, start with \`Spot Trading Desk AI\` then product/model in parentheses. Example: \`Spot Trading Desk AI (Grok)\`. Never put the note title here.`
   );
   lines.push(
-    `The trader will **copy this markdown into General / coin journal** as the decision record — write it so it still makes sense in 3–7 days without the rest of the chat. **Always fill Agent** with your product name (e.g. ChatGPT, Grok, Gemini) and model if known. **Keep the Prompt line exactly as given** so the trader knows which Spot button was used.`
+    `2. **Target entry:** one PHP number only (optional ₱). Example: \`₱12.50\` or \`12.50\`. Use \`n/a\` if none — not a sentence.`
+  );
+  lines.push(
+    `3. **Target exit:** one PHP number only (same rules). Example: \`₱15.00\` or \`n/a\`.`
+  );
+  lines.push(
+    `4. **Review by:** exactly \`YYYY-MM-DD\` (Manila calendar date). Example: \`2026-11-04\`. No extra words on that line.`
+  );
+  lines.push(
+    `Keep each of those four as its own bullet: \`- **Label:** value\`. Do not bold the value. Do not use tables for these four.`
   );
   lines.push(``);
   lines.push('```markdown');
+
   if (isAllocated) {
     lines.push(`## ${pair} · add / size note · ${todayManila} (Manila)`);
     lines.push(``);
@@ -396,15 +410,14 @@ export function formatEntryReviewPrompt(
     lines.push(`- **Analysis date (Manila):** ${todayManila}`);
     lines.push(`- **Price now:** …`);
     lines.push(`- **Avg cost / unrealized:** …`);
-    lines.push(`- **Target entry:** ₱… (add/buy level; or n/a)`);
-    lines.push(`- **Target exit:** ₱… (trim/TP level; or n/a)`);
+    lines.push(`- **Target entry:** ₱…`);
+    lines.push(`- **Target exit:** ₱…`);
     lines.push(`- **Additional budget (PHP):** … (0 if DO NOT ADD)`);
     lines.push(`- **Tranches:** … (PHP + level; 30/30/40 of additional budget)`);
     lines.push(`- **New avg cost if filled:** …`);
     lines.push(`- **Last pump / local high (if relevant):** date · peak · why it may have faded`);
     lines.push(`- **Invalidation (add thesis broken if):** …`);
-    lines.push(`- **Timeframe — valid until:** YYYY-MM-DD`);
-    lines.push(`- **Review again by:** YYYY-MM-DD`);
+    lines.push(`- **Review by:** YYYY-MM-DD`);
     lines.push(`- **News audit:** exploit / unlock / listing / partnership / regulatory`);
     lines.push(`- **News (verified only):** …`);
     lines.push(`- **Why (1–3 short lines):**`);
@@ -417,12 +430,12 @@ export function formatEntryReviewPrompt(
     lines.push(`- **Verdict:** READY TO STAGE | WAIT FOR PULLBACK | SKIP`);
     lines.push(`- **Analysis date (Manila):** ${todayManila}`);
     lines.push(`- **Price now:** …`);
-    lines.push(`- **Target entry:** ₱… (preferred buy / top ladder; or n/a)`);
-    lines.push(`- **Target exit:** ₱… (take-profit / resistance trim; or n/a)`);
+    lines.push(`- **Target entry:** ₱…`);
+    lines.push(`- **Target exit:** ₱…`);
     lines.push(`- **Ladder levels:**`);
     lines.push(`  - … (pct)`);
     lines.push(`- **Invalidation:** …`);
-    lines.push(`- **Timeframe — valid until / review by:** YYYY-MM-DD`);
+    lines.push(`- **Review by:** YYYY-MM-DD`);
     lines.push(`- **News audit:** exploit / unlock / listing / partnership / regulatory`);
     lines.push(`- **News (verified only):** …`);
     lines.push(`- **Why (1–3 short lines):**`);

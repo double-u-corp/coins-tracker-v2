@@ -231,10 +231,27 @@ If a **verified** incident exists → flag it and lean **WAIT / SKIP / DO NOT AD
   });
   lines.push(`## Final journal note (REQUIRED — pure markdown, copy-paste ready)`);
   lines.push(
-    `End with ONLY this block (real newlines, no HTML). Fill fields; "n/a" if needed. Must still make sense in 3–7 days without the rest of the chat. **Always fill Agent** with your product name (e.g. ChatGPT, Grok, Gemini) and model if known. **Keep the Prompt line exactly as given** so the trader knows which Spot button was used.`
+    `End with ONLY the fenced markdown block below. Home Target monitor **parses these exact labels** — do not rename, translate, or merge them into one sentence.`
+  );
+  lines.push(`**STRICT field rules (machine-readable):**`);
+  lines.push(
+    `1. **Agent:** one line, start with \`Spot Trading Desk AI\` then product/model in parentheses. Example: \`Spot Trading Desk AI (Grok)\`. Never put the note title here.`
+  );
+  lines.push(
+    `2. **Target entry:** one PHP number only (optional ₱). Example: \`₱12.50\` or \`12.50\`. Use \`n/a\` if none — not a sentence.`
+  );
+  lines.push(
+    `3. **Target exit:** one PHP number only (same rules). Example: \`₱15.00\` or \`n/a\`.`
+  );
+  lines.push(
+    `4. **Review by:** exactly \`YYYY-MM-DD\` (Manila calendar date). Example: \`2026-11-04\`. No extra words on that line.`
+  );
+  lines.push(
+    `Keep each of those four as its own bullet: \`- **Label:** value\`. Do not bold the value. Do not use tables for these four.`
   );
   lines.push(``);
   lines.push("```markdown");
+
   if (args.holding) {
     lines.push(`## ${args.symbol} · add / size note · ${todayManila} (Manila)`);
     lines.push(``);
@@ -243,8 +260,8 @@ If a **verified** incident exists → flag it and lean **WAIT / SKIP / DO NOT AD
     lines.push(`- **Verdict:** ADD | ADD ONLY ON PULLBACK | DO NOT ADD | TRIM`);
     lines.push(`- **Price now:** …`);
     lines.push(`- **Avg cost / unrealized:** …`);
-    lines.push(`- **Target entry:** ₱… (add/buy level; or n/a)`);
-    lines.push(`- **Target exit:** ₱… (trim/TP level; or n/a)`);
+    lines.push(`- **Target entry:** ₱…`);
+    lines.push(`- **Target exit:** ₱…`);
     lines.push(`- **Last pump / local high:** date · peak · why it may have faded (or n/a)`);
     lines.push(`- **Sell / trim if:** …`);
     lines.push(`- **Invalidation:** …`);
@@ -258,8 +275,8 @@ If a **verified** incident exists → flag it and lean **WAIT / SKIP / DO NOT AD
     lines.push(`- **Prompt:** Spot · Position & trades · buy/sizing research`);
     lines.push(`- **Verdict:** BUY | WAIT | SKIP`);
     lines.push(`- **Price now:** …`);
-    lines.push(`- **Target entry:** ₱… (preferred buy level; or n/a)`);
-    lines.push(`- **Target exit:** ₱… (take-profit level; or n/a)`);
+    lines.push(`- **Target entry:** ₱…`);
+    lines.push(`- **Target exit:** ₱…`);
     lines.push(`- **Last pump / local high:** date · peak · why price may be down now (or n/a)`);
     lines.push(`- **Entry / invalidation / TP:** …`);
     lines.push(`- **Size note:** …`);
