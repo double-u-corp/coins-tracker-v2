@@ -70,7 +70,9 @@ model PriceTarget {
   coin       Coin     @relation(fields: [coinId], references: [id])
   targetHigh Float?
   targetLow  Float?
-  /// Agent review / "valid until" date (date-only, Manila plan tracking)
+  /// When true, coin appears on Home Target & review monitor; review dates come from journal.
+  onMonitor  Boolean  @default(false)
+  /// Deprecated: kept for DB compat; UI no longer edits this. Prefer onMonitor + journal dates.
   reviewUntil DateTime?
   updatedAt  DateTime @updatedAt
 }

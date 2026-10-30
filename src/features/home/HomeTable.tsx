@@ -244,10 +244,45 @@ function MonitorCard({
           >
             <span className="font-semibold text-violet-900">
               Review {reviewLabel}
+              <span className="ml-1 text-[10px] font-normal text-violet-600">Manage</span>
             </span>
             <span className="font-mono text-gray-700">{card.review.reviewUntil}</span>
           </div>
         )}
+        {(card.journalReviews || []).map((jr) => {
+          const jl =
+            jr.urgency === "overdue"
+              ? `${Math.abs(jr.daysUntil)}d overdue`
+              : jr.urgency === "today"
+                ? "today"
+                : jr.daysUntil === 1
+                  ? "tomorrow"
+                  : `In ${jr.daysUntil}d`;
+          return (
+            <div
+              key={`${jr.entryId}-${jr.date}`}
+              className={`flex flex-col gap-0.5 rounded-md border px-2 py-1 ${
+                jr.urgency === "overdue"
+                  ? "bg-rose-50 border-rose-200"
+                  : jr.urgency === "today"
+                    ? "bg-amber-50 border-amber-200"
+                    : "bg-indigo-50/80 border-indigo-100"
+              }`}
+              title={jr.title || "From journal note"}
+            >
+              <div className="flex justify-between gap-2">
+                <span className="font-semibold text-indigo-900">
+                  Review {jl}
+                  <span className="ml-1 text-[10px] font-normal text-indigo-600">Journal</span>
+                </span>
+                <span className="font-mono text-gray-700">{jr.date}</span>
+              </div>
+              {jr.title ? (
+                <span className="truncate text-[10px] text-gray-500">{jr.title}</span>
+              ) : null}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -657,7 +692,7 @@ export default function HomeTable() {
         
         ) : !monitorCards || monitorCards.length === 0 ? (
           <p className="text-xs text-gray-500 py-1">
-            No target proximity alerts and no review dates set. Set targets / review-by on Manage.
+            No target proximity alerts and no review dates (Manage or journal “Review by: YYYY-MM-DD”).
           </p>
         ) : (
           <div className="space-y-5">
@@ -854,7 +889,7 @@ export default function HomeTable() {
           </div>
         </div>
         <JournalSidebar
-          entries={journalEntries}
+          entries={(journalEntries || []).filter((e) => !e.symbol)}
           loading={journalLoading}
           error={journalError}
           defaultSymbol=""

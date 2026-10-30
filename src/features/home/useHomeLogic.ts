@@ -34,14 +34,27 @@ export interface ReviewScheduleCoin {
   urgency: "overdue" | "today" | "soon" | "later";
 }
 
-/** One Home card per coin: high + low + review date combined. */
+/** Review date parsed from a coin journal note (agent “review by / valid until”). */
+export interface JournalReviewDate {
+  date: string; // YYYY-MM-DD
+  source: "journal";
+  entryId: number;
+  title: string | null;
+  daysUntil: number;
+  urgency: "overdue" | "today" | "soon" | "later";
+}
+
+/** One Home card per coin: high + low + review date(s) combined. */
 export interface MonitorCoinCard {
   symbol: string;
   name: string;
   currentPrice: number | null;
   high: TargetAlertCoin | null;
   low: TargetAlertCoin | null;
+  /** Manage-page reviewUntil (single). */
   review: ReviewScheduleCoin | null;
+  /** Dates from this coin’s journal notes (may be multiple). */
+  journalReviews: JournalReviewDate[];
 }
 
 interface PriceUpdateCoin {
@@ -56,6 +69,33 @@ export interface ManualRecordEntry {
 }
 
 const DISMISSED_KEY = "coins-tracker:dismissed-alert-cron-log-id";
+
+/** Pull YYYY-MM-DD review-by / valid-until / recheck-by from agent journal markdown. */
+export function extractReviewDatesFromNotes(notes: string): string[] {
+  if (!notes) return [];
+  const found = new Set<string>();
+  const patterns = [
+    /review(?:\s*again)?\s*by\s*[:\-–—]?\s*\*?\*?\s*(\d{4}-\d{2}-\d{2})/gi,
+    /valid\s*until\s*[:\-–—]?\s*\*?\*?\s*(\d{4}-\d{2}-\d{2})/gi,
+    /recheck\s*by\s*[:\-–—]?\s*\*?\*?\s*(\d{4}-\d{2}-\d{2})/gi,
+    /timeframe[^\n]{0,48}?(\d{4}-\d{2}-\d{2})/gi,
+  ];
+  for (const re of patterns) {
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(notes)) !== null) {
+      found.add(m[1]);
+    }
+  }
+  return [...found].sort();
+}
+
+function urgencyFromDays(daysUntil: number): JournalReviewDate["urgency"] {
+  if (daysUntil < 0) return "overdue";
+  if (daysUntil === 0) return "today";
+  if (daysUntil <= 3) return "soon";
+  return "later";
+}
 
 export function useHomeLogic() {
   const { authenticated } = useAuth();
@@ -327,34 +367,21 @@ export function useHomeLogic() {
     });
   }, [state.coins]);
 
-  const reviewSchedule = useMemo<ReviewScheduleCoin[]>(() => {
-    const today = new Date();
-    const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
-
-    const rows: ReviewScheduleCoin[] = [];
+  /** Coins flagged onMonitor on Manage (Home Target & review). */
+  const monitoredSymbols = useMemo(() => {
+    const set = new Set<string>();
     for (const coin of state.coins) {
-      const raw = coin.reviewUntil;
-      if (!raw) continue;
-      const reviewUntil = String(raw).slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(reviewUntil)) continue;
-      const [y, m, d] = reviewUntil.split("-").map(Number);
-      const reviewUtc = Date.UTC(y, m - 1, d);
-      const daysUntil = Math.round((reviewUtc - todayUtc) / 86_400_000);
-      let urgency: ReviewScheduleCoin["urgency"] = "later";
-      if (daysUntil < 0) urgency = "overdue";
-      else if (daysUntil === 0) urgency = "today";
-      else if (daysUntil <= 3) urgency = "soon";
-      rows.push({
-        symbol: coin.symbol,
-        name: coin.name,
-        reviewUntil,
-        currentPrice: coin.currentPrice,
-        daysUntil,
-        urgency,
-      });
+      const on =
+        (coin as { onMonitor?: boolean }).onMonitor === true ||
+        // legacy: had a reviewUntil date before onMonitor existed
+        (!!coin.reviewUntil && (coin as { onMonitor?: boolean }).onMonitor !== false);
+      if (on) set.add(coin.symbol);
     }
-    return rows.sort((a, b) => a.daysUntil - b.daysUntil || a.symbol.localeCompare(b.symbol));
+    return set;
   }, [state.coins]);
+
+  // Manage no longer stores a review date; keep empty list for type compat
+  const reviewSchedule = useMemo<ReviewScheduleCoin[]>(() => [], []);
 
   const monitorCards = useMemo<MonitorCoinCard[]>(() => {
     const bySym = new Map<string, MonitorCoinCard>();
@@ -363,7 +390,7 @@ export function useHomeLogic() {
     const ensure = (symbol: string, name: string, currentPrice: number | null) => {
       let row = bySym.get(symbol);
       if (!row) {
-        row = { symbol, name, currentPrice, high: null, low: null, review: null };
+        row = { symbol, name, currentPrice, high: null, low: null, review: null, journalReviews: [] };
         bySym.set(symbol, row);
       } else if (currentPrice != null && row.currentPrice == null) {
         row.currentPrice = currentPrice;
@@ -427,27 +454,75 @@ export function useHomeLogic() {
       if (a.targetType === "high") row.high = a;
       else row.low = a;
     }
+    // Ensure every onMonitor coin has a card (even without target proximity)
+    for (const coin of state.coins) {
+      if (!monitoredSymbols.has(coin.symbol)) continue;
+      const row = ensure(coin.symbol, coin.name, coin.currentPrice);
+      fillTargetsFromCoin(row);
+    }
+
     for (const r of reviewSchedule) {
+      if (!monitoredSymbols.has(r.symbol)) continue;
       const row = ensure(r.symbol, r.name, r.currentPrice);
       row.review = r;
-      // Always show high/low levels on review cards, even if far from 5% band
       fillTargetsFromCoin(row);
+    }
+
+    // Journal-derived review dates (per coin; multiple notes → multiple dates)
+    const today = new Date();
+    const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+    for (const e of journalEntries) {
+      if (!e.symbol) continue;
+      if (!monitoredSymbols.has(e.symbol)) continue;
+      const dates = extractReviewDatesFromNotes(e.notes || "");
+      if (!dates.length) continue;
+      const coin = coinBySym.get(e.symbol);
+      const row = ensure(
+        e.symbol,
+        coin?.name || e.name || e.symbol,
+        coin?.currentPrice ?? null
+      );
+      for (const date of dates) {
+        if (row.journalReviews.some((j) => j.date === date && j.entryId === e.id)) continue;
+        // Skip if same date already on Manage reviewUntil (avoid duplicate chip)
+        if (row.review?.reviewUntil === date) continue;
+        if (row.journalReviews.some((j) => j.date === date)) continue;
+        const [y, m, d] = date.split("-").map(Number);
+        const reviewUtc = Date.UTC(y, m - 1, d);
+        const daysUntil = Math.round((reviewUtc - todayUtc) / 86_400_000);
+        row.journalReviews.push({
+          date,
+          source: "journal",
+          entryId: e.id,
+          title: e.title || null,
+          daysUntil,
+          urgency: urgencyFromDays(daysUntil),
+        });
+        fillTargetsFromCoin(row);
+      }
+      row.journalReviews.sort((a, b) => a.daysUntil - b.daysUntil || a.date.localeCompare(b.date));
     }
 
     const rank = (c: MonitorCoinCard) => {
       let s = 0;
       if (c.high?.alertType === "reached" || c.low?.alertType === "reached") s -= 100;
-      if (c.review?.urgency === "overdue") s -= 50;
-      if (c.review?.urgency === "today") s -= 40;
+      const urgencies = [
+        c.review?.urgency,
+        ...c.journalReviews.map((j) => j.urgency),
+      ].filter(Boolean);
+      if (urgencies.includes("overdue")) s -= 50;
+      if (urgencies.includes("today")) s -= 40;
       if (c.high || c.low) s -= 10;
-      if (c.review) s -= 5;
+      if (c.review || c.journalReviews.length) s -= 5;
       return s;
     };
 
-    return [...bySym.values()].sort(
+    // Only coins with Manage "Home monitor: Yes"
+    const rows = [...bySym.values()].filter((c) => monitoredSymbols.has(c.symbol));
+    return rows.sort(
       (a, b) => rank(a) - rank(b) || a.symbol.localeCompare(b.symbol)
     );
-  }, [targetAlerts, reviewSchedule, state.coins]);
+  }, [targetAlerts, reviewSchedule, state.coins, journalEntries, monitoredSymbols]);
 
   const loadRecentManualRecords = useCallback(async (symbol: string) => {
     setRecentManualLoading(true);
@@ -558,12 +633,11 @@ export function useHomeLogic() {
     setJournalError(null);
     try {
       const from = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-      // empty symbol → general notes only (server/client filter)
-      const res = await fetch(`/api/journal?symbol=&from=${from}`);
+      // All entries (coin + general) so Target monitor can parse review-by dates
+      const res = await fetch(`/api/journal?from=${from}`);
       if (!res.ok) throw new Error(`Failed to load journal (${res.status})`);
       const data = (await res.json()) as { entries: JournalEntryView[] };
-      const general = (data.entries || []).filter((e) => !e.symbol);
-      setJournalEntries(general);
+      setJournalEntries(data.entries || []);
     } catch (err) {
       setJournalError((err as Error).message);
       setJournalEntries([]);

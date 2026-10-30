@@ -48,6 +48,7 @@ export const setTargetSchema = z.object({
   targetHigh: z.coerce.number().positive("Target high must be greater than 0").nullable(),
   targetLow: z.coerce.number().positive("Target low must be greater than 0").nullable(),
   /** YYYY-MM-DD from date input, or null/empty to clear */
+  onMonitor: z.boolean().optional(),
   reviewUntil: z
     .union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.literal(""), z.null()])
     .optional()

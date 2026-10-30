@@ -23,6 +23,7 @@ export const coinSummarySchema = z.object({
   targetHigh: z.number().nullable(),
   targetLow: z.number().nullable(),
   /** ISO date YYYY-MM-DD or full ISO string; null if unset */
+  onMonitor: z.boolean().optional(),
   reviewUntil: z.string().nullable().optional(),
   targetHighReached: z.boolean(),
   targetLowReached: z.boolean(),

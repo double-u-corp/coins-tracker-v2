@@ -3,12 +3,17 @@ import prisma from "@/lib/prisma";
 import { setTargetSchema } from "@/validators/coinSchema";
 
 type Response =
-  | { targetHigh: number | null; targetLow: number | null; reviewUntil: string | null }
+  | {
+      targetHigh: number | null;
+      targetLow: number | null;
+      onMonitor: boolean;
+      reviewUntil: string | null;
+    }
   | { error: string };
 
 /**
- * POST /api/targets — set (or clear) target high/low and optional reviewUntil date.
- * Body: { symbol, targetHigh, targetLow, reviewUntil?: "YYYY-MM-DD"|null }.
+ * POST /api/targets — set target high/low and onMonitor (Home Target & review).
+ * Body: { symbol, targetHigh, targetLow, onMonitor?: boolean }.
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse<Response>) {
   if (req.method !== "POST") {
@@ -23,28 +28,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
     });
   }
 
-  const { symbol, targetHigh, targetLow, reviewUntil } = parsed.data;
+  const { symbol, targetHigh, targetLow, onMonitor } = parsed.data;
 
   const coin = await prisma.coin.findUnique({ where: { symbol } });
   if (!coin) {
     return res.status(404).json({ error: `${symbol} is not a monitored coin.` });
   }
 
-  const bodyHasReview = Object.prototype.hasOwnProperty.call(req.body || {}, "reviewUntil");
-  const reviewDate =
-    bodyHasReview && reviewUntil != null
-      ? new Date(`${reviewUntil}T12:00:00.000Z`)
-      : bodyHasReview
-        ? null
-        : undefined;
+  const bodyHasMonitor = Object.prototype.hasOwnProperty.call(req.body || {}, "onMonitor");
+  const monitorVal = bodyHasMonitor ? Boolean(onMonitor) : undefined;
 
   const updatePayload: {
     targetHigh: number | null;
     targetLow: number | null;
-    reviewUntil?: Date | null;
+    onMonitor?: boolean;
   } = { targetHigh, targetLow };
-  if (bodyHasReview) {
-    updatePayload.reviewUntil = reviewDate ?? null;
+  if (monitorVal !== undefined) {
+    updatePayload.onMonitor = monitorVal;
   }
 
   const target = await prisma.priceTarget.upsert({
@@ -54,13 +54,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       coinId: coin.id,
       targetHigh,
       targetLow,
-      reviewUntil: bodyHasReview ? reviewDate ?? null : null,
+      onMonitor: monitorVal ?? false,
     },
   });
 
   return res.status(200).json({
     targetHigh: target.targetHigh,
     targetLow: target.targetLow,
+    onMonitor: Boolean(target.onMonitor),
     reviewUntil: target.reviewUntil
       ? target.reviewUntil.toISOString().slice(0, 10)
       : null,
