@@ -42,6 +42,9 @@ export interface JournalReviewDate {
   title: string | null;
   daysUntil: number;
   urgency: "overdue" | "today" | "soon" | "later";
+  agent: string | null;
+  targetEntry: number | null;
+  targetExit: number | null;
 }
 
 /** One Home card per coin: high + low + review date(s) combined. */
@@ -55,6 +58,10 @@ export interface MonitorCoinCard {
   review: ReviewScheduleCoin | null;
   /** Dates from this coin’s journal notes (may be multiple). */
   journalReviews: JournalReviewDate[];
+  /** Latest journal Target entry / exit (₱), if parsed. */
+  journalTargetEntry: number | null;
+  journalTargetExit: number | null;
+  journalAgent: string | null;
 }
 
 interface PriceUpdateCoin {
@@ -88,6 +95,45 @@ export function extractReviewDatesFromNotes(notes: string): string[] {
     }
   }
   return [...found].sort();
+}
+
+
+/** Parse Agent + Target entry/exit from journal markdown (bold or plain). */
+export function extractJournalTargets(notes: string): {
+  entry: number | null;
+  exit: number | null;
+  agent: string | null;
+} {
+  if (!notes) return { entry: null, exit: null, agent: null };
+  const parseMoney = (s: string): number | null => {
+    if (!s || /n\s*\/\s*a/i.test(s)) return null;
+    const cleaned = s.replace(/[₱$,]/g, " ");
+    const m = cleaned.match(/(\d+(?:\.\d+)?)/);
+    if (!m) return null;
+    const n = Number(m[1]);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  const lineVal = (label: string): string | null => {
+    // **Label:** value  |  Label: value  |  fullwidth colon
+    const re = new RegExp(
+      `(?:^|\\n)\\s*[-*•]?\\s*\\*{0,2}\\s*${label}\\s*\\*{0,2}\\s*[:：]\\s*(.+)`,
+      "i"
+    );
+    const m = notes.match(re);
+    return m ? m[1].trim() : null;
+  };
+  const entryRaw = lineVal("Target\\s+entry");
+  const exitRaw = lineVal("Target\\s+exit");
+  const agentRaw = lineVal("Agent");
+  let agent: string | null = null;
+  if (agentRaw && !/^n\s*\/\s*a$/i.test(agentRaw)) {
+    agent = agentRaw.replace(/\*+/g, "").trim().slice(0, 120);
+  }
+  return {
+    entry: entryRaw ? parseMoney(entryRaw) : null,
+    exit: exitRaw ? parseMoney(exitRaw) : null,
+    agent,
+  };
 }
 
 function urgencyFromDays(daysUntil: number): JournalReviewDate["urgency"] {
@@ -390,7 +436,18 @@ export function useHomeLogic() {
     const ensure = (symbol: string, name: string, currentPrice: number | null) => {
       let row = bySym.get(symbol);
       if (!row) {
-        row = { symbol, name, currentPrice, high: null, low: null, review: null, journalReviews: [] };
+        row = {
+          symbol,
+          name,
+          currentPrice,
+          high: null,
+          low: null,
+          review: null,
+          journalReviews: [],
+          journalTargetEntry: null,
+          journalTargetExit: null,
+          journalAgent: null,
+        };
         bySym.set(symbol, row);
       } else if (currentPrice != null && row.currentPrice == null) {
         row.currentPrice = currentPrice;
@@ -482,11 +539,16 @@ export function useHomeLogic() {
         coin?.name || e.name || e.symbol,
         coin?.currentPrice ?? null
       );
+      const levels = extractJournalTargets(e.notes || "");
       for (const date of dates) {
-        if (row.journalReviews.some((j) => j.date === date && j.entryId === e.id)) continue;
-        // Skip if same date already on Manage reviewUntil (avoid duplicate chip)
         if (row.review?.reviewUntil === date) continue;
-        if (row.journalReviews.some((j) => j.date === date)) continue;
+        const existing = row.journalReviews.find((j) => j.date === date);
+        if (existing) {
+          if (!existing.agent && levels.agent) existing.agent = levels.agent;
+          if (existing.targetEntry == null && levels.entry != null) existing.targetEntry = levels.entry;
+          if (existing.targetExit == null && levels.exit != null) existing.targetExit = levels.exit;
+          continue;
+        }
         const [y, m, d] = date.split("-").map(Number);
         const reviewUtc = Date.UTC(y, m - 1, d);
         const daysUntil = Math.round((reviewUtc - todayUtc) / 86_400_000);
@@ -497,10 +559,19 @@ export function useHomeLogic() {
           title: e.title || null,
           daysUntil,
           urgency: urgencyFromDays(daysUntil),
+          agent: levels.agent,
+          targetEntry: levels.entry,
+          targetExit: levels.exit,
         });
         fillTargetsFromCoin(row);
       }
       row.journalReviews.sort((a, b) => a.daysUntil - b.daysUntil || a.date.localeCompare(b.date));
+
+      const levels = extractJournalTargets(e.notes || "");
+      // Keep first filled values (journal list is newest-first)
+      if (row.journalTargetEntry == null && levels.entry != null) row.journalTargetEntry = levels.entry;
+      if (row.journalTargetExit == null && levels.exit != null) row.journalTargetExit = levels.exit;
+      if (!row.journalAgent && levels.agent) row.journalAgent = levels.agent;
     }
 
     const rank = (c: MonitorCoinCard) => {

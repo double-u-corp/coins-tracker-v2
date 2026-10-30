@@ -104,6 +104,19 @@ function MonitorCard({
       daysUntil: number;
       reviewUntil: string;
     } | null;
+    journalReviews?: {
+      entryId: number;
+      date: string;
+      daysUntil: number;
+      urgency: string;
+      title: string | null;
+      agent?: string | null;
+      targetEntry?: number | null;
+      targetExit?: number | null;
+    }[];
+    journalTargetEntry?: number | null;
+    journalTargetExit?: number | null;
+    journalAgent?: string | null;
   };
   portfolio: { symbol?: string; holdings?: number; spent?: number }[] | null | undefined;
   daysHeld?: number | null;
@@ -232,6 +245,27 @@ function MonitorCard({
             </span>
           </div>
         )}
+        {(card.journalTargetEntry != null || card.journalTargetExit != null) && (
+          <div className="rounded-md border border-teal-100 bg-teal-50/70 px-2 py-1 space-y-0.5">
+            {card.journalTargetEntry != null && (
+              <div className="flex justify-between gap-2 text-[11px]">
+                <span className="font-semibold text-teal-900">Journal entry</span>
+                <span className="font-mono text-gray-900">{formatPhp(card.journalTargetEntry)}</span>
+              </div>
+            )}
+            {card.journalTargetExit != null && (
+              <div className="flex justify-between gap-2 text-[11px]">
+                <span className="font-semibold text-teal-900">Journal exit</span>
+                <span className="font-mono text-gray-900">{formatPhp(card.journalTargetExit)}</span>
+              </div>
+            )}
+            {card.journalAgent && (
+              <div className="truncate text-[10px] text-teal-800/80" title={card.journalAgent}>
+                {card.journalAgent}
+              </div>
+            )}
+          </div>
+        )}
         {card.review && (
           <div
             className={`flex justify-between gap-2 rounded-md border px-2 py-1 ${
@@ -268,7 +302,6 @@ function MonitorCard({
                     ? "bg-amber-50 border-amber-200"
                     : "bg-indigo-50/80 border-indigo-100"
               }`}
-              title={jr.title || "From journal note"}
             >
               <div className="flex justify-between gap-2">
                 <span className="font-semibold text-indigo-900">
@@ -277,9 +310,27 @@ function MonitorCard({
                 </span>
                 <span className="font-mono text-gray-700">{jr.date}</span>
               </div>
-              {jr.title ? (
-                <span className="truncate text-[10px] text-gray-500">{jr.title}</span>
+              {jr.agent ? (
+                <span className="truncate text-[10px] text-indigo-800/90" title={jr.agent}>
+                  {jr.agent}
+                </span>
               ) : null}
+              {(jr.targetEntry != null || jr.targetExit != null) && (
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] tabular-nums text-gray-800">
+                  {jr.targetEntry != null && (
+                    <span>
+                      <span className="text-gray-500">Entry </span>
+                      {formatPhp(jr.targetEntry)}
+                    </span>
+                  )}
+                  {jr.targetExit != null && (
+                    <span>
+                      <span className="text-gray-500">Exit </span>
+                      {formatPhp(jr.targetExit)}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}

@@ -777,193 +777,7 @@ export default function ChartView() {
 
       <MacroDayBanner />
 
-      {/* Watchlist Scan — check every tracked coin's confluence signal at once
-          instead of clicking through the dropdown one by one */}
-      <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm space-y-3">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div>
-            <h2 className="text-sm font-bold text-gray-900 flex items-center gap-1.5">
-              <span>📡</span> Watchlist Scan
-            </h2>
-            <p className="text-xs text-gray-500">
-              Check every tracked coin's confluence signal at once — click a result to load its full chart below.
-            </p>
-            <p className="text-[11px] text-gray-400 mt-0.5">
-              Suggested: ~08:15 and ~20:15 Manila
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={runScan}
-            disabled={isScanning || allCoins.length === 0}
-            className="px-4 py-2 rounded-md text-sm font-semibold bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 whitespace-nowrap shadow-sm"
-          >
-            {isScanning ? `Scanning ${scanProgress.completed}/${scanProgress.total}…` : "🔍 Scan All Coins"}
-          </button>
-        </div>
-
-        {scanError && <AlertBanner variant="error" message={`Scan failed: ${scanError}`} />}
-
-        {hasScanned && !isScanning && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <span className="text-[11px] text-gray-400">
-                {visibleScanResults.length} of {sortedScanResults.length} coins shown
-                {!showAllScanResults && " (hits + near-support worth-check)"}
-              </span>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={handleCopyScanResults}
-                  disabled={directionalSignalCount === 0}
-                  title={
-                    directionalSignalCount === 0
-                      ? "No LONG/SHORT signals to copy right now"
-                      : "Copy full details of LONG/SHORT signals for your journal"
-                  }
-                  className="text-[11px] font-semibold text-white bg-gray-700 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed rounded px-2.5 py-1 transition"
-                >
-                  {scanCopied ? "✅ Copied!" : `📋 Copy for Journal (${directionalSignalCount})`}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowAllScanResults((v) => !v)}
-                  className="text-[11px] font-medium text-purple-700 hover:underline"
-                >
-                  {showAllScanResults ? "Show buy-low hits only" : "Show all coins"}
-                </button>
-              </div>
-            </div>
-
-            {visibleScanResults.length === 0 ? (
-              <p className="text-xs text-gray-500 py-2">
-                No buy-low watchlist hits right now — no LONG/NEUTRAL coin is near support or in the lower third of range.
-                Try "Show all coins" to see the full breakdown.
-              </p>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {visibleScanResults.map((r) => (
-                  <div
-                    key={r.symbol}
-                    className={`rounded-md border p-2.5 transition hover:shadow-sm ${
-                      symbol === r.symbol ? "ring-2 ring-purple-400" : ""
-                    } ${r.error ? "border-gray-200 bg-gray-50" : "border-gray-200 bg-white"}`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setSymbol(r.symbol)}
-                        className="text-xs font-bold text-gray-900 hover:underline text-left"
-                        title={`Load ${r.symbol} chart`}
-                      >
-                        {r.symbol}
-                      </button>
-                      <div className="flex items-center gap-1 shrink-0">
-                        {r.streak >= 2 && (
-                          <span
-                            className="rounded-md border border-orange-300 bg-orange-50 px-1.5 py-0.5 text-[10px] font-bold text-orange-700"
-                            title={`${r.streak} consecutive scan runs with the same signal direction`}
-                          >
-                            🔥{r.streak}
-                          </span>
-                        )}
-                        {r.confluence &&
-                          !isWatchlistBuyLowHit(r.confluence) &&
-                          isNearSupportWorthCheck(r.confluence) && (
-                            <span
-                              className="rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold text-sky-800"
-                              title="Near support — secondary watch, not a priority hit"
-                            >
-                              📌 Check
-                            </span>
-                          )}
-                        {r.confluence && (
-                          <span
-                            className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${
-                              BIAS_BADGE_CLASSES[r.confluence.bias]
-                            }`}
-                          >
-                            {r.confluence.bias}
-                          </span>
-                        )}
-                        {r.confluence && (
-                          <button
-                            type="button"
-                            onClick={() => handleCopyCard(r)}
-                            title="Copy this coin's full details"
-                            className="text-[11px] px-1.5 py-0.5 rounded hover:bg-gray-100 text-gray-500"
-                          >
-                            {cardCopiedSymbol === r.symbol ? "✅" : "📋"}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setSymbol(r.symbol)}
-                      className="block w-full text-left mt-1"
-                      title={`Load ${r.symbol} chart`}
-                    >
-                      {r.error ? (
-                        <p className="text-[10px] text-red-500">Failed to load</p>
-                      ) : r.confluence ? (
-                        <p className="text-[10px] text-gray-500">
-                          Score {r.confluence.score >= 0 ? "+" : ""}
-                          {r.confluence.score}/±{r.confluence.maxPossibleScore} ·{" "}
-                          {(r.confluence.confidence * 100).toFixed(0)}% data
-                          <br />
-                          {isWatchlistBuyLowHit(r.confluence) ? (
-                            isLongExtended(r.confluence) ? (
-                              <span className="text-amber-700 font-semibold">
-                                ⏳ Extended — wait for pullback into ladder
-                              </span>
-                            ) : r.confluence.bias.includes("LONG") ? (
-                              <span className="text-emerald-700 font-medium">
-                                Near ladder / ready to stage
-                              </span>
-                            ) : (
-                              <span className="text-emerald-700/90 font-medium">
-                                Buy-low zone — watch for confirmation
-                              </span>
-                            )
-                          ) : isNearSupportWorthCheck(r.confluence) ? (
-                            <span className="text-sky-700 font-medium">
-                              📌 Worth to check — near support / key level
-                            </span>
-                          ) : r.confluence.bias.includes("SHORT") ? (
-                            <span className="text-rose-600 font-medium">
-                              Hold cash — do not buy
-                            </span>
-                          ) : isLongExtended(r.confluence) ? (
-                            <span className="text-amber-700 font-semibold">
-                              ⏳ Extended — wait for pullback into ladder
-                            </span>
-                          ) : r.confluence.bias.includes("LONG") ? (
-                            <span className="text-emerald-700 font-medium">
-                              Near ladder / ready to stage
-                            </span>
-                          ) : null}
-                          <br />
-                          <span className="text-gray-400">
-                            {new Date(r.scannedAt).toLocaleTimeString("en-US", {
-                              timeZone: "Asia/Manila",
-                              hour: "numeric",
-                              minute: "2-digit",
-                            })}{" "}
-                            Manila
-                          </span>
-                        </p>
-                      ) : (
-                        <p className="text-[10px] text-gray-400">No data</p>
-                      )}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      {/* Watchlist Scan hidden — use LONG scan page */}
 
       {!symbol ? (
         <div className="flex flex-wrap items-end gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
@@ -1014,6 +828,38 @@ export default function ChartView() {
       ) : (
         <div className="flex flex-col gap-6">
           {chartError && <AlertBanner variant="error" message={`Failed to load chart: ${chartError}`} />}
+
+          <div className="flex flex-wrap items-end gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+            <Dropdown
+              label="Coin"
+              placeholder="Select a coin to analyse"
+              value={symbol}
+              onChange={setSymbol}
+              options={coinOptions.map((c) => ({
+                label: `${c.name} (${c.symbol})`,
+                value: c.symbol,
+              }))}
+            />
+            <div className="flex flex-col gap-1 text-sm font-medium text-gray-700">
+              <span>Range</span>
+              <div className="inline-flex rounded-md border border-gray-200 p-1 bg-white">
+                {RANGE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setRange(opt.value)}
+                    className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                      range === opt.value
+                        ? "bg-brand-600 text-white"
+                        : "text-gray-600 hover:bg-gray-100"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
 
           <div className="flex flex-col gap-4 bg-white border border-purple-100 rounded-lg p-5 shadow-sm">
             <div className="flex flex-row items-center gap-3 flex-wrap sm:flex-nowrap">
@@ -1118,38 +964,6 @@ export default function ChartView() {
                 )}
               </div>
             )}
-          </div>
-
-          <div className="flex flex-wrap items-end gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-            <Dropdown
-              label="Coin"
-              placeholder="Select a coin to analyse"
-              value={symbol}
-              onChange={setSymbol}
-              options={coinOptions.map((c) => ({
-                label: `${c.name} (${c.symbol})`,
-                value: c.symbol,
-              }))}
-            />
-            <div className="flex flex-col gap-1 text-sm font-medium text-gray-700">
-              <span>Range</span>
-              <div className="inline-flex rounded-md border border-gray-200 p-1 bg-white">
-                {RANGE_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => setRange(opt.value)}
-                    className={`rounded px-3 py-1.5 text-sm font-medium transition-colors ${
-                      range === opt.value
-                        ? "bg-brand-600 text-white"
-                        : "text-gray-600 hover:bg-gray-100"
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
 
           <div className="w-full rounded-lg border border-gray-200 bg-white p-4 shadow-sm">

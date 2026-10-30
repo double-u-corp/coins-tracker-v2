@@ -390,12 +390,14 @@ export function formatEntryReviewPrompt(
   if (isAllocated) {
     lines.push(`## ${pair} · add / size note · ${todayManila} (Manila)`);
     lines.push(``);
-    lines.push(`- **Agent:** (ChatGPT / Grok / Gemini / other — name the model)`);
+    lines.push(`- **Agent:** Spot Trading Desk AI (ChatGPT / Grok / Gemini — name model)`);
     lines.push(`- **Prompt:** Spot Insights · Copy add/size review (full confluence)`);
     lines.push(`- **Verdict:** ADD | ADD ONLY ON PULLBACK | DO NOT ADD | TRIM`);
     lines.push(`- **Analysis date (Manila):** ${todayManila}`);
     lines.push(`- **Price now:** …`);
     lines.push(`- **Avg cost / unrealized:** …`);
+    lines.push(`- **Target entry:** ₱… (add/buy level; or n/a)`);
+    lines.push(`- **Target exit:** ₱… (trim/TP level; or n/a)`);
     lines.push(`- **Additional budget (PHP):** … (0 if DO NOT ADD)`);
     lines.push(`- **Tranches:** … (PHP + level; 30/30/40 of additional budget)`);
     lines.push(`- **New avg cost if filled:** …`);
@@ -410,11 +412,13 @@ export function formatEntryReviewPrompt(
   } else {
     lines.push(`## ${pair} · entry note · ${todayManila} (Manila)`);
     lines.push(``);
-    lines.push(`- **Agent:** (ChatGPT / Grok / Gemini / other — name the model)`);
+    lines.push(`- **Agent:** Spot Trading Desk AI (ChatGPT / Grok / Gemini — name model)`);
     lines.push(`- **Prompt:** Spot Insights · Copy entry review (full confluence)`);
     lines.push(`- **Verdict:** READY TO STAGE | WAIT FOR PULLBACK | SKIP`);
     lines.push(`- **Analysis date (Manila):** ${todayManila}`);
     lines.push(`- **Price now:** …`);
+    lines.push(`- **Target entry:** ₱… (preferred buy / top ladder; or n/a)`);
+    lines.push(`- **Target exit:** ₱… (take-profit / resistance trim; or n/a)`);
     lines.push(`- **Ladder levels:**`);
     lines.push(`  - … (pct)`);
     lines.push(`- **Invalidation:** …`);

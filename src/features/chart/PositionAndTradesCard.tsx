@@ -238,11 +238,13 @@ If a **verified** incident exists → flag it and lean **WAIT / SKIP / DO NOT AD
   if (args.holding) {
     lines.push(`## ${args.symbol} · add / size note · ${todayManila} (Manila)`);
     lines.push(``);
-    lines.push(`- **Agent:** (ChatGPT / Grok / Gemini / other — name the model)`);
+    lines.push(`- **Agent:** Spot Trading Desk AI (ChatGPT / Grok / Gemini — name model)`);
     lines.push(`- **Prompt:** Spot · Position & trades · add/size research`);
     lines.push(`- **Verdict:** ADD | ADD ONLY ON PULLBACK | DO NOT ADD | TRIM`);
     lines.push(`- **Price now:** …`);
     lines.push(`- **Avg cost / unrealized:** …`);
+    lines.push(`- **Target entry:** ₱… (add/buy level; or n/a)`);
+    lines.push(`- **Target exit:** ₱… (trim/TP level; or n/a)`);
     lines.push(`- **Last pump / local high:** date · peak · why it may have faded (or n/a)`);
     lines.push(`- **Sell / trim if:** …`);
     lines.push(`- **Invalidation:** …`);
@@ -252,10 +254,12 @@ If a **verified** incident exists → flag it and lean **WAIT / SKIP / DO NOT AD
   } else {
     lines.push(`## ${args.symbol} · entry note · ${todayManila} (Manila)`);
     lines.push(``);
-    lines.push(`- **Agent:** (ChatGPT / Grok / Gemini / other — name the model)`);
+    lines.push(`- **Agent:** Spot Trading Desk AI (ChatGPT / Grok / Gemini — name model)`);
     lines.push(`- **Prompt:** Spot · Position & trades · buy/sizing research`);
     lines.push(`- **Verdict:** BUY | WAIT | SKIP`);
     lines.push(`- **Price now:** …`);
+    lines.push(`- **Target entry:** ₱… (preferred buy level; or n/a)`);
+    lines.push(`- **Target exit:** ₱… (take-profit level; or n/a)`);
     lines.push(`- **Last pump / local high:** date · peak · why price may be down now (or n/a)`);
     lines.push(`- **Entry / invalidation / TP:** …`);
     lines.push(`- **Size note:** …`);
