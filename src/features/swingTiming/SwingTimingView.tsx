@@ -822,14 +822,6 @@ export default function SwingTimingView() {
           >
             {agentCopied === "timing" ? "✅ Copied" : "📋 Timing pattern"}
           </button>
-          <button
-            type="button"
-            onClick={() => void copyMacroPrompt()}
-            className="rounded-md border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-900 hover:bg-indigo-100"
-            title="Copy: Macro watch calendar for agent validation"
-          >
-            {agentCopied === "macro" ? "✅ Copied" : "📋 Macro watch"}
-          </button>
         </div>
       </div>
 
@@ -1001,92 +993,7 @@ export default function SwingTimingView() {
           </div>
 
 
-          <div className="rounded-lg border-2 border-teal-200 bg-teal-50/30 p-4 shadow-sm">
-            <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h2 className="text-sm font-bold text-teal-950">2d · biggest movers</h2>
-                <p className="text-[11px] text-teal-900/80 mt-0.5">
-                  Ranked by total |%| move over the <span className="font-semibold">last ~2 days only</span>
-                  — not the 14/30/60 hot-slot list. Use for latest-news checks.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => void copyWhyMovingPrompt()}
-                disabled={!data || recentPollsLoading}
-                className="rounded-md border border-teal-400 bg-teal-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-700 disabled:opacity-50"
-              >
-                {agentCopied === "why" ? "✅ Copied" : "📋 Why moving (2d)"}
-              </button>
-            </div>
-            <p className="text-[11px] text-gray-600 mb-2">
-              Path tiles = last ~16 Manila 3h prints for the 2d biggest movers. Green/red = up/down vs prior
-              print.
-            </p>
-            {data.topMovers2d && data.topMovers2d.length > 0 && (
-              <div className="mb-3 flex flex-wrap gap-1.5">
-                {data.topMovers2d.map((m, i) => (
-                  <span
-                    key={m.symbol}
-                    className="inline-flex items-center gap-1 rounded-full border border-teal-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-teal-900"
-                    title={`total |path| ${m.totalAbsPct}% · net ${m.netPct}%`}
-                  >
-                    <span className="text-teal-500">#{i + 1}</span>
-                    {m.symbol.replace(/PHP$/i, "")}
-                    <span
-                      className={
-                        m.netPct > 0 ? "text-emerald-600" : m.netPct < 0 ? "text-rose-600" : "text-gray-500"
-                      }
-                    >
-                      {m.netPct >= 0 ? "+" : ""}
-                      {m.netPct.toFixed(1)}%
-                    </span>
-                  </span>
-                ))}
-              </div>
-            )}
-            {recentPollsLoading ? (
-              <p className="text-xs text-gray-400">Loading 3h series…</p>
-            ) : recentPolls.length === 0 ? (
-              <p className="text-xs text-gray-500">No 3h series available yet.</p>
-            ) : (
-              <div className="space-y-3 max-h-72 overflow-y-auto">
-                {recentPolls.map((s) => (
-                  <div key={s.symbol}>
-                    <div className="text-xs font-bold text-indigo-900 mb-1 font-mono">{s.symbol}</div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {s.points.map((pt, i) => {
-                        const prev = i > 0 ? s.points[i - 1].price : null;
-                        const up = prev != null && pt.price > prev * 1.0005;
-                        const down = prev != null && pt.price < prev * 0.9995;
-                        return (
-                          <div
-                            key={`${pt.day}-${pt.slotLabel}-${i}`}
-                            className={`rounded-md border px-1.5 py-1 text-center min-w-[4.25rem] ${
-                              up
-                                ? "border-emerald-200 bg-emerald-50"
-                                : down
-                                  ? "border-rose-200 bg-rose-50"
-                                  : "border-gray-100 bg-gray-50"
-                            }`}
-                          >
-                            <div className="text-[9px] font-semibold text-gray-500">
-                              {pt.day.slice(5)} {pt.slotLabel}
-                            </div>
-                            <div className="text-[11px] font-bold tabular-nums text-gray-900">
-                              {pt.price}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {data.topMoversByHotSlot.length > 0 && data.hottestSlot && (
+                    {data.topMoversByHotSlot.length > 0 && data.hottestSlot && (
             <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
               <h2 className="text-sm font-bold text-gray-900 mb-1">
                 Most active coins in the hottest window

@@ -77,12 +77,12 @@ function PollMiniLine({
   const pad = (max - min) * 0.08 || max * 0.01 || 1;
   const y0 = min - pad;
   const y1 = max + pad;
-  const left = 48; // room for price labels
-  const right = 4;
+  const left = 56; // room for price labels
+  const right = 8;
   const top = 10;
   const bottom = 16;
-  // Tall viewBox so phone screens get more vertical room when scaled to 100% width
-  const w = 360;
+  // Wide viewBox for desktop; CSS height keeps phone tall
+  const w = 960;
   const h = 280;
   const plotW = w - left - right;
   const plotH = h - top - bottom;
@@ -102,11 +102,11 @@ function PollMiniLine({
     v >= 1000 ? v.toLocaleString("en-PH", { maximumFractionDigits: 0 }) : v.toLocaleString("en-PH", { maximumFractionDigits: 4 });
 
   return (
-    <div className="relative -mx-1 flex w-[calc(100%+0.5rem)] max-w-none flex-col rounded-lg border border-violet-100 bg-violet-50/30 sm:-mx-2 sm:w-[calc(100%+1rem)]">
-      <div className="w-full p-1 pb-0 sm:p-1.5 sm:pb-0">
+    <div className="relative -mx-2 flex w-[calc(100%+1rem)] max-w-none flex-col rounded-lg border border-violet-100 bg-violet-50/30 sm:-mx-3 sm:w-[calc(100%+1.5rem)] md:-mx-4 md:w-[calc(100%+2rem)]">
+      <div className="w-full p-1 pb-0 sm:p-2 sm:pb-0">
       <svg
         viewBox={`0 0 ${w} ${h}`}
-        className="h-[min(58vw,320px)] w-full min-h-[240px] sm:h-64 sm:min-h-0"
+        className="h-[min(62vw,340px)] w-full min-h-[260px] sm:h-72 sm:min-h-[288px] md:h-80 lg:h-[22rem]"
         role="img"
         aria-label="3h poll prices"
         onMouseLeave={() => setHover(null)}

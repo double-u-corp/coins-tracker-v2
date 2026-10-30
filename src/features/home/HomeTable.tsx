@@ -6,6 +6,7 @@ import { useHomeLogic } from "./useHomeLogic";
 import NewRecordModal from "./NewRecordModal";
 import HomeMacroWatch from "./HomeMacroWatch";
 import NewsSection from "./NewsSection";
+import HomeTwoDayMovers from "./HomeTwoDayMovers";
 import JournalSidebar from "@/features/chart/JournalSidebar";
 import PriceUpdateModal from "./PriceUpdateModal";
 import type { CoinSummary } from "@/validators/recordSchema";
@@ -831,9 +832,10 @@ export default function HomeTable() {
         </>
       )}
 
-                  <p className="mt-2 text-xs text-gray-500">Target prices are set from the Manage Coins page.</p>
 
       {/* 1) Market Signals (Core outlet + Price & RSS) */}
+      <HomeTwoDayMovers />
+
       <NewsSection />
 
       {/* 2) Macro watch — after market signals */}

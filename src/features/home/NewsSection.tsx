@@ -182,12 +182,7 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
 
   return (
     <section className="mt-8 space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold text-gray-900">Market Signals</h2>
-        <CoinsPhAgentButton />
-      </div>
-
-      <div className="rounded-lg border border-teal-100 bg-white p-4 shadow-sm">
+      <div className="mt-3 rounded-lg border border-teal-100 bg-white p-4 shadow-sm">
         <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
           <div>
             <h3 className="text-sm font-bold text-teal-900">Core outlet news</h3>
@@ -196,14 +191,17 @@ export default function NewsSection({ refreshSignal }: NewsSectionProps) {
               signal.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => void scan()}
-            disabled={watchScanning}
-            className="rounded-md border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-800 hover:bg-teal-100 disabled:opacity-50"
-          >
-            {watchScanning ? "Scanning…" : "↻ Scan"}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <CoinsPhAgentButton />
+            <button
+              type="button"
+              onClick={() => void scan()}
+              disabled={watchScanning}
+              className="rounded-md border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-800 hover:bg-teal-100 disabled:opacity-50"
+            >
+              {watchScanning ? "Scanning…" : "↻ Scan"}
+            </button>
+          </div>
         </div>
 
         <div className="mb-3 flex flex-wrap gap-1.5 items-center">

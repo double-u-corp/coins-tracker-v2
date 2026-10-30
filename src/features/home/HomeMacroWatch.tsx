@@ -96,7 +96,91 @@ function mergeEvents(existing: MacroEvent[], incoming: MacroEvent[], deleted: Se
 }
 
 /** Upcoming US macro that tends to shake crypto — Fed, CPI, jobs, etc. */
+
+function manilaNowLabel(): string {
+  return new Date().toLocaleString("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }) + " Manila";
+}
+
+function formatMacroAgentPromptFromEvents(events: MacroEvent[]): string {
+  const lines: string[] = [];
+  lines.push(`ROLE`);
+  lines.push(
+    `You are a neutral research assistant for a Philippines spot LONG-only PHP crypto trader (no shorting, no leverage). No buy signals, targets, or predictions. "No action" is a valid answer.`
+  );
+  lines.push(``);
+  lines.push(`PURPOSE`);
+  lines.push(
+    `Verify the macro calendar below, find missing high-impact events, and tell the trader which Manila windows to watch. Hot windows are activity, not direction.`
+  );
+  lines.push(``);
+  lines.push(`TIME RULES`);
+  lines.push(`- Manila is UTC+8, no daylight saving.`);
+  lines.push(
+    `- US Eastern is EDT (UTC-4) until Nov 1, 2026 (ET→Manila +12h). After that EST (UTC-5, +13h).`
+  );
+  lines.push(`- Always state Manila DATE and time. Evening ET can fall on the next Manila date.`);
+  lines.push(``);
+  lines.push(`TODAY`);
+  lines.push(manilaNowLabel());
+  lines.push(``);
+  lines.push(`CALENDAR FROM THE APP (verify; do not assume correct)`);
+  lines.push(`name | impact | ET date+time | Manila | type`);
+  if (!events.length) {
+    lines.push(`(no events in app)`);
+  } else {
+    for (const e of events) {
+      const date = String(e.date || "").slice(0, 10);
+      const impact = e.severity === "high" ? "HIGH" : e.severity || "medium";
+      const et = e.timeET ? `${date} ${e.timeET} ET` : `${date} (time unknown) ET`;
+      const manila = e.manilaTimeLabel
+        ? `${e.manilaDateKey || date} ${e.manilaTimeLabel}`
+        : e.manilaDateKey || "—";
+      const src = (e as { source?: string }).source === "manual" ? " [manual]" : "";
+      lines.push(
+        `${(e.title || "").trim()} | ${impact} | ${et} | ${manila} | ${e.type || "OTHER"}${src}`
+      );
+    }
+  }
+  lines.push(``);
+  lines.push(`APP POLL SLOTS (Manila; ~3h window before label)`);
+  lines.push(`02:05, 05:05, 08:05, 11:05, 14:05, 17:05, 20:05, 23:05.`);
+  lines.push(``);
+  lines.push(`RESEARCH TASKS (live search; no training memory)`);
+  lines.push(
+    `1. Verify each event vs primary source (federalreserve.gov, bls.gov, bea.gov). KEEP / FIX (ET + Manila) / STALE.`
+  );
+  lines.push(
+    `2. Crypto-specific additions next 21d only when concrete (regulation, ETF flows, major protocol). Omit routine macro without crypto link.`
+  );
+  lines.push(
+    `3. Each HIGH event: where it lands vs poll slots (including sub-slot timing).`
+  );
+  lines.push(``);
+  lines.push(`VERIFICATION`);
+  lines.push(`- Primary source URL + check date. Unverified → "none verified". No memory headlines.`);
+  lines.push(``);
+  lines.push(`POSTURE: IGNORE · WATCH · STAGE (only if Spot already LONG bias) · RISK`);
+  lines.push(``);
+  lines.push(`ANSWER FORMAT`);
+  lines.push(`0. Data status`);
+  lines.push(`1. Calendar fixes (KEEP/FIX/STALE)`);
+  lines.push(`2. Missing high-impact (crypto-relevant) or none verified`);
+  lines.push(`3. Manila windows to watch (max 3) with posture`);
+  lines.push(`4. Do / Don't (max 3 each) for a spot buyer`);
+  lines.push(`Recheck by: (Manila date)`);
+  return lines.join("\n");
+}
+
 export default function HomeMacroWatch() {
+    const [macroPromptCopied, setMacroPromptCopied] = useState(false);
   const [events, setEvents] = useState<MacroEvent[]>([]);
   const [meta, setMeta] = useState<MetaStore>({ version: 1, deletedKeys: [], history: [] });
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
@@ -217,6 +301,17 @@ export default function HomeMacroWatch() {
   useEffect(() => {
     void loadCache();
   }, [loadCache]);
+
+  const copyMacroAgentPrompt = async () => {
+    try {
+      const text = formatMacroAgentPromptFromEvents(events);
+      await navigator.clipboard.writeText(text);
+      setMacroPromptCopied(true);
+      setTimeout(() => setMacroPromptCopied(false), 2000);
+    } catch {
+      setError("Could not copy macro prompt");
+    }
+  };
 
   const refresh = async () => {
     setRefreshing(true);
@@ -361,7 +456,7 @@ export default function HomeMacroWatch() {
   }, [events]);
 
   return (
-    <div className="mb-6 rounded-lg border border-indigo-100 bg-white p-4 shadow-sm mt-3">
+    <div className="mb-6 rounded-lg border border-indigo-100 bg-white p-4 shadow-sm mt-4">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 className="text-sm font-bold uppercase tracking-wider text-indigo-900 flex items-center gap-2">
@@ -381,6 +476,14 @@ export default function HomeMacroWatch() {
           )}
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void copyMacroAgentPrompt()}
+            className="rounded-md border border-indigo-300 bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700"
+            title="Copy macro calendar agent prompt"
+          >
+            {macroPromptCopied ? "✅ Copied" : "📋 Macro agent"}
+          </button>
           <button
             type="button"
             onClick={() => setShowAddForm((v) => !v)}
