@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import AlertBanner from "@/components/AlertBanner";
@@ -27,13 +27,54 @@ function MonitoredCoinCard({
   const [savedHigh, setSavedHigh] = useState<number | null>(coin.targetHigh);
   const [savedLow, setSavedLow] = useState<number | null>(coin.targetLow);
   const [savedMonitor, setSavedMonitor] = useState<boolean>(
-    Boolean(coin.onMonitor ?? coin.reviewUntil)
+    coin.onMonitor === true || coin.onMonitor === false
+      ? Boolean(coin.onMonitor)
+      : Boolean(coin.reviewUntil)
   );
 
   // Buffer Edit State
   const [inputHigh, setInputHigh] = useState<string>(savedHigh?.toString() ?? "");
   const [inputLow, setInputLow] = useState<string>(savedLow?.toString() ?? "");
   const [inputMonitor, setInputMonitor] = useState<boolean>(savedMonitor);
+
+  // Keep local state in sync when parent reloads coin (modal / list refresh)
+  useEffect(() => {
+    setSavedHigh(coin.targetHigh ?? null);
+    setSavedLow(coin.targetLow ?? null);
+    const mon =
+      coin.onMonitor === true || coin.onMonitor === false
+        ? Boolean(coin.onMonitor)
+        : Boolean(coin.reviewUntil);
+    setSavedMonitor(mon);
+    if (!isEditing) {
+      setInputHigh(coin.targetHigh != null ? String(coin.targetHigh) : "");
+      setInputLow(coin.targetLow != null ? String(coin.targetLow) : "");
+      setInputMonitor(mon);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coin.symbol, coin.targetHigh, coin.targetLow, coin.onMonitor, coin.reviewUntil]);
+
+  const persistTargets = async (opts: {
+    high: number | null;
+    low: number | null;
+    onMonitor: boolean;
+  }) => {
+    const res = await fetch("/api/targets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        symbol: coin.symbol,
+        targetHigh: opts.high,
+        targetLow: opts.low,
+        onMonitor: opts.onMonitor,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error((data as { error?: string }).error || "Failed to save targets");
+    }
+    return data as { onMonitor?: boolean };
+  };
 
   const handleCancel = () => {
     setInputHigh(savedHigh?.toString() ?? "");
@@ -50,27 +91,47 @@ function MonitoredCoinCard({
 
     setIsSaving(true);
     try {
-      const res = await fetch("/api/targets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          symbol: coin.symbol,
-          targetHigh: validHigh,
-          targetLow: validLow,
-          onMonitor: inputMonitor,
-        }),
+      const data = await persistTargets({
+        high: validHigh,
+        low: validLow,
+        onMonitor: inputMonitor,
       });
-
-      if (!res.ok) throw new Error("Failed to save targets");
-
       setSavedHigh(validHigh);
       setSavedLow(validLow);
-      setSavedMonitor(inputMonitor);
+      setSavedMonitor(data.onMonitor === true || data.onMonitor === false ? data.onMonitor : inputMonitor);
+      setInputMonitor(data.onMonitor === true || data.onMonitor === false ? Boolean(data.onMonitor) : inputMonitor);
+      // reflect on coin object so parent modal keeps value if it reuses same ref
+      coin.onMonitor = data.onMonitor ?? inputMonitor;
       setIsEditing(false);
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 2500);
     } catch (err) {
-      alert("Failed to save target ranges.");
+      alert((err as Error).message || "Failed to save target ranges.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  /** Yes/No can save immediately (no need to open Edit first) — fixes Spot modal. */
+  const handleMonitorToggle = async (next: boolean) => {
+    if (isSaving) return;
+    setInputMonitor(next);
+    setIsSaving(true);
+    try {
+      const data = await persistTargets({
+        high: savedHigh,
+        low: savedLow,
+        onMonitor: next,
+      });
+      const mon = data.onMonitor === true || data.onMonitor === false ? Boolean(data.onMonitor) : next;
+      setSavedMonitor(mon);
+      setInputMonitor(mon);
+      coin.onMonitor = mon;
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 2500);
+    } catch (err) {
+      setInputMonitor(savedMonitor);
+      alert((err as Error).message || "Failed to save Home monitor.");
     } finally {
       setIsSaving(false);
     }
@@ -198,42 +259,35 @@ function MonitoredCoinCard({
             Yes = show on Home Target &amp; review (held + plan). Review dates come from this
             coin&apos;s journal notes (Review by / valid until), not a date field here.
           </p>
-          {isEditing ? (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setInputMonitor(true)}
-                className={`rounded-md px-3 py-1 text-[11px] font-bold border ${
-                  inputMonitor
-                    ? "bg-indigo-600 text-white border-indigo-600"
-                    : "bg-white text-gray-600 border-gray-300"
-                }`}
-              >
-                Yes
-              </button>
-              <button
-                type="button"
-                onClick={() => setInputMonitor(false)}
-                className={`rounded-md px-3 py-1 text-[11px] font-bold border ${
-                  !inputMonitor
-                    ? "bg-slate-700 text-white border-slate-700"
-                    : "bg-white text-gray-600 border-gray-300"
-                }`}
-              >
-                No
-              </button>
-            </div>
-          ) : (
-            <span
-              className={`inline-flex w-fit rounded-full px-2 py-0.5 text-[11px] font-bold ${
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={isSaving}
+              onClick={() => void handleMonitorToggle(true)}
+              className={`rounded-md px-3 py-1 text-[11px] font-bold border disabled:opacity-50 ${
                 savedMonitor
-                  ? "bg-indigo-100 text-indigo-900 border border-indigo-200"
-                  : "bg-gray-100 text-gray-600 border border-gray-200"
+                  ? "bg-indigo-600 text-white border-indigo-600"
+                  : "bg-white text-gray-600 border-gray-300 hover:bg-indigo-50"
               }`}
             >
-              {savedMonitor ? "Monitor: Yes" : "Monitor: No"}
+              Yes
+            </button>
+            <button
+              type="button"
+              disabled={isSaving}
+              onClick={() => void handleMonitorToggle(false)}
+              className={`rounded-md px-3 py-1 text-[11px] font-bold border disabled:opacity-50 ${
+                !savedMonitor
+                  ? "bg-slate-700 text-white border-slate-700"
+                  : "bg-white text-gray-600 border-gray-300 hover:bg-slate-50"
+              }`}
+            >
+              No
+            </button>
+            <span className="text-[10px] text-gray-500">
+              {isSaving ? "Saving…" : savedMonitor ? "On Home monitor" : "Hidden on Home"}
             </span>
-          )}
+          </div>
         </div>
       </div>
       

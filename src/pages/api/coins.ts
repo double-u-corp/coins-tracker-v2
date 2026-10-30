@@ -59,13 +59,32 @@ function toDailyRecords(records: { price: number; createdAt: Date }[]): DailyRec
 }
 
 async function handleSummary(res: NextApiResponse<SummaryResponse>) {
-  const coins = await prisma.coin.findMany({
-    include: {
-      records: { orderBy: { createdAt: "desc" }, take: 2 }, // 2, not 1 — need the prior one for priceDirection
-      priceTarget: true,
-    },
-    orderBy: { name: "asc" },
-  });
+  let coins;
+  try {
+    coins = await prisma.coin.findMany({
+      include: {
+        records: { orderBy: { createdAt: "desc" }, take: 2 },
+        priceTarget: {
+          select: {
+            targetHigh: true,
+            targetLow: true,
+            onMonitor: true,
+            reviewUntil: true,
+          },
+        },
+      },
+      orderBy: { name: "asc" },
+    });
+  } catch {
+    // Prisma client or DB missing onMonitor — still return coins without crashing
+    coins = await prisma.coin.findMany({
+      include: {
+        records: { orderBy: { createdAt: "desc" }, take: 2 },
+        priceTarget: true,
+      },
+      orderBy: { name: "asc" },
+    });
+  }
 
   // Overall recorded high/low is the max/min across every record ever saved,
   // not just the latest row, since "high"/"low" on the latest row already
@@ -79,6 +98,14 @@ async function handleSummary(res: NextApiResponse<SummaryResponse>) {
     const reviewUntil = coin.priceTarget?.reviewUntil
       ? coin.priceTarget.reviewUntil.toISOString().slice(0, 10)
       : null;
+    // Always emit onMonitor in JSON (UI uses this, not reviewUntil)
+    const pt = coin.priceTarget as {
+      onMonitor?: boolean | null;
+      targetHigh?: number | null;
+      targetLow?: number | null;
+      reviewUntil?: Date | null;
+    } | null;
+    const onMonitor = pt?.onMonitor === true;
 
     let priceDirection: "up" | "down" | "flat" | null = null;
     let priceChangePct: number | null = null;
@@ -98,6 +125,7 @@ async function handleSummary(res: NextApiResponse<SummaryResponse>) {
       recordedLow: latest?.low ?? null,
       targetHigh,
       targetLow,
+      onMonitor,
       reviewUntil,
       targetHighReached: targetHigh !== null && currentPrice !== null && currentPrice >= targetHigh,
       targetLowReached: targetLow !== null && currentPrice !== null && currentPrice <= targetLow,

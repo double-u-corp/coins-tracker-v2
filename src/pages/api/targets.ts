@@ -47,23 +47,35 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
     updatePayload.onMonitor = monitorVal;
   }
 
-  const target = await prisma.priceTarget.upsert({
-    where: { coinId: coin.id },
-    update: updatePayload,
-    create: {
-      coinId: coin.id,
-      targetHigh,
-      targetLow,
-      onMonitor: monitorVal ?? false,
-    },
-  });
+  try {
+    const target = await prisma.priceTarget.upsert({
+      where: { coinId: coin.id },
+      update: updatePayload,
+      create: {
+        coinId: coin.id,
+        targetHigh,
+        targetLow,
+        onMonitor: monitorVal ?? false,
+      },
+    });
 
-  return res.status(200).json({
-    targetHigh: target.targetHigh,
-    targetLow: target.targetLow,
-    onMonitor: Boolean(target.onMonitor),
-    reviewUntil: target.reviewUntil
-      ? target.reviewUntil.toISOString().slice(0, 10)
-      : null,
-  });
+    return res.status(200).json({
+      targetHigh: target.targetHigh,
+      targetLow: target.targetLow,
+      onMonitor: Boolean((target as { onMonitor?: boolean }).onMonitor),
+      reviewUntil: target.reviewUntil
+        ? target.reviewUntil.toISOString().slice(0, 10)
+        : null,
+    });
+  } catch (err) {
+    const msg = (err as Error).message || "Database error";
+    // Common: prisma client / DB missing onMonitor column
+    if (/onMonitor|Unknown arg|column/i.test(msg)) {
+      return res.status(500).json({
+        error:
+          "Home monitor field not in database yet. Run: npx prisma db push && npx prisma generate",
+      });
+    }
+    return res.status(500).json({ error: msg });
+  }
 }
