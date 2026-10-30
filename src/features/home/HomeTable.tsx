@@ -245,27 +245,6 @@ function MonitorCard({
             </span>
           </div>
         )}
-        {(card.journalTargetEntry != null || card.journalTargetExit != null) && (
-          <div className="rounded-md border border-teal-100 bg-teal-50/70 px-2 py-1 space-y-0.5">
-            {card.journalTargetEntry != null && (
-              <div className="flex justify-between gap-2 text-[11px]">
-                <span className="font-semibold text-teal-900">Journal entry</span>
-                <span className="font-mono text-gray-900">{formatPhp(card.journalTargetEntry)}</span>
-              </div>
-            )}
-            {card.journalTargetExit != null && (
-              <div className="flex justify-between gap-2 text-[11px]">
-                <span className="font-semibold text-teal-900">Journal exit</span>
-                <span className="font-mono text-gray-900">{formatPhp(card.journalTargetExit)}</span>
-              </div>
-            )}
-            {card.journalAgent && (
-              <div className="truncate text-[10px] text-teal-800/80" title={card.journalAgent}>
-                {card.journalAgent}
-              </div>
-            )}
-          </div>
-        )}
         {card.review && (
           <div
             className={`flex justify-between gap-2 rounded-md border px-2 py-1 ${

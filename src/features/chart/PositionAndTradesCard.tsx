@@ -210,6 +210,9 @@ If a **verified** incident exists → flag it and lean **WAIT / SKIP / DO NOT AD
   );
   lines.push(`4. Why (max 3 bullets) — neutral; mix technical + catalyst; mention exploit/unlock if relevant`);
   lines.push(`5. Levels (entry / invalidation / take-profit) or "none — stay in cash"`);
+  lines.push(
+    `   → Those entry/TP numbers **must** be copied into the journal as **Target entry** and **Target exit** (full PHP prices, no commas).`
+  );
   lines.push(`6. Timeframe with ≥1 calendar recheck date (Manila)`);
   if (!args.holding) {
     lines.push(
@@ -238,10 +241,10 @@ If a **verified** incident exists → flag it and lean **WAIT / SKIP / DO NOT AD
     `1. **Agent:** one line, start with \`Spot Trading Desk AI\` then product/model in parentheses. Example: \`Spot Trading Desk AI (Grok)\`. Never put the note title here.`
   );
   lines.push(
-    `2. **Target entry:** one PHP number only (optional ₱). Example: \`₱12.50\` or \`12.50\`. Use \`n/a\` if none — not a sentence.`
+    `2. **Target entry:** REQUIRED. One full PHP price from research + levels (support / ladder / pullback). Optional ₱. Example: ₱16332.9 or 16332.9 — never truncate (16 vs 16000). **No thousands commas.** Use n/a only if verdict is SKIP/WAIT with no buy level.`
   );
   lines.push(
-    `3. **Target exit:** one PHP number only (same rules). Example: \`₱15.00\` or \`n/a\`.`
+    `3. **Target exit:** REQUIRED. One full PHP price from research + levels (resistance / trim / TP). Optional ₱. Example: ₱20036.1. **No thousands commas.** Use n/a only if no exit level applies.`
   );
   lines.push(
     `4. **Review by:** exactly \`YYYY-MM-DD\` (Manila calendar date). Example: \`2026-11-04\`. No extra words on that line.`
@@ -260,8 +263,12 @@ If a **verified** incident exists → flag it and lean **WAIT / SKIP / DO NOT AD
     lines.push(`- **Verdict:** ADD | ADD ONLY ON PULLBACK | DO NOT ADD | TRIM`);
     lines.push(`- **Price now:** …`);
     lines.push(`- **Avg cost / unrealized:** …`);
-    lines.push(`- **Target entry:** ₱…`);
-    lines.push(`- **Target exit:** ₱…`);
+    lines.push(
+      `- **Target entry:** ₱${args.support != null && Number.isFinite(args.support) ? Number(args.support).toFixed(2) : "…"}`
+    );
+    lines.push(
+      `- **Target exit:** ₱${args.resistance != null && Number.isFinite(args.resistance) ? Number(args.resistance).toFixed(2) : "…"}`
+    );
     lines.push(`- **Last pump / local high:** date · peak · why it may have faded (or n/a)`);
     lines.push(`- **Sell / trim if:** …`);
     lines.push(`- **Invalidation:** …`);
@@ -275,8 +282,12 @@ If a **verified** incident exists → flag it and lean **WAIT / SKIP / DO NOT AD
     lines.push(`- **Prompt:** Spot · Position & trades · buy/sizing research`);
     lines.push(`- **Verdict:** BUY | WAIT | SKIP`);
     lines.push(`- **Price now:** …`);
-    lines.push(`- **Target entry:** ₱…`);
-    lines.push(`- **Target exit:** ₱…`);
+    lines.push(
+      `- **Target entry:** ₱${args.support != null && Number.isFinite(args.support) ? Number(args.support).toFixed(2) : "…"}`
+    );
+    lines.push(
+      `- **Target exit:** ₱${args.resistance != null && Number.isFinite(args.resistance) ? Number(args.resistance).toFixed(2) : "…"}`
+    );
     lines.push(`- **Last pump / local high:** date · peak · why price may be down now (or n/a)`);
     lines.push(`- **Entry / invalidation / TP:** …`);
     lines.push(`- **Size note:** …`);

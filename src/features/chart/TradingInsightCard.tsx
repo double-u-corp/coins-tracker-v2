@@ -387,10 +387,10 @@ export function formatEntryReviewPrompt(
     `1. **Agent:** one line, start with \`Spot Trading Desk AI\` then product/model in parentheses. Example: \`Spot Trading Desk AI (Grok)\`. Never put the note title here.`
   );
   lines.push(
-    `2. **Target entry:** one PHP number only (optional ₱). Example: \`₱12.50\` or \`12.50\`. Use \`n/a\` if none — not a sentence.`
+    `2. **Target entry:** REQUIRED. One full PHP price from research + levels (support / ladder / pullback). Optional ₱. Example: ₱16332.9 or 16332.9 — never truncate (16 vs 16000). **No thousands commas.** Use n/a only if verdict is SKIP/WAIT with no buy level.`
   );
   lines.push(
-    `3. **Target exit:** one PHP number only (same rules). Example: \`₱15.00\` or \`n/a\`.`
+    `3. **Target exit:** REQUIRED. One full PHP price from research + levels (resistance / trim / TP). Optional ₱. Example: ₱20036.1. **No thousands commas.** Use n/a only if no exit level applies.`
   );
   lines.push(
     `4. **Review by:** exactly \`YYYY-MM-DD\` (Manila calendar date). Example: \`2026-11-04\`. No extra words on that line.`
@@ -410,8 +410,12 @@ export function formatEntryReviewPrompt(
     lines.push(`- **Analysis date (Manila):** ${todayManila}`);
     lines.push(`- **Price now:** …`);
     lines.push(`- **Avg cost / unrealized:** …`);
-    lines.push(`- **Target entry:** ₱…`);
-    lines.push(`- **Target exit:** ₱…`);
+    lines.push(
+      `- **Target entry:** ₱${c.support != null && Number.isFinite(c.support) ? Number(c.support).toFixed(2) : "…"}`
+    );
+    lines.push(
+      `- **Target exit:** ₱${c.resistance != null && Number.isFinite(c.resistance) ? Number(c.resistance).toFixed(2) : "…"}`
+    );
     lines.push(`- **Additional budget (PHP):** … (0 if DO NOT ADD)`);
     lines.push(`- **Tranches:** … (PHP + level; 30/30/40 of additional budget)`);
     lines.push(`- **New avg cost if filled:** …`);
@@ -430,8 +434,12 @@ export function formatEntryReviewPrompt(
     lines.push(`- **Verdict:** READY TO STAGE | WAIT FOR PULLBACK | SKIP`);
     lines.push(`- **Analysis date (Manila):** ${todayManila}`);
     lines.push(`- **Price now:** …`);
-    lines.push(`- **Target entry:** ₱…`);
-    lines.push(`- **Target exit:** ₱…`);
+    lines.push(
+      `- **Target entry:** ₱${c.support != null && Number.isFinite(c.support) ? Number(c.support).toFixed(2) : "…"}`
+    );
+    lines.push(
+      `- **Target exit:** ₱${c.resistance != null && Number.isFinite(c.resistance) ? Number(c.resistance).toFixed(2) : "…"}`
+    );
     lines.push(`- **Ladder levels:**`);
     lines.push(`  - … (pct)`);
     lines.push(`- **Invalidation:** …`);

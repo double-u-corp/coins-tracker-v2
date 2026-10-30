@@ -107,7 +107,9 @@ export function extractJournalTargets(notes: string): {
   if (!notes) return { entry: null, exit: null, agent: null };
   const parseMoney = (s: string): number | null => {
     if (!s || /n\s*\/\s*a/i.test(s)) return null;
-    const cleaned = s.replace(/[₱$,]/g, " ");
+    // Strip currency symbols/spaces; remove thousands commas WITHOUT inserting spaces
+    // (e.g. "₱16,032.50" must become "16032.50", not "16 032.50" → 16)
+    const cleaned = s.replace(/[₱$]/g, "").replace(/,/g, "").trim();
     const m = cleaned.match(/(\d+(?:\.\d+)?)/);
     if (!m) return null;
     const n = Number(m[1]);
