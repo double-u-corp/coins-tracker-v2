@@ -567,8 +567,7 @@ export function useHomeLogic() {
       }
       row.journalReviews.sort((a, b) => a.daysUntil - b.daysUntil || a.date.localeCompare(b.date));
 
-      const levels = extractJournalTargets(e.notes || "");
-      // Keep first filled values (journal list is newest-first)
+      // Keep first filled card-level values (journal list is newest-first)
       if (row.journalTargetEntry == null && levels.entry != null) row.journalTargetEntry = levels.entry;
       if (row.journalTargetExit == null && levels.exit != null) row.journalTargetExit = levels.exit;
       if (!row.journalAgent && levels.agent) row.journalAgent = levels.agent;
