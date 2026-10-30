@@ -552,6 +552,75 @@ function formatRecentPollsBlock(series: RecentPollSeries[]): string {
 }
 
 
+
+function formatSlotsSnapshot(data: TimingResponse): string {
+  const when = new Date(data.generatedAt).toLocaleString("en-CA", {
+    timeZone: "Asia/Manila",
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+  const lines: string[] = [];
+  lines.push(`### Poll windows (${data.days}d · Manila)`);
+  lines.push(`*Snapshot: ${when} Manila*`);
+  lines.push(``);
+  lines.push(`| # | Slot | Intensity | Avg % | Med % | ≥1% | n |`);
+  lines.push(`| -: | --- | --- | -: | -: | -: | -: |`);
+  for (const s of [...data.slots].sort((a, b) => a.rank - b.rank)) {
+    lines.push(
+      `| ${s.rank} | ${s.label} | ${s.intensity} | ${s.avgAbsPct} | ${s.medianAbsPct} | ${s.pctMovesAbove1} | ${s.sampleCount} |`
+    );
+  }
+  lines.push(``);
+  if (data.hottestSlot) {
+    lines.push(`- **Hottest:** ${data.hottestSlot.label} (${data.hottestSlot.avgAbsPct}% avg)`);
+  }
+  if (data.quietestSlot) {
+    lines.push(`- **Quietest:** ${data.quietestSlot.label} (${data.quietestSlot.avgAbsPct}% avg)`);
+  }
+  return lines.join("\n");
+}
+
+function formatWeekdaysSnapshot(data: TimingResponse): string {
+  const when = new Date(data.generatedAt).toLocaleString("en-CA", {
+    timeZone: "Asia/Manila",
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+  const lines: string[] = [];
+  lines.push(`### Weekday activity (${data.days}d · Manila)`);
+  lines.push(`*Snapshot: ${when} Manila*`);
+  lines.push(``);
+  if (!data.weekdays?.length) {
+    lines.push(`*(no weekday data)*`);
+    return lines.join("\n");
+  }
+  lines.push(`| # | Day | Intensity | Avg % | Med % | ≥1% | n |`);
+  lines.push(`| -: | --- | --- | -: | -: | -: | -: |`);
+  for (const w of [...data.weekdays].sort((a, b) => a.rank - b.rank)) {
+    lines.push(
+      `| ${w.rank} | ${w.label} | ${w.intensity} | ${w.avgAbsPct} | ${w.medianAbsPct} | ${w.pctMovesAbove1} | ${w.sampleCount} |`
+    );
+  }
+  lines.push(``);
+  if (data.hottestWeekday) {
+    lines.push(`- **Hottest weekday:** ${data.hottestWeekday.label} (${data.hottestWeekday.avgAbsPct}% avg)`);
+  }
+  if (data.quietestWeekday) {
+    lines.push(`- **Quietest weekday:** ${data.quietestWeekday.label} (${data.quietestWeekday.avgAbsPct}% avg)`);
+  }
+  return lines.join("\n");
+}
+
+function formatMonthlyTimingJournal(data: TimingResponse): string {
+  return [
+    formatSlotsSnapshot(data),
+    ``,
+    formatWeekdaysSnapshot(data),
+    ``,
+    `> Monthly timing snapshot (slots + weekdays). **Not a trade signal.**`,
+  ].join("\n");
+}
+
 function formatWhyMovingPrompt(
   data: TimingResponse,
   series: RecentPollSeries[]
@@ -658,7 +727,7 @@ export default function SwingTimingView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
-  const [agentCopied, setAgentCopied] = useState<"timing" | "macro" | "why" | null>(null);
+  const [agentCopied, setAgentCopied] = useState<"timing" | "macro" | "why" | "slots" | "weekdays" | "journal" | null>(null);
   const [recentPolls, setRecentPolls] = useState<RecentPollSeries[]>([]);
   const [recentPollsLoading, setRecentPollsLoading] = useState(false);
 
@@ -700,6 +769,105 @@ export default function SwingTimingView() {
       setError("Could not copy why-moving prompt");
     }
   };
+
+  const copySlotsSnapshot = async () => {
+    if (!data) return;
+    try {
+      await navigator.clipboard.writeText(formatSlotsSnapshot(data));
+      setAgentCopied("slots");
+      setTimeout(() => setAgentCopied(null), 2000);
+    } catch {
+      setError("Could not copy poll windows");
+    }
+  };
+
+  const copyWeekdaysSnapshot = async () => {
+    if (!data) return;
+    try {
+      await navigator.clipboard.writeText(formatWeekdaysSnapshot(data));
+      setAgentCopied("weekdays");
+      setTimeout(() => setAgentCopied(null), 2000);
+    } catch {
+      setError("Could not copy weekday activity");
+    }
+  };
+
+  const saveTimingSnapshotToJournal = async (kind: "manual" | "monthly") => {
+    if (!data) return;
+    try {
+      const todayManila = new Date().toLocaleDateString("en-CA", {
+        timeZone: "Asia/Manila",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      });
+      const ym = todayManila.slice(0, 7);
+      // Cross-device dedupe key in CatalystLog (shared DB — not localStorage)
+      const promptId = `timing-activity-${ym}`;
+
+      if (kind === "monthly") {
+        const logsRes = await fetch("/api/catalyst-ai");
+        if (logsRes.ok) {
+          const logsJson = await logsRes.json();
+          if (logsJson?.logs?.[promptId]) {
+            // Already saved this Manila month on any device
+            return;
+          }
+        }
+      }
+
+      const title =
+        kind === "monthly"
+          ? `Timing activity · ${ym} (month-end)`
+          : `Timing activity · ${todayManila}`;
+      const notes = formatMonthlyTimingJournal(data);
+
+      const res = await fetch("/api/journal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entryDate: todayManila,
+          title,
+          notes,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || `Journal save failed (${res.status})`);
+      }
+
+      // Mark month in CatalystLog so other devices skip auto-save
+      await fetch("/api/catalyst-ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          promptId,
+          category: "Monthly",
+          storeOnly: notes,
+        }),
+      });
+
+      setAgentCopied("journal");
+      setTimeout(() => setAgentCopied(null), 2500);
+    } catch (e) {
+      setError((e as Error).message || "Could not save to journal");
+    }
+  };
+
+  // Month-end timing journal auto-save (once per Manila calendar month, last 2 days)
+  useEffect(() => {
+    if (!data || typeof window === "undefined") return;
+    const manila = new Date(Date.now() + 8 * 3600 * 1000);
+    const y = manila.getUTCFullYear();
+    const m = manila.getUTCMonth();
+    const d = manila.getUTCDate();
+    const lastDay = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    if (d < lastDay - 1) return;
+    const ym = `${y}-${String(m + 1).padStart(2, "0")}`;
+    void saveTimingSnapshotToJournal("monthly");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.generatedAt]);
+
 
   const copyMacroPrompt = async () => {
     try {
@@ -822,6 +990,15 @@ export default function SwingTimingView() {
           >
             {agentCopied === "timing" ? "✅ Copied" : "📋 Timing pattern"}
           </button>
+          <button
+            type="button"
+            onClick={() => void saveTimingSnapshotToJournal("manual")}
+            disabled={!data || loading}
+            className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-900 hover:bg-emerald-100 disabled:opacity-50"
+            title="Save slots + weekdays snapshot to global journal (no coin)"
+          >
+            {agentCopied === "journal" ? "✅ Saved" : "📓 Save to journal"}
+          </button>
         </div>
       </div>
 
@@ -900,9 +1077,18 @@ export default function SwingTimingView() {
           {/* Weekday section */}
           {data.weekdays && data.weekdays.length > 0 && (
             <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-              <h2 className="text-sm font-bold text-gray-900 mb-1">
-                Weekday activity ({data.days} days · Manila)
-              </h2>
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-sm font-bold text-gray-900">
+                  Weekday activity ({data.days} days · Manila)
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => void copyWeekdaysSnapshot()}
+                  className="rounded-md border border-violet-200 bg-violet-50 px-2 py-1 text-[10px] font-bold text-violet-900 hover:bg-violet-100"
+                >
+                  {agentCopied === "weekdays" ? "✅ Copied" : "📋 Copy weekdays"}
+                </button>
+              </div>
               <p className="text-[11px] text-gray-500 mb-4">
                 Average |% move| from the previous poll → this print, grouped by calendar day in
                 Manila. Higher = more swing to monitor that day of the week.
@@ -948,9 +1134,18 @@ export default function SwingTimingView() {
 
           {/* Time-of-day section */}
           <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-            <h2 className="text-sm font-bold text-gray-900 mb-1">
-              Poll windows ranked by activity ({data.days} days)
-            </h2>
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-sm font-bold text-gray-900">
+                Poll windows ranked by activity ({data.days} days)
+              </h2>
+              <button
+                type="button"
+                onClick={() => void copySlotsSnapshot()}
+                className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1 text-[10px] font-bold text-indigo-900 hover:bg-indigo-100"
+              >
+                {agentCopied === "slots" ? "✅ Copied" : "📋 Copy poll windows"}
+              </button>
+            </div>
             <p className="text-[11px] text-gray-500 mb-4">
               |% change| from the previous poll to this slot, averaged across all monitored coins.
             </p>
