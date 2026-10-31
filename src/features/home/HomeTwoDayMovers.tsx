@@ -129,12 +129,12 @@ function MoverLineChart({
   const pad = (max - min) * 0.08 || max * 0.01 || 1;
   const y0 = min - pad;
   const y1 = max + pad;
-  const left = 56;
+  const left = 64;
   const right = 8;
-  const top = 10;
-  const bottom = 16;
+  const top = 14;
+  const bottom = 22;
   const w = 960;
-  const h = 280;
+  const h = 320;
   const plotW = w - left - right;
   const plotH = h - top - bottom;
   const n = points.length;
@@ -184,7 +184,7 @@ function MoverLineChart({
       <div className="w-full p-1 pb-0 sm:p-2 sm:pb-0">
         <svg
           viewBox={`0 0 ${w} ${h}`}
-          className="h-[min(62vw,340px)] w-full min-h-[260px] sm:h-72 md:h-80"
+          className="h-[min(78vw,420px)] w-full min-h-[340px] sm:h-80 md:h-96"
           role="img"
           aria-label={`${symbol} 3h path`}
           onMouseLeave={() => setHover(null)}
@@ -199,7 +199,7 @@ function MoverLineChart({
                   y={y + 3}
                   textAnchor="end"
                   className="fill-teal-900"
-                  style={{ fontSize: 11, fontWeight: 700 }}
+                  style={{ fontSize: 13, fontWeight: 700 }}
                 >
                   {fmt(tv)}
                 </text>
@@ -228,13 +228,13 @@ function MoverLineChart({
             const anchor = isLast ? "end" : i === 0 ? "start" : "middle";
             return (
               <g key={`sma-${p.dayKey}-${i}`}>
-                <circle cx={p.x} cy={p.y} r={4.5} fill="#f59e0b" stroke="#fff" strokeWidth={1.5} />
+                <circle cx={p.x} cy={p.y} r={5.5} fill="#f59e0b" stroke="#fff" strokeWidth={1.5} />
                 <text
                   x={labelX}
                   y={Math.min(h - bottom - 4, p.y + 14)}
                   textAnchor={anchor}
                   className="fill-amber-800"
-                  style={{ fontSize: 9, fontWeight: 700 }}
+                  style={{ fontSize: 12, fontWeight: 700 }}
                 >
                   SMA {fmt(p.v)}
                 </text>
@@ -248,7 +248,7 @@ function MoverLineChart({
                 <circle
                   cx={p.x}
                   cy={p.y}
-                  r={18}
+                  r={22}
                   fill="transparent"
                   className="cursor-pointer"
                   onMouseEnter={() =>
@@ -271,7 +271,7 @@ function MoverLineChart({
                 <circle
                   cx={p.x}
                   cy={p.y}
-                  r={isLast ? 5.5 : p.s.isDayStart ? 4.5 : 3.5}
+                  r={isLast ? 7 : p.s.isDayStart ? 4.5 : 3.5}
                   fill={isLast ? "#059669" : p.s.isDayStart ? "#0d9488" : "#115e59"}
                   className="pointer-events-none"
                 />
@@ -302,7 +302,7 @@ function MoverLineChart({
                 x={Math.min(Math.max(hover.x - 70, left), w - right - 140) + 8}
                 y={Math.max(hover.y - 36, 4) + 13}
                 fill="#ccfbf1"
-                style={{ fontSize: 9, fontWeight: 600 }}
+                style={{ fontSize: 11, fontWeight: 600 }}
               >
                 {hover.label}
               </text>
@@ -318,7 +318,7 @@ function MoverLineChart({
           )}
         </svg>
       </div>
-      <div className="flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-teal-100 bg-white/70 px-2.5 py-1.5 text-[10px] text-gray-500">
+      <div className="flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-teal-100 bg-white/70 px-2.5 py-2 text-[11px] sm:text-[10px] text-gray-500">
         <div className="flex flex-wrap items-center gap-x-3">
           <span className="font-semibold text-teal-800">● day start (2:05)</span>
           <span className="font-semibold text-emerald-700">● latest</span>
