@@ -5,6 +5,7 @@ import { formatPhp } from "@/lib/format";
 import type { JournalEntryView } from "@/validators/journalSchema";
 import FormattedAiResponse from "@/components/FormattedAiResponse";
 import dynamic from "next/dynamic";
+import LongScanPollChart from "./LongScanPollChart";
 
 const ManageCoinsView = dynamic(() => import("@/features/manage/ManageCoinsView"), {
   ssr: false,
@@ -819,6 +820,11 @@ export default function LongScanView({
                   </span>
                   </div>
                 </div>
+
+                <LongScanPollChart
+                  symbol={g.symbol}
+                  livePrice={priceBySymbol[g.symbol.toUpperCase()] ?? null}
+                />
 
                 <div className="divide-y divide-gray-100">
                   {g.rows.map((h) => {

@@ -63,6 +63,14 @@ function PollMiniLine({
     label: string;
     price: number;
   } | null>(null);
+  const [isMobileChart, setIsMobileChart] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 639px)");
+    const apply = () => setIsMobileChart(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
 
   const series = groups.flatMap((g) =>
     g.tiles.map((tile) => ({
@@ -102,16 +110,16 @@ function PollMiniLine({
   const allY = [...prices, ...smaValsForScale];
   const min = Math.min(...allY);
   const max = Math.max(...allY);
-  const pad = (max - min) * 0.08 || max * 0.01 || 1;
+  const pad = (max - min) * (isMobileChart ? 0.14 : 0.08) || max * 0.01 || 1;
   const y0 = min - pad;
   const y1 = max + pad;
-  const left = 72; // room for price labels
+  const left = isMobileChart ? 58 : 52; // room for price labels
   const right = 8;
-  const top = 18;
-  const bottom = 28;
+  const top = isMobileChart ? 16 : 10;
+  const bottom = isMobileChart ? 26 : 16;
   // Wide viewBox for desktop; CSS height keeps phone tall
-  const w = 960;
-  const h = 360;
+  const w = isMobileChart ? 420 : 960;
+  const h = isMobileChart ? 380 : 260;
   const plotW = w - left - right;
   const plotH = h - top - bottom;
   const n = series.length;
@@ -124,6 +132,11 @@ function PollMiniLine({
     })
     .filter(Boolean) as { x: number; y: number; s: (typeof series)[0] }[];
   const path = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const strokeMain = isMobileChart ? 3.25 : 2;
+  const strokeSma = isMobileChart ? 3 : 2;
+  const fontAxis = isMobileChart ? 15 : 11;
+  const fontSma = isMobileChart ? 13 : 10;
+
 
   // Place SMA at day-start (2:05); today's SMA also extends to current price x
   const currentIdx = Math.max(
@@ -182,7 +195,7 @@ function PollMiniLine({
       <div className="w-full p-1 pb-0 sm:p-2 sm:pb-0">
       <svg
         viewBox={`0 0 ${w} ${h}`}
-        className="h-[min(100vw,560px)] w-full min-h-[440px] max-h-[70vh] sm:h-80 sm:min-h-[320px] sm:max-h-none md:h-96 lg:h-[26rem]"
+        className="h-[min(92vw,520px)] w-full min-h-[380px] max-h-[65vh] sm:h-64 sm:min-h-0 sm:max-h-none md:h-72 lg:h-80"
         role="img"
         aria-label="3h poll prices"
         onMouseLeave={() => setHover(null)}
@@ -198,7 +211,7 @@ function PollMiniLine({
                 y={y + 3}
                 textAnchor="end"
                 className="fill-violet-800"
-                style={{ fontSize: 16, fontWeight: 800 }}
+                style={{ fontSize: fontAxis, fontWeight: 800 }}
               >
                 {fmt(tv)}
               </text>
@@ -219,9 +232,9 @@ function PollMiniLine({
             />
           ) : null
         )}
-        <path d={path} fill="none" stroke="#7c3aed" strokeWidth={2} />
+        <path d={path} fill="none" stroke="#7c3aed" strokeWidth={strokeMain} />
         {smaPath ? (
-          <path d={smaPath} fill="none" stroke="#f59e0b" strokeWidth={2} />
+          <path d={smaPath} fill="none" stroke="#f59e0b" strokeWidth={strokeSma} />
         ) : null}
         {smaPts.map((p, i) => {
           const isLast = i === smaPts.length - 1;
@@ -236,7 +249,7 @@ function PollMiniLine({
                 y={Math.min(h - bottom - 4, p.y + 14)}
                 textAnchor={anchor}
                 className="fill-amber-800"
-                style={{ fontSize: 14, fontWeight: 800 }}
+                style={{ fontSize: fontSma, fontWeight: 800 }}
               >
                 SMA {fmt(p.v)}
               </text>

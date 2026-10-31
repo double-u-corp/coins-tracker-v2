@@ -102,6 +102,14 @@ function MoverLineChart({
     label: string;
     price: number;
   } | null>(null);
+  const [isMobileChart, setIsMobileChart] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 639px)");
+    const apply = () => setIsMobileChart(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
 
   const prices = points.map((p) => p.price).filter((p) => Number.isFinite(p));
   if (prices.length < 2) {
@@ -126,15 +134,15 @@ function MoverLineChart({
   const allY = [...prices, ...smaAnchors.map((s) => s.v)];
   const min = Math.min(...allY);
   const max = Math.max(...allY);
-  const pad = (max - min) * 0.08 || max * 0.01 || 1;
+  const pad = (max - min) * (isMobileChart ? 0.14 : 0.08) || max * 0.01 || 1;
   const y0 = min - pad;
   const y1 = max + pad;
-  const left = 72;
+  const left = isMobileChart ? 58 : 52;
   const right = 8;
-  const top = 18;
-  const bottom = 28;
-  const w = 960;
-  const h = 360;
+  const top = isMobileChart ? 16 : 10;
+  const bottom = isMobileChart ? 26 : 16;
+  const w = isMobileChart ? 420 : 960;
+  const h = isMobileChart ? 380 : 260;
   const plotW = w - left - right;
   const plotH = h - top - bottom;
   const n = points.length;
@@ -145,6 +153,11 @@ function MoverLineChart({
     return { x, y: yAt(s.price), s };
   });
   const path = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const strokeMain = isMobileChart ? 3.25 : 2;
+  const strokeSma = isMobileChart ? 3 : 2;
+  const fontAxis = isMobileChart ? 15 : 11;
+  const fontSma = isMobileChart ? 13 : 10;
+
 
   const currentIdx = n - 1;
   const smaPts = smaAnchors.map((anchor, ai) => {
@@ -184,7 +197,7 @@ function MoverLineChart({
       <div className="w-full p-1 pb-0 sm:p-2 sm:pb-0">
         <svg
           viewBox={`0 0 ${w} ${h}`}
-          className="h-[min(100vw,560px)] w-full min-h-[440px] max-h-[70vh] sm:h-80 sm:max-h-none md:h-96"
+          className="h-[min(92vw,520px)] w-full min-h-[380px] max-h-[65vh] sm:h-64 sm:min-h-0 sm:max-h-none md:h-72"
           role="img"
           aria-label={`${symbol} 3h path`}
           onMouseLeave={() => setHover(null)}
@@ -199,7 +212,7 @@ function MoverLineChart({
                   y={y + 3}
                   textAnchor="end"
                   className="fill-teal-900"
-                  style={{ fontSize: 16, fontWeight: 800 }}
+                  style={{ fontSize: fontAxis, fontWeight: 800 }}
                 >
                   {fmt(tv)}
                 </text>
@@ -220,8 +233,8 @@ function MoverLineChart({
               />
             ) : null
           )}
-          <path d={path} fill="none" stroke="#0d9488" strokeWidth={2} />
-          {smaPath ? <path d={smaPath} fill="none" stroke="#f59e0b" strokeWidth={2} /> : null}
+          <path d={path} fill="none" stroke="#0d9488" strokeWidth={strokeMain} />
+          {smaPath ? <path d={smaPath} fill="none" stroke="#f59e0b" strokeWidth={strokeSma} /> : null}
           {smaPts.map((p, i) => {
             const isLast = i === smaPts.length - 1;
             const labelX = isLast ? Math.max(left + 4, p.x - 8) : p.x;
@@ -234,7 +247,7 @@ function MoverLineChart({
                   y={Math.min(h - bottom - 4, p.y + 14)}
                   textAnchor={anchor}
                   className="fill-amber-800"
-                  style={{ fontSize: 14, fontWeight: 800 }}
+                  style={{ fontSize: fontSma, fontWeight: 800 }}
                 >
                   SMA {fmt(p.v)}
                 </text>
