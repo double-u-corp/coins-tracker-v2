@@ -77,23 +77,40 @@ export interface ManualRecordEntry {
 
 const DISMISSED_KEY = "coins-tracker:dismissed-alert-cron-log-id";
 
-/** Pull YYYY-MM-DD review-by / valid-until / recheck-by from agent journal markdown. */
+/** Pull review / valid-until dates from journal markdown (several formats). */
 export function extractReviewDatesFromNotes(notes: string): string[] {
   if (!notes) return [];
   const found = new Set<string>();
-  const patterns = [
-    /review(?:\s*again)?\s*by\s*[:\-–—]?\s*\*?\*?\s*(\d{4}-\d{2}-\d{2})/gi,
-    /valid\s*until\s*[:\-–—]?\s*\*?\*?\s*(\d{4}-\d{2}-\d{2})/gi,
-    /recheck\s*by\s*[:\-–—]?\s*\*?\*?\s*(\d{4}-\d{2}-\d{2})/gi,
-    /timeframe[^\n]{0,48}?(\d{4}-\d{2}-\d{2})/gi,
-  ];
-  for (const re of patterns) {
-    re.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(notes)) !== null) {
-      found.add(m[1]);
-    }
-  }
+  const add = (y: number, m: number, d: number) => {
+    if (m < 1 || m > 12 || d < 1 || d > 31) return;
+    found.add(
+      `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`
+    );
+  };
+  const addIso = (s: string) => {
+    const [y, m, d] = s.split("-").map(Number);
+    add(y, m, d);
+  };
+
+  // ISO on keyword lines (allow ** around date, extra text)
+  const keywordLine =
+    /(?:^|\n)[^\n]*(?:review(?:\s*again)?\s*by|valid\s*until|recheck\s*by|timeframe|re-?entry\s*by|next\s*review)[^\n]{0,80}?(\d{4}-\d{2}-\d{2})/gi;
+  let m: RegExpExecArray | null;
+  while ((m = keywordLine.exec(notes)) !== null) addIso(m[1]);
+
+  // ISO anywhere near "review" in a short window
+  const nearReview =
+    /review[^\n]{0,40}?(\d{4}-\d{2}-\d{2})|(\d{4}-\d{2}-\d{2})[^\n]{0,20}?review/gi;
+  while ((m = nearReview.exec(notes)) !== null) addIso(m[1] || m[2]);
+
+  // Slash dates on keyword lines: 2026/11/06 or 11/06/2026
+  const slashLine =
+    /(?:^|\n)[^\n]*(?:review|valid\s*until|recheck|timeframe)[^\n]{0,80}?(\d{4})[\/\.](\d{1,2})[\/\.](\d{1,2})/gi;
+  while ((m = slashLine.exec(notes)) !== null) add(+m[1], +m[2], +m[3]);
+  const usSlash =
+    /(?:^|\n)[^\n]*(?:review|valid\s*until|recheck|timeframe)[^\n]{0,80}?(\d{1,2})[\/\.](\d{1,2})[\/\.](\d{4})/gi;
+  while ((m = usSlash.exec(notes)) !== null) add(+m[3], +m[1], +m[2]);
+
   return [...found].sort();
 }
 
@@ -178,6 +195,10 @@ export function useHomeLogic() {
   const [portfolio, setPortfolio] = useState<any[]>([]);
   /** Open-position hold days by symbol (current cycle). */
   const [daysHeldBySymbol, setDaysHeldBySymbol] = useState<Record<string, number>>({});
+  /** Symbols with prior buy/sell cycle fully closed (holdings ~0) — rebuy candidates on monitor. */
+  const [realizedSymbols, setRealizedSymbols] = useState<Record<string, true>>({});
+  /** Net coin units from trade history (dust ≤ 1e-8 treated as 0). */
+  const [openHoldingsBySymbol, setOpenHoldingsBySymbol] = useState<Record<string, number>>({});
   const [cronTriggering, setCronTriggering] = useState(false);
 
   const [journalEntries, setJournalEntries] = useState<JournalEntryView[]>([]);
@@ -306,6 +327,25 @@ export function useHomeLogic() {
           days[sym] = Math.max(0, Math.floor(ms / (24 * 60 * 60 * 1000)));
         }
         setDaysHeldBySymbol(days);
+
+        const EPS = 1e-8;
+        const openHold: Record<string, number> = {};
+        for (const [sym, u] of Object.entries(units)) {
+          openHold[sym] = u > EPS ? u : 0;
+        }
+        setOpenHoldingsBySymbol(openHold);
+
+        // Had at least one buy and currently flat → realized / rebuy candidate
+        const bought = new Set<string>();
+        for (const tx of sorted) {
+          const sym = (tx.symbol || "").toUpperCase();
+          if ((tx.type || "").toLowerCase() === "buy" && sym) bought.add(sym);
+        }
+        const realized: Record<string, true> = {};
+        for (const sym of bought) {
+          if ((openHold[sym] || 0) <= 0) realized[sym] = true;
+        }
+        setRealizedSymbols(realized);
       })
       .catch((err) => console.error(err));
 
@@ -782,6 +822,8 @@ export function useHomeLogic() {
     setSelectedCoins,
     portfolio,
     daysHeldBySymbol,
+    realizedSymbols,
+    openHoldingsBySymbol,
     canUpdatePrice: authenticated,
     authenticated,
     journalEntries,

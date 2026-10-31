@@ -84,6 +84,7 @@ function MonitorCard({
   card,
   portfolio,
   daysHeld,
+  isRealized,
 }: {
   card: {
     symbol: string;
@@ -120,6 +121,7 @@ function MonitorCard({
   };
   portfolio: { symbol?: string; holdings?: number; spent?: number }[] | null | undefined;
   daysHeld?: number | null;
+  isRealized?: boolean;
 }) {
   const hit =
     card.high?.alertType === "reached" || card.low?.alertType === "reached";
@@ -191,6 +193,11 @@ function MonitorCard({
           {daysHeld != null && daysHeld >= 0 && holdings > 0 ? (
             <div className="mt-0.5 text-[11px] font-semibold text-slate-600">
               Held {daysHeld} day{daysHeld === 1 ? "" : "s"}
+            </div>
+          ) : null}
+          {isRealized && !(holdings > 0) ? (
+            <div className="mt-0.5 inline-flex rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-900">
+              Rebuy · prior cycle realized
             </div>
           ) : null}
         </div>
@@ -359,6 +366,8 @@ export default function HomeTable() {
     setSelectedCoins,
     portfolio,
     daysHeldBySymbol,
+    realizedSymbols,
+    openHoldingsBySymbol,
     lastCronRun,
     lastCronStatus,
     loading,
@@ -399,19 +408,32 @@ export default function HomeTable() {
 } = useHomeLogic();
 
   const { heldMonitorCards, planMonitorCards } = useMemo(() => {
-    const heldSyms = new Set(
-      (portfolio || [])
-        .filter((p: { holdings?: number }) => (p.holdings ?? 0) > 0)
-        .map((p: { symbol?: string }) => (p.symbol || "").toUpperCase())
-    );
+    const EPS = 1e-8;
+    const heldSyms = new Set<string>();
+
+    // Prefer trade-replay units (dust → 0). Portfolio alone can leave tiny residual "holdings".
+    const open = openHoldingsBySymbol || {};
+    for (const [sym, u] of Object.entries(open)) {
+      if ((u ?? 0) > EPS) heldSyms.add(sym.toUpperCase());
+    }
+    // Fallback if txs not loaded yet
+    if (Object.keys(open).length === 0) {
+      for (const p of portfolio || []) {
+        const sym = (p.symbol || "").toUpperCase();
+        if (!sym) continue;
+        if ((p.holdings ?? 0) > EPS) heldSyms.add(sym);
+      }
+    }
+
     const held: typeof monitorCards = [];
     const plan: typeof monitorCards = [];
     for (const card of monitorCards || []) {
-      if (heldSyms.has(card.symbol.toUpperCase())) held.push(card);
+      const sym = card.symbol.toUpperCase();
+      if (heldSyms.has(sym)) held.push(card);
       else plan.push(card);
     }
     return { heldMonitorCards: held, planMonitorCards: plan };
-  }, [monitorCards, portfolio]);
+  }, [monitorCards, portfolio, openHoldingsBySymbol]);
 
 
   const [movePctBySymbol, setMovePctBySymbol] = useState<Record<string, number>>({});
@@ -740,6 +762,7 @@ export default function HomeTable() {
                       card={card}
                       portfolio={portfolio}
                       daysHeld={daysHeldBySymbol[card.symbol.toUpperCase()] ?? null}
+                      isRealized={false}
                     />
                   ))}
                 </div>
@@ -748,6 +771,9 @@ export default function HomeTable() {
             <div>
               <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-sky-800">
                 Watch / plan to buy · not held
+                <span className="ml-1 font-normal normal-case text-gray-500">
+                  (includes realized / rebuy if monitored)
+                </span>
               </h3>
               {planMonitorCards.length === 0 ? (
                 <p className="text-xs text-gray-500">No watchlist / plan-to-buy cards right now.</p>
@@ -759,6 +785,7 @@ export default function HomeTable() {
                       card={card}
                       portfolio={portfolio}
                       daysHeld={null}
+                      isRealized={!!realizedSymbols?.[card.symbol.toUpperCase()]}
                     />
                   ))}
                 </div>

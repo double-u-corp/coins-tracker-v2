@@ -113,6 +113,9 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
       existing.holdings -= coinAmt;
       existing.sold += phpAmt;
     }
+    // Dust / float noise: treat near-zero bags as fully realized
+    if (Math.abs(existing.holdings) < 1e-8) existing.holdings = 0;
+    if (existing.holdings < 0) existing.holdings = 0;
     byCoin.set(t.coin.symbol, existing);
   }
 

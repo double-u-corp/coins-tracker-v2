@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { formatPhp } from "@/lib/format";
+import { calculateSMASeries } from "@/features/chart/Technicals";
+
 
 type Mover = {
   symbol: string;
@@ -72,7 +74,28 @@ async function fetchPollSeries(symbol: string): Promise<PollPoint[]> {
   return out;
 }
 
-function MoverLineChart({ points, symbol }: { points: PollPoint[]; symbol: string }) {
+type DailyPt = { period: string; high: number; low: number; close?: number };
+
+async function fetchDailyForSma(symbol: string): Promise<DailyPt[]> {
+  const res = await fetch(
+    `/api/coins?type=chart&symbol=${encodeURIComponent(symbol)}&years=1.00&granularity=daily&_=${Date.now()}`,
+    { cache: "no-store" }
+  );
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.points || []) as DailyPt[];
+}
+
+function MoverLineChart({
+  points,
+  symbol,
+  dailyPoints = [],
+}: {
+  points: PollPoint[];
+  symbol: string;
+  dailyPoints?: DailyPt[];
+}) {
+
   const [hover, setHover] = useState<{
     x: number;
     y: number;
@@ -85,8 +108,24 @@ function MoverLineChart({ points, symbol }: { points: PollPoint[]; symbol: strin
     return <p className="text-xs text-gray-500">Not enough 3h prints for a line.</p>;
   }
 
-  const min = Math.min(...prices);
-  const max = Math.max(...prices);
+  const dailySmaList: { dayKey: string; v: number }[] = [];
+  if (dailyPoints.length >= 20) {
+    const smaSeries = calculateSMASeries(dailyPoints as any, 20);
+    for (let i = 0; i < dailyPoints.length; i++) {
+      const v = smaSeries[i];
+      if (v == null || !Number.isFinite(v)) continue;
+      dailySmaList.push({ dayKey: String(dailyPoints[i].period).slice(0, 10), v });
+    }
+  }
+  const pollDaySet = new Set(points.map((s) => s.day));
+  let smaAnchors = dailySmaList.filter((s) => pollDaySet.has(s.dayKey));
+  if (smaAnchors.length < 2 && dailySmaList.length > 0) {
+    smaAnchors = dailySmaList.slice(-Math.max(2, pollDaySet.size));
+  }
+
+  const allY = [...prices, ...smaAnchors.map((s) => s.v)];
+  const min = Math.min(...allY);
+  const max = Math.max(...allY);
   const pad = (max - min) * 0.08 || max * 0.01 || 1;
   const y0 = min - pad;
   const y1 = max + pad;
@@ -100,11 +139,39 @@ function MoverLineChart({ points, symbol }: { points: PollPoint[]; symbol: strin
   const plotH = h - top - bottom;
   const n = points.length;
   const yAt = (price: number) => top + plotH - ((price - y0) / (y1 - y0)) * plotH;
+  const xAt = (i: number) => (n <= 1 ? left + plotW / 2 : left + (i / (n - 1)) * plotW);
   const pts = points.map((s, i) => {
-    const x = n <= 1 ? left + plotW / 2 : left + (i / (n - 1)) * plotW;
+    const x = xAt(i);
     return { x, y: yAt(s.price), s };
   });
   const path = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+
+  const currentIdx = n - 1;
+  const smaPts = smaAnchors.map((anchor, ai) => {
+    let idx = points.findIndex((s) => s.day === anchor.dayKey && s.isDayStart);
+    if (idx < 0) idx = points.findIndex((s) => s.day === anchor.dayKey);
+    if (idx < 0) {
+      const dayStarts = points.map((s, i) => (s.isDayStart ? i : -1)).filter((i) => i >= 0);
+      if (dayStarts.length > 0) {
+        const off = smaAnchors.length - 1 - ai;
+        idx = dayStarts[Math.max(0, dayStarts.length - 1 - off)] ?? dayStarts[dayStarts.length - 1];
+      } else idx = n - 1;
+    }
+    const isLatest = ai === smaAnchors.length - 1;
+    const xStart = xAt(idx);
+    const x = isLatest ? xAt(currentIdx) : xStart;
+    return { x, xStart, y: yAt(anchor.v), v: anchor.v, dayKey: anchor.dayKey, isLatest };
+  });
+  const smaPathPts = smaPts.flatMap((p) =>
+    p.isLatest && Math.abs(p.x - p.xStart) > 1
+      ? [{ x: p.xStart, y: p.y }, { x: p.x, y: p.y }]
+      : [{ x: p.x, y: p.y }]
+  );
+  const smaPath =
+    smaPathPts.length >= 2
+      ? smaPathPts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")
+      : "";
+
   const ticks = [y1, (y0 + y1) / 2, y0];
   const fmt = (v: number) =>
     v >= 1000
@@ -154,6 +221,26 @@ function MoverLineChart({ points, symbol }: { points: PollPoint[]; symbol: strin
             ) : null
           )}
           <path d={path} fill="none" stroke="#0d9488" strokeWidth={2} />
+          {smaPath ? <path d={smaPath} fill="none" stroke="#f59e0b" strokeWidth={2} /> : null}
+          {smaPts.map((p, i) => {
+            const isLast = i === smaPts.length - 1;
+            const labelX = isLast ? Math.max(left + 4, p.x - 8) : p.x;
+            const anchor = isLast ? "end" : i === 0 ? "start" : "middle";
+            return (
+              <g key={`sma-${p.dayKey}-${i}`}>
+                <circle cx={p.x} cy={p.y} r={4.5} fill="#f59e0b" stroke="#fff" strokeWidth={1.5} />
+                <text
+                  x={labelX}
+                  y={Math.min(h - bottom - 4, p.y + 14)}
+                  textAnchor={anchor}
+                  className="fill-amber-800"
+                  style={{ fontSize: 9, fontWeight: 700 }}
+                >
+                  SMA {fmt(p.v)}
+                </text>
+              </g>
+            );
+          })}
           {pts.map((p, i) => {
             const isLast = i === pts.length - 1;
             return (
@@ -295,6 +382,7 @@ export default function HomeTwoDayMovers() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string>("");
   const [series, setSeries] = useState<PollPoint[]>([]);
+  const [dailyPoints, setDailyPoints] = useState<DailyPt[]>([]);
   const [seriesLoading, setSeriesLoading] = useState(false);
   const [whyCopied, setWhyCopied] = useState(false);
 
@@ -335,13 +423,17 @@ export default function HomeTwoDayMovers() {
   useEffect(() => {
     if (!selected) {
       setSeries([]);
+      setDailyPoints([]);
       return;
     }
     let cancelled = false;
     setSeriesLoading(true);
-    void fetchPollSeries(selected)
-      .then((pts) => {
-        if (!cancelled) setSeries(pts);
+    void Promise.all([fetchPollSeries(selected), fetchDailyForSma(selected)])
+      .then(([pts, daily]) => {
+        if (!cancelled) {
+          setSeries(pts);
+          setDailyPoints(daily);
+        }
       })
       .finally(() => {
         if (!cancelled) setSeriesLoading(false);
@@ -460,7 +552,7 @@ export default function HomeTwoDayMovers() {
           {seriesLoading ? (
             <p className="text-xs text-gray-500">Loading 3h series…</p>
           ) : (
-            <MoverLineChart points={series} symbol={selected} />
+            <MoverLineChart points={series} symbol={selected} dailyPoints={dailyPoints} />
           )}
         </>
       )}

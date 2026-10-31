@@ -7,7 +7,7 @@ import JournalSidebar from "./JournalSidebar";
 import TradingInsightCard from "./TradingInsightCard";
 import { useChartLogic, type ChartRange } from "./useChartLogic";
 import { formatPhp } from "@/lib/format";
-import { getSupportResistance, BIAS_BADGE_CLASSES, BIAS_PRIORITY, isLongExtended, isWatchlistBuyLowHit, isNearSupportWorthCheck , buildStructureKeyLevels } from "./Technicals";
+import { getSupportResistance, BIAS_BADGE_CLASSES, BIAS_PRIORITY, isLongExtended, isWatchlistBuyLowHit, isNearSupportWorthCheck , buildStructureKeyLevels, calculateSMASeries, calculateSMAAt } from "./Technicals";
 import { useCoinScanner, formatScanResultsForJournal, formatSingleScanResult } from "./useCoinScanner";
 import MacroDayBanner from "./MacroDayBanner";
 import PositionAndTradesCard from "./PositionAndTradesCard";
@@ -39,6 +39,7 @@ function PollMiniLine({
   groups,
   dayLabel,
   todayKey,
+  dailyPoints,
 }: {
   groups: {
     dayKey: string;
@@ -53,6 +54,8 @@ function PollMiniLine({
   }[];
   dayLabel: (key: string) => string;
   todayKey: string;
+  /** Daily chart bars — same series as main Spot line chart (SMA20 source). */
+  dailyPoints?: { period: string; high: number; low: number; close?: number }[];
 }) {
   const [hover, setHover] = useState<{
     x: number;
@@ -68,12 +71,37 @@ function PollMiniLine({
       xLabel: `${dayLabel(g.dayKey)} ${tile.label}`,
     }))
   );
+
+  // Daily 20 SMA from main Spot chart — all days in poll window (grows when user loads +days)
+  const dailySmaList: { dayKey: string; v: number }[] = [];
+  if (dailyPoints && dailyPoints.length >= 20) {
+    const smaSeries = calculateSMASeries(dailyPoints as any, 20);
+    for (let i = 0; i < dailyPoints.length; i++) {
+      const v = smaSeries[i];
+      if (v == null || !Number.isFinite(v)) continue;
+      dailySmaList.push({
+        dayKey: String(dailyPoints[i].period).slice(0, 10),
+        v,
+      });
+    }
+  }
+  const pollDaySet = new Set(series.map((s) => s.dayKey));
+  // Prefer SMA rows whose day appears in the 3h window; if date keys mismatch, still keep last N
+  let smaAnchors = dailySmaList.filter((s) => pollDaySet.has(s.dayKey));
+  if (smaAnchors.length < 2 && dailySmaList.length > 0) {
+    const need = Math.max(2, pollDaySet.size);
+    smaAnchors = dailySmaList.slice(-need);
+  }
+
   const prices = series.map((s) => s.price).filter((p): p is number => p != null && Number.isFinite(p));
   if (prices.length < 2) {
     return <p className="text-xs text-gray-500">Not enough poll points for a line.</p>;
   }
-  const min = Math.min(...prices);
-  const max = Math.max(...prices);
+
+  const smaValsForScale = smaAnchors.map((s) => s.v);
+  const allY = [...prices, ...smaValsForScale];
+  const min = Math.min(...allY);
+  const max = Math.max(...allY);
   const pad = (max - min) * 0.08 || max * 0.01 || 1;
   const y0 = min - pad;
   const y1 = max + pad;
@@ -88,15 +116,63 @@ function PollMiniLine({
   const plotH = h - top - bottom;
   const n = series.length;
   const yAt = (price: number) => top + plotH - ((price - y0) / (y1 - y0)) * plotH;
+  const xAt = (i: number) => (n <= 1 ? left + plotW / 2 : left + (i / (n - 1)) * plotW);
   const pts = series
     .map((s, i) => {
       if (s.price == null || !Number.isFinite(s.price)) return null;
-      const x = n <= 1 ? left + plotW / 2 : left + (i / (n - 1)) * plotW;
-      const y = yAt(s.price);
-      return { x, y, s };
+      return { x: xAt(i), y: yAt(s.price), s };
     })
     .filter(Boolean) as { x: number; y: number; s: (typeof series)[0] }[];
   const path = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+
+  // Place SMA at day-start (2:05); today's SMA also extends to current price x
+  const currentIdx = Math.max(
+    0,
+    series.findIndex((s) => s.isCurrent),
+    series.length - 1
+  );
+  const smaPts = smaAnchors.map((anchor, ai) => {
+    let idx = series.findIndex((s) => s.dayKey === anchor.dayKey && s.isDayStart);
+    if (idx < 0) idx = series.findIndex((s) => s.dayKey === anchor.dayKey);
+    if (idx < 0) {
+      const dayStarts = series
+        .map((s, i) => (s.isDayStart ? i : -1))
+        .filter((i) => i >= 0);
+      if (dayStarts.length > 0) {
+        const off = smaAnchors.length - 1 - ai;
+        idx = dayStarts[Math.max(0, dayStarts.length - 1 - off)] ?? dayStarts[dayStarts.length - 1];
+      } else {
+        idx = n - 1;
+      }
+    }
+    const isLatest = ai === smaAnchors.length - 1;
+    // Today / latest daily SMA: extend horizontally to current poll x
+    const x = isLatest ? xAt(currentIdx) : xAt(idx);
+    const xStart = xAt(idx);
+    return {
+      x,
+      xStart,
+      y: yAt(anchor.v),
+      v: anchor.v,
+      dayKey: anchor.dayKey,
+      isLatest,
+      label: `${dayLabel(anchor.dayKey)} 20 SMA`,
+    };
+  });
+  // Solid polyline through day-start anchors; latest point sits at current price x
+  const smaPathPts = smaPts.flatMap((p) =>
+    p.isLatest && Math.abs(p.x - p.xStart) > 1
+      ? [
+          { x: p.xStart, y: p.y },
+          { x: p.x, y: p.y },
+        ]
+      : [{ x: p.x, y: p.y }]
+  );
+  const smaPath =
+    smaPathPts.length >= 2
+      ? smaPathPts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")
+      : "";
+
   const ticks = [y1, (y0 + y1) / 2, y0];
   const fmt = (v: number) =>
     v >= 1000 ? v.toLocaleString("en-PH", { maximumFractionDigits: 0 }) : v.toLocaleString("en-PH", { maximumFractionDigits: 4 });
@@ -144,6 +220,29 @@ function PollMiniLine({
           ) : null
         )}
         <path d={path} fill="none" stroke="#7c3aed" strokeWidth={2} />
+        {smaPath ? (
+          <path d={smaPath} fill="none" stroke="#f59e0b" strokeWidth={2} />
+        ) : null}
+        {smaPts.map((p, i) => {
+          const isLast = i === smaPts.length - 1;
+          // Keep last SMA label inside chart (was clipped on the right edge)
+          const labelX = isLast ? Math.max(left + 4, p.x - 8) : p.x;
+          const anchor = isLast ? "end" : i === 0 ? "start" : "middle";
+          return (
+            <g key={`sma-${p.dayKey}-${i}`}>
+              <circle cx={p.x} cy={p.y} r={4.5} fill="#f59e0b" stroke="#fff" strokeWidth={1.5} />
+              <text
+                x={labelX}
+                y={Math.min(h - bottom - 4, p.y + 14)}
+                textAnchor={anchor}
+                className="fill-amber-800"
+                style={{ fontSize: 9, fontWeight: 700 }}
+              >
+                SMA {fmt(p.v)}
+              </text>
+            </g>
+          );
+        })}
         {pts.map((p, i) => (
           <g key={i}>
             {/* larger hit area for touch/hover */}
@@ -237,6 +336,11 @@ function PollMiniLine({
       </div>
       <div className="flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-violet-100 bg-white/70 px-2.5 py-1.5 text-[10px] text-gray-500">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+          <span className="font-semibold text-violet-700">● price</span>
+          <span className="font-semibold text-amber-700">
+            ● 20 SMA (daily · extends to now)
+            {smaPts.length < 1 ? " · need ≥20 daily bars" : ""}
+          </span>
           <span className="font-semibold text-violet-700">● day start (2:05)</span>
           <span className="font-semibold text-emerald-700">● now</span>
           <span className="tabular-nums text-gray-600">
@@ -937,6 +1041,7 @@ export default function ChartView() {
                     groups={pollWindow.groups}
                     dayLabel={pollWindow.dayLabel}
                     todayKey={pollWindow.todayKey}
+                    dailyPoints={points}
                   />
                 ) : (
                   <div className="mt-2 flex flex-wrap gap-1.5 sm:gap-2">

@@ -43,6 +43,8 @@ function buildAgentPrompt(args: {
   symbol: string;
   currentPrice: number;
   holding: boolean;
+  /** Flat now but had prior buys — rebuy / re-entry */
+  rebuy: boolean;
   holdings: number;
   spent: number;
   avg: number | null;
@@ -135,7 +137,16 @@ function buildAgentPrompt(args: {
   } else {
     lines.push(``);
     lines.push(`## Position`);
-    lines.push(`The trader does **not** hold ${base} right now.`);
+    if (args.rebuy) {
+      lines.push(
+        `The trader does **not** hold ${base} right now, but **previously held and realized** this pair (closed cycle). This is a **rebuy / re-entry** setup — not a first-time buy.`
+      );
+      lines.push(
+        `Journal must use **Target re-entry** (full PHP price). Consider prior trade history; do not force a rebuy if thesis is weak.`
+      );
+    } else {
+      lines.push(`The trader does **not** hold ${base} right now.`);
+    }
     lines.push(``);
     lines.push(`## Sizing intent (trader plan)`);
     if (cheapCoin) {
@@ -152,18 +163,28 @@ function buildAgentPrompt(args: {
     }
     lines.push(``);
     lines.push(`## Question`);
-    if (cheapCoin) {
+    if (args.rebuy) {
+      lines.push(
+        `Is it reasonable to **rebuy / re-enter** ${base} now (after a prior realized cycle), only on a deeper pullback, or **skip**?`
+      );
+      lines.push(
+        `Advise **BUY / WAIT / SKIP**. Prefer staged **Target re-entry** levels over chasing. Stay neutral.`
+      );
+    } else if (cheapCoin) {
       lines.push(
         `Is it reasonable to **start a spot buy of about ₱10,000** in ${base} at/near current levels, based on verified research and levels?`
+      );
+      lines.push(
+        `Advise **BUY / WAIT / SKIP**. If the setup is weak or bearish, choose WAIT or SKIP (hold cash) — do not invent a long. If BUY, suggest staging, invalidation, and a rough hold timeframe.`
       );
     } else {
       lines.push(
         `Is it better to **buy 1 ${base}** or **more than 1**, and is a buy justified at all right now based on verified research and levels?`
       );
+      lines.push(
+        `Advise **BUY / WAIT / SKIP**. If the setup is weak or bearish, choose WAIT or SKIP (hold cash) — do not invent a long. If BUY, suggest staging, invalidation, and a rough hold timeframe.`
+      );
     }
-    lines.push(
-      `Advise **BUY / WAIT / SKIP**. If the setup is weak or bearish, choose WAIT or SKIP (hold cash) — do not invent a long. If BUY, suggest staging, invalidation, and a rough hold timeframe.`
-    );
   }
 
   lines.push(``);
@@ -276,14 +297,18 @@ If a **verified** incident exists → flag it and lean **WAIT / SKIP / DO NOT AD
     lines.push(`- **News (verified):** …`);
     lines.push(`- **Why:** …`);
   } else {
-    lines.push(`## ${args.symbol} · entry note · ${todayManila} (Manila)`);
+    lines.push(
+      `## ${args.symbol} · ${args.rebuy ? "rebuy / re-entry" : "entry"} note · ${todayManila} (Manila)`
+    );
     lines.push(``);
     lines.push(`- **Agent:** Spot Trading Desk AI (ChatGPT / Grok / Gemini — name model)`);
-    lines.push(`- **Prompt:** Spot · Position & trades · buy/sizing research`);
+    lines.push(
+      `- **Prompt:** Spot · Position & trades · ${args.rebuy ? "rebuy / re-entry research" : "buy/sizing research"}`
+    );
     lines.push(`- **Verdict:** BUY | WAIT | SKIP`);
     lines.push(`- **Price now:** …`);
     lines.push(
-      `- **Target entry:** ₱${args.support != null && Number.isFinite(args.support) ? Number(args.support).toFixed(2) : "…"}`
+      `- **${args.rebuy ? "Target re-entry" : "Target entry"}:** ₱${args.support != null && Number.isFinite(args.support) ? Number(args.support).toFixed(2) : "…"}`
     );
     lines.push(
       `- **Target exit:** ₱${args.resistance != null && Number.isFinite(args.resistance) ? Number(args.resistance).toFixed(2) : "…"}`
@@ -313,6 +338,12 @@ export default function PositionAndTradesCard({
   const holdings = portfolio?.holdings ?? 0;
   const spent = portfolio?.spent ?? 0;
   const holding = holdings > 0 && spent > 0;
+  const priorBuys = (transactions || []).some(
+    (tx) =>
+      String(tx.symbol || "").toUpperCase() === String(symbol || "").toUpperCase() &&
+      String(tx.type || "").toLowerCase() === "buy"
+  );
+  const rebuy = !holding && priorBuys;
   const avg = holding ? spent / holdings : null;
   const mtm = holding && currentPrice > 0 ? holdings * currentPrice : null;
   const pnlPhp = mtm != null ? mtm - spent : null;
@@ -329,6 +360,7 @@ export default function PositionAndTradesCard({
         symbol,
         currentPrice,
         holding,
+        rebuy,
         holdings,
         spent,
         avg,
@@ -343,6 +375,7 @@ export default function PositionAndTradesCard({
       symbol,
       currentPrice,
       holding,
+      rebuy,
       holdings,
       spent,
       avg,
@@ -381,7 +414,7 @@ export default function PositionAndTradesCard({
           onClick={() => void copyPrompt()}
           className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-900 hover:bg-indigo-100"
         >
-          {copied ? "✅ Copied" : holding ? "📋 Agent: add more?" : "📋 Agent: buy advice?"}
+          {copied ? "✅ Copied" : holding ? "📋 Agent: add more?" : rebuy ? "📋 Agent: rebuy?" : "📋 Agent: buy advice?"}
         </button>
       </div>
 
