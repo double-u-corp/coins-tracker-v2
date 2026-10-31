@@ -129,12 +129,12 @@ function MoverLineChart({
   const pad = (max - min) * 0.08 || max * 0.01 || 1;
   const y0 = min - pad;
   const y1 = max + pad;
-  const left = 64;
+  const left = 72;
   const right = 8;
-  const top = 14;
-  const bottom = 22;
+  const top = 18;
+  const bottom = 28;
   const w = 960;
-  const h = 320;
+  const h = 360;
   const plotW = w - left - right;
   const plotH = h - top - bottom;
   const n = points.length;
@@ -184,7 +184,7 @@ function MoverLineChart({
       <div className="w-full p-1 pb-0 sm:p-2 sm:pb-0">
         <svg
           viewBox={`0 0 ${w} ${h}`}
-          className="h-[min(78vw,420px)] w-full min-h-[340px] sm:h-80 md:h-96"
+          className="h-[min(100vw,560px)] w-full min-h-[440px] max-h-[70vh] sm:h-80 sm:max-h-none md:h-96"
           role="img"
           aria-label={`${symbol} 3h path`}
           onMouseLeave={() => setHover(null)}
@@ -199,7 +199,7 @@ function MoverLineChart({
                   y={y + 3}
                   textAnchor="end"
                   className="fill-teal-900"
-                  style={{ fontSize: 13, fontWeight: 700 }}
+                  style={{ fontSize: 16, fontWeight: 800 }}
                 >
                   {fmt(tv)}
                 </text>
@@ -228,13 +228,13 @@ function MoverLineChart({
             const anchor = isLast ? "end" : i === 0 ? "start" : "middle";
             return (
               <g key={`sma-${p.dayKey}-${i}`}>
-                <circle cx={p.x} cy={p.y} r={5.5} fill="#f59e0b" stroke="#fff" strokeWidth={1.5} />
+                <circle cx={p.x} cy={p.y} r={7} fill="#f59e0b" stroke="#fff" strokeWidth={1.5} />
                 <text
                   x={labelX}
                   y={Math.min(h - bottom - 4, p.y + 14)}
                   textAnchor={anchor}
                   className="fill-amber-800"
-                  style={{ fontSize: 12, fontWeight: 700 }}
+                  style={{ fontSize: 14, fontWeight: 800 }}
                 >
                   SMA {fmt(p.v)}
                 </text>
@@ -248,7 +248,7 @@ function MoverLineChart({
                 <circle
                   cx={p.x}
                   cy={p.y}
-                  r={22}
+                  r={28}
                   fill="transparent"
                   className="cursor-pointer"
                   onMouseEnter={() =>
@@ -292,8 +292,8 @@ function MoverLineChart({
               <rect
                 x={Math.min(Math.max(hover.x - 70, left), w - right - 140)}
                 y={Math.max(hover.y - 36, 4)}
-                width={140}
-                height={32}
+                width={160}
+                height={40}
                 rx={6}
                 fill="#134e4a"
                 opacity={0.92}
@@ -302,7 +302,7 @@ function MoverLineChart({
                 x={Math.min(Math.max(hover.x - 70, left), w - right - 140) + 8}
                 y={Math.max(hover.y - 36, 4) + 13}
                 fill="#ccfbf1"
-                style={{ fontSize: 11, fontWeight: 600 }}
+                style={{ fontSize: 13, fontWeight: 700 }}
               >
                 {hover.label}
               </text>
