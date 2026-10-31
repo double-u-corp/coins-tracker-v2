@@ -387,7 +387,7 @@ export function formatEntryReviewPrompt(
     `1. **Agent:** one line, start with \`Spot Trading Desk AI\` then product/model in parentheses. Example: \`Spot Trading Desk AI (Grok)\`. Never put the note title here.`
   );
   lines.push(
-    `2. **Target entry:** REQUIRED. One full PHP price from research + levels (support / ladder / pullback). Optional ₱. Example: ₱16332.9 or 16332.9 — never truncate (16 vs 16000). **No thousands commas.** Use n/a only if verdict is SKIP/WAIT with no buy level.`
+    `2. **Target entry** / **Target re-entry:** REQUIRED. Full PHP from research + levels. If allocated / adding, use **Target re-entry**. Example: ₱16332.9 — no commas, no truncation. n/a only if SKIP with no buy level.`
   );
   lines.push(
     `3. **Target exit:** REQUIRED. One full PHP price from research + levels (resistance / trim / TP). Optional ₱. Example: ₱20036.1. **No thousands commas.** Use n/a only if no exit level applies.`
@@ -411,7 +411,7 @@ export function formatEntryReviewPrompt(
     lines.push(`- **Price now:** …`);
     lines.push(`- **Avg cost / unrealized:** …`);
     lines.push(
-      `- **Target entry:** ₱${c.support != null && Number.isFinite(c.support) ? Number(c.support).toFixed(2) : "…"}`
+      `- **Target re-entry:** ₱${c.support != null && Number.isFinite(c.support) ? Number(c.support).toFixed(2) : "…"}`
     );
     lines.push(
       `- **Target exit:** ₱${c.resistance != null && Number.isFinite(c.resistance) ? Number(c.resistance).toFixed(2) : "…"}`

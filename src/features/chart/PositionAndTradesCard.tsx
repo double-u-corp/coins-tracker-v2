@@ -211,7 +211,7 @@ If a **verified** incident exists → flag it and lean **WAIT / SKIP / DO NOT AD
   lines.push(`4. Why (max 3 bullets) — neutral; mix technical + catalyst; mention exploit/unlock if relevant`);
   lines.push(`5. Levels (entry / invalidation / take-profit) or "none — stay in cash"`);
   lines.push(
-    `   → Those entry/TP numbers **must** be copied into the journal as **Target entry** and **Target exit** (full PHP prices, no commas).`
+    `   → Copy levels into journal: **Target entry** (new buy) or **Target re-entry** (already holding / add) and **Target exit** (full PHP, no commas). Always include **Review by:** YYYY-MM-DD (future Manila date).`
   );
   lines.push(`6. Timeframe with ≥1 calendar recheck date (Manila)`);
   if (!args.holding) {
@@ -241,7 +241,7 @@ If a **verified** incident exists → flag it and lean **WAIT / SKIP / DO NOT AD
     `1. **Agent:** one line, start with \`Spot Trading Desk AI\` then product/model in parentheses. Example: \`Spot Trading Desk AI (Grok)\`. Never put the note title here.`
   );
   lines.push(
-    `2. **Target entry:** REQUIRED. One full PHP price from research + levels (support / ladder / pullback). Optional ₱. Example: ₱16332.9 or 16332.9 — never truncate (16 vs 16000). **No thousands commas.** Use n/a only if verdict is SKIP/WAIT with no buy level.`
+    `2. **Target entry** / **Target re-entry:** REQUIRED. One full PHP price from research + levels. If already holding / adding, prefer label **Target re-entry**. Optional ₱. Example: ₱16332.9 — never truncate; **no thousands commas**. n/a only if SKIP/WAIT with no buy level.`
   );
   lines.push(
     `3. **Target exit:** REQUIRED. One full PHP price from research + levels (resistance / trim / TP). Optional ₱. Example: ₱20036.1. **No thousands commas.** Use n/a only if no exit level applies.`
@@ -264,7 +264,7 @@ If a **verified** incident exists → flag it and lean **WAIT / SKIP / DO NOT AD
     lines.push(`- **Price now:** …`);
     lines.push(`- **Avg cost / unrealized:** …`);
     lines.push(
-      `- **Target entry:** ₱${args.support != null && Number.isFinite(args.support) ? Number(args.support).toFixed(2) : "…"}`
+      `- **Target re-entry:** ₱${args.support != null && Number.isFinite(args.support) ? Number(args.support).toFixed(2) : "…"}`
     );
     lines.push(
       `- **Target exit:** ₱${args.resistance != null && Number.isFinite(args.resistance) ? Number(args.resistance).toFixed(2) : "…"}`
