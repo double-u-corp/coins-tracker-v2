@@ -9,6 +9,8 @@ type Tx = {
   price: number;
   phpAmount: number;
   transactedAt: string;
+  /** Present when list is multi-coin; optional if parent already filtered by symbol */
+  symbol?: string;
 };
 
 type PortfolioRow = {
@@ -338,11 +340,12 @@ export default function PositionAndTradesCard({
   const holdings = portfolio?.holdings ?? 0;
   const spent = portfolio?.spent ?? 0;
   const holding = holdings > 0 && spent > 0;
-  const priorBuys = (transactions || []).some(
-    (tx) =>
-      String(tx.symbol || "").toUpperCase() === String(symbol || "").toUpperCase() &&
-      String(tx.type || "").toLowerCase() === "buy"
-  );
+  const priorBuys = (transactions || []).some((tx) => {
+    if (String(tx.type || "").toLowerCase() !== "buy") return false;
+    // If tx has no symbol, parent already scoped this list to the coin
+    if (!tx.symbol) return true;
+    return String(tx.symbol).toUpperCase() === String(symbol || "").toUpperCase();
+  });
   const rebuy = !holding && priorBuys;
   const avg = holding ? spent / holdings : null;
   const mtm = holding && currentPrice > 0 ? holdings * currentPrice : null;
