@@ -34,6 +34,11 @@ type SlotStat = {
   avgAbsPct: number;
   medianAbsPct: number;
   pctMovesAbove1: number;
+  upSharePct: number;
+  avgUpPct: number;
+  avgDownPct: number;
+  upCount: number;
+  downCount: number;
   rank: number;
   intensity: "quiet" | "normal" | "active" | "hot";
 };
@@ -46,6 +51,11 @@ type WeekdayStat = {
   avgAbsPct: number;
   medianAbsPct: number;
   pctMovesAbove1: number;
+  upSharePct: number;
+  avgUpPct: number;
+  avgDownPct: number;
+  upCount: number;
+  downCount: number;
   rank: number;
   intensity: "quiet" | "normal" | "active" | "hot";
 };
@@ -78,6 +88,10 @@ type ResponseBody = {
   quietestSlot: SlotStat | null;
   hottestWeekday: WeekdayStat | null;
   quietestWeekday: WeekdayStat | null;
+  strongestUpSlot: SlotStat | null;
+  strongestDownSlot: SlotStat | null;
+  strongestUpWeekday: WeekdayStat | null;
+  strongestDownWeekday: WeekdayStat | null;
   topMoversByHotSlot: CoinSlotHighlight[];
   /** Ranked by totalAbsPct over last 48h — not the 14/30/60 hot-slot list */
   topMovers2d: Coin2dMover[];
@@ -114,6 +128,21 @@ function median(nums: number[]): number {
   return s.length % 2 === 0 ? (s[mid - 1] + s[mid]) / 2 : s[mid];
 }
 
+function directionStats(signed: number[]) {
+  const ups = signed.filter((x) => x > 0);
+  const downs = signed.filter((x) => x < 0);
+  const n = signed.length;
+  return {
+    upCount: ups.length,
+    downCount: downs.length,
+    upSharePct: Number((n > 0 ? (ups.length / n) * 100 : 0).toFixed(1)),
+    avgUpPct: Number((ups.length ? ups.reduce((a, b) => a + b, 0) / ups.length : 0).toFixed(3)),
+    avgDownPct: Number(
+      (downs.length ? downs.reduce((a, b) => a + Math.abs(b), 0) / downs.length : 0).toFixed(3)
+    ),
+  };
+}
+
 function intensityFromRank(
   avgAbsPct: number,
   minAvg: number,
@@ -147,15 +176,19 @@ export default async function handler(
   });
 
   const movesBySlot = new Map<number, number[]>();
+  const signedBySlot = new Map<number, number[]>();
   const movesBySlotCoin = new Map<number, Map<string, number[]>>();
   const movesByWeekday = new Map<number, number[]>();
+  const signedByWeekday = new Map<number, number[]>();
 
   for (const h of SLOT_HOURS) {
     movesBySlot.set(h, []);
+    signedBySlot.set(h, []);
     movesBySlotCoin.set(h, new Map());
   }
   for (let d = 0; d <= 6; d++) {
     movesByWeekday.set(d, []);
+    signedByWeekday.set(d, []);
   }
 
   const since2d = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
@@ -213,17 +246,20 @@ export default async function handler(
       const gapH = (cur.createdAt.getTime() - prev.createdAt.getTime()) / (60 * 60 * 1000);
       if (gapH > 5) continue;
 
-      const absPct = (Math.abs(cur.price - prev.price) / prev.price) * 100;
+      const signedPct = ((cur.price - prev.price) / prev.price) * 100;
+      const absPct = Math.abs(signedPct);
       const { hour, weekday } = toManilaParts(cur.createdAt);
       const slot = nearestSlotHour(hour);
       if (slot < 0) continue;
 
       movesBySlot.get(slot)!.push(absPct);
+      signedBySlot.get(slot)!.push(signedPct);
       const coinMap = movesBySlotCoin.get(slot)!;
       if (!coinMap.has(coin.symbol)) coinMap.set(coin.symbol, []);
       coinMap.get(coin.symbol)!.push(absPct);
 
       movesByWeekday.get(weekday)!.push(absPct);
+      signedByWeekday.get(weekday)!.push(signedPct);
     }
   }
 
@@ -240,6 +276,7 @@ export default async function handler(
       (arr) => arr.length > 0
     ).length;
 
+    const dir = directionStats(signedBySlot.get(hour) || []);
     return {
       hour,
       label: SLOT_LABELS[hour] || `${hour}:05`,
@@ -248,6 +285,7 @@ export default async function handler(
       avgAbsPct: Number(avgAbsPct.toFixed(3)),
       medianAbsPct: Number(medianAbsPct.toFixed(3)),
       pctMovesAbove1: Number(pctMovesAbove1.toFixed(1)),
+      ...dir,
     };
   });
 
@@ -270,6 +308,7 @@ export default async function handler(
     const samples = movesByWeekday.get(d) || [];
     const avgAbsPct =
       samples.length > 0 ? samples.reduce((a: number, b: number) => a + b, 0) / samples.length : 0;
+    const dir = directionStats(signedByWeekday.get(d) || []);
     rawWeekdays.push({
       day: d,
       label: WEEKDAY_LABELS[d],
@@ -280,6 +319,7 @@ export default async function handler(
         samples.length > 0
           ? Number(((samples.filter((x) => x >= 1).length / samples.length) * 100).toFixed(1))
           : 0,
+      ...dir,
     });
   }
   const wdByHeat = [...rawWeekdays].sort((a, b) => b.avgAbsPct - a.avgAbsPct);
@@ -298,6 +338,14 @@ export default async function handler(
   const quietestSlot = [...slots].sort((a, b) => a.avgAbsPct - b.avgAbsPct)[0] || null;
   const hottestWeekday = [...weekdays].sort((a, b) => b.avgAbsPct - a.avgAbsPct)[0] || null;
   const quietestWeekday = [...weekdays].sort((a, b) => a.avgAbsPct - b.avgAbsPct)[0] || null;
+  const strongestUpSlot =
+    [...slots].filter((s) => s.upCount > 0).sort((a, b) => b.avgUpPct - a.avgUpPct)[0] || null;
+  const strongestDownSlot =
+    [...slots].filter((s) => s.downCount > 0).sort((a, b) => b.avgDownPct - a.avgDownPct)[0] || null;
+  const strongestUpWeekday =
+    [...weekdays].filter((w) => w.upCount > 0).sort((a, b) => b.avgUpPct - a.avgUpPct)[0] || null;
+  const strongestDownWeekday =
+    [...weekdays].filter((w) => w.downCount > 0).sort((a, b) => b.avgDownPct - a.avgDownPct)[0] || null;
 
   let topMoversByHotSlot: CoinSlotHighlight[] = [];
   if (hottestSlot) {
@@ -342,8 +390,21 @@ export default async function handler(
       `Quietest weekday: ${quietestWeekday.label} — avg |move| ${quietestWeekday.avgAbsPct}%.`
     );
   }
+  if (strongestUpSlot) {
+    guidance.push(
+      `Strongest average UP into a print: ${strongestUpSlot.label} — avg +${strongestUpSlot.avgUpPct}% when rising (${strongestUpSlot.upSharePct}% of samples up).`
+    );
+  }
+  if (strongestDownSlot) {
+    guidance.push(
+      `Strongest average DOWN into a print: ${strongestDownSlot.label} — avg −${strongestDownSlot.avgDownPct}% when falling (${100 - strongestDownSlot.upSharePct}% of samples down-ish).`
+    );
+  }
   guidance.push(
     `Hot time/day = more movement to watch — not an automatic entry signal. Confirm bias on Spot.`
+  );
+  guidance.push(
+    `Macro catalysts (FOMC, CPI, NFP, PCE) often cluster in US hours → 8:05 PM–2:05 AM Manila can spike both ways. Check Home → Macro watch around those dates — correlation is situational, not a rule.`
   );
 
   return res.status(200).json({
@@ -358,6 +419,10 @@ export default async function handler(
     quietestSlot,
     hottestWeekday,
     quietestWeekday,
+    strongestUpSlot,
+    strongestDownSlot,
+    strongestUpWeekday,
+    strongestDownWeekday,
     topMoversByHotSlot,
     topMovers2d,
     guidance,

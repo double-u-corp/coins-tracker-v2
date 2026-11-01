@@ -478,6 +478,40 @@ export default function LongScanView({
     }
   };
 
+  const removeCoin = async (symbol: string) => {
+    const sym = symbol.toUpperCase();
+    if (
+      !window.confirm(
+        `Remove ${symbol} from LONG scan? This deletes all listed scan responses for this coin.`
+      )
+    ) {
+      return;
+    }
+    setDeletingKey(`coin:${sym}`);
+    setError(null);
+    const prev = runs;
+    setRuns((list) =>
+      list.map((run) => ({
+        ...run,
+        hits: (run.hits || []).filter((h) => h.symbol.toUpperCase() !== sym),
+        saved: (run.hits || []).filter((h) => h.symbol.toUpperCase() !== sym).length,
+      }))
+    );
+    try {
+      const res = await fetch(
+        `/api/long-scan?symbol=${encodeURIComponent(symbol)}`,
+        { method: "DELETE" }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Delete failed");
+    } catch (err) {
+      setRuns(prev);
+      setError((err as Error).message);
+    } finally {
+      setDeletingKey(null);
+    }
+  };
+
   const removeHit = async (runId: string, symbol: string) => {
     const key = `${runId}:${symbol}`;
     setDeletingKey(key);
@@ -927,6 +961,15 @@ export default function LongScanView({
                   })}
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5 border-t border-gray-100 bg-slate-50/80 px-3 py-2 justify-start sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => void removeCoin(g.symbol)}
+                    disabled={deletingKey === `coin:${g.symbol.toUpperCase()}`}
+                    className="rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                    title={`Remove ${g.symbol} and all scan rows`}
+                  >
+                    {deletingKey === `coin:${g.symbol.toUpperCase()}` ? "…" : "🗑 Remove coin"}
+                  </button>
                   <button
                     type="button"
                     onClick={() => openJournal(g.symbol, { name: g.name })}

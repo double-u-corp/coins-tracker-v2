@@ -10,6 +10,11 @@ type SlotStat = {
   avgAbsPct: number;
   medianAbsPct: number;
   pctMovesAbove1: number;
+  upSharePct?: number;
+  avgUpPct?: number;
+  avgDownPct?: number;
+  upCount?: number;
+  downCount?: number;
   rank: number;
   intensity: "quiet" | "normal" | "active" | "hot";
 };
@@ -21,6 +26,11 @@ type WeekdayStat = {
   avgAbsPct: number;
   medianAbsPct: number;
   pctMovesAbove1: number;
+  upSharePct?: number;
+  avgUpPct?: number;
+  avgDownPct?: number;
+  upCount?: number;
+  downCount?: number;
   rank: number;
   intensity: "quiet" | "normal" | "active" | "hot";
 };
@@ -50,6 +60,10 @@ type TimingResponse = {
   quietestSlot: SlotStat | null;
   hottestWeekday: WeekdayStat | null;
   quietestWeekday: WeekdayStat | null;
+  strongestUpSlot?: SlotStat | null;
+  strongestDownSlot?: SlotStat | null;
+  strongestUpWeekday?: WeekdayStat | null;
+  strongestDownWeekday?: WeekdayStat | null;
   topMoversByHotSlot: CoinSlotHighlight[];
   /** Biggest movers last ~2 days only */
   topMovers2d?: Coin2dMover[];
@@ -1066,6 +1080,37 @@ export default function SwingTimingView() {
             )}
           </div>
 
+          {(data.strongestUpSlot || data.strongestDownSlot) && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {data.strongestUpSlot && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-emerald-800">
+                    Strongest avg UP window
+                  </div>
+                  <div className="mt-1 text-sm font-bold text-emerald-950">
+                    {data.strongestUpSlot.label}
+                  </div>
+                  <div className="mt-1 font-mono text-sm font-bold text-emerald-800">
+                    ↑{data.strongestUpSlot.avgUpPct}% · {data.strongestUpSlot.upSharePct}% of samples up
+                  </div>
+                </div>
+              )}
+              {data.strongestDownSlot && (
+                <div className="rounded-lg border border-rose-200 bg-rose-50/60 p-3">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-rose-800">
+                    Strongest avg DOWN window
+                  </div>
+                  <div className="mt-1 text-sm font-bold text-rose-950">
+                    {data.strongestDownSlot.label}
+                  </div>
+                  <div className="mt-1 font-mono text-sm font-bold text-rose-800">
+                    ↓{data.strongestDownSlot.avgDownPct}% when falling
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {data.guidance.length > 0 && (
             <ul className="rounded-lg border border-indigo-100 bg-indigo-50/40 px-4 py-3 text-[12px] text-indigo-950 space-y-1.5 list-disc list-inside">
               {data.guidance.map((g, i) => (
@@ -1090,8 +1135,8 @@ export default function SwingTimingView() {
                 </button>
               </div>
               <p className="text-[11px] text-gray-500 mb-4">
-                Average |% move| from the previous poll → this print, grouped by calendar day in
-                Manila. Higher = more swing to monitor that day of the week.
+                |move| by Manila weekday. ↑ / ↓ = average up vs down size; % up = how often price
+                rose into the next print. Use to plan attention — not automatic buys.
               </p>
               <div className="space-y-3">
                 {[...data.weekdays]
@@ -1110,12 +1155,26 @@ export default function SwingTimingView() {
                             </span>
                             <span className="font-semibold text-gray-900">{wd.label}</span>
                           </div>
-                          <div className="flex items-center gap-3 text-gray-600 shrink-0">
+                          <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-gray-600 shrink-0 justify-end">
                             <span className="font-mono font-bold text-gray-900">
-                              {wd.avgAbsPct}% avg
+                              {wd.avgAbsPct}% |move|
                             </span>
-                            <span className="hidden sm:inline">med {wd.medianAbsPct}%</span>
-                            <span className="hidden md:inline">≥1%: {wd.pctMovesAbove1}%</span>
+                            {wd.avgUpPct != null && (
+                              <span className="font-mono text-emerald-700 font-semibold">
+                                ↑{wd.avgUpPct}%
+                              </span>
+                            )}
+                            {wd.avgDownPct != null && (
+                              <span className="font-mono text-rose-700 font-semibold">
+                                ↓{wd.avgDownPct}%
+                              </span>
+                            )}
+                            {wd.upSharePct != null && (
+                              <span className="hidden sm:inline text-[10px] text-slate-500">
+                                {wd.upSharePct}% up
+                              </span>
+                            )}
+                            <span className="hidden md:inline">med {wd.medianAbsPct}%</span>
                             <span className="text-gray-400">{wd.sampleCount} samples</span>
                           </div>
                         </div>
@@ -1147,7 +1206,7 @@ export default function SwingTimingView() {
               </button>
             </div>
             <p className="text-[11px] text-gray-500 mb-4">
-              |% change| from the previous poll to this slot, averaged across all monitored coins.
+              |move| = avg absolute change into this slot. ↑ avg up size · ↓ avg down size · % up = share of rising prints. Watch windows only — not entry signals.
             </p>
             <div className="space-y-3">
               {[...data.slots]
@@ -1166,11 +1225,26 @@ export default function SwingTimingView() {
                           </span>
                           <span className="font-semibold text-gray-900 truncate">{slot.label}</span>
                         </div>
-                        <div className="flex items-center gap-3 text-gray-600 shrink-0">
+                        <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-gray-600 shrink-0 justify-end">
                           <span className="font-mono font-bold text-gray-900">
-                            {slot.avgAbsPct}% avg
+                            {slot.avgAbsPct}% |move|
                           </span>
-                          <span className="hidden sm:inline">med {slot.medianAbsPct}%</span>
+                          {slot.avgUpPct != null && (
+                            <span className="font-mono text-emerald-700 font-semibold">
+                              ↑{slot.avgUpPct}%
+                            </span>
+                          )}
+                          {slot.avgDownPct != null && (
+                            <span className="font-mono text-rose-700 font-semibold">
+                              ↓{slot.avgDownPct}%
+                            </span>
+                          )}
+                          {slot.upSharePct != null && (
+                            <span className="hidden sm:inline text-[10px] text-slate-500">
+                              {slot.upSharePct}% up
+                            </span>
+                          )}
+                          <span className="hidden md:inline">med {slot.medianAbsPct}%</span>
                           <span className="hidden md:inline">≥1%: {slot.pctMovesAbove1}%</span>
                           <span className="text-gray-400">{slot.sampleCount} samples</span>
                         </div>

@@ -5,6 +5,7 @@ import {
   listLongScanRuns,
   deleteLongScanRun,
   deleteLongScanHit,
+  deleteLongScanSymbol,
 } from "@/lib/longScanLogic";
 
 export const config = {
@@ -13,8 +14,24 @@ export const config = {
 
 function isCronAuthorized(req: NextApiRequest): boolean {
   const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret) return false;
+
+  // 1) Standard: Authorization: Bearer <secret>
   const authHeader = req.headers.authorization;
-  if (cronSecret && authHeader === `Bearer ${cronSecret}`) return true;
+  if (authHeader === `Bearer ${cronSecret}`) return true;
+
+  // 2) Some hosts send only the token
+  if (authHeader === cronSecret) return true;
+
+  // 3) Alternate header (cron-job.org / custom tools)
+  const xCron = req.headers["x-cron-secret"];
+  if (typeof xCron === "string" && xCron === cronSecret) return true;
+
+  // 4) Query param — cron-job.org often cannot send Authorization
+  //    GET /api/long-scan?secret=...&chunks=10&chunk=0
+  const q = req.query.secret ?? req.query.cron_secret;
+  if (typeof q === "string" && q === cronSecret) return true;
+
   if (req.headers["x-vercel-cron"] === "1") return true;
   return false;
 }
@@ -81,11 +98,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     try {
       const runId = typeof req.query.runId === "string" ? req.query.runId : null;
       const symbol = typeof req.query.symbol === "string" ? req.query.symbol : null;
+      // Delete all hits for a coin across every run
+      if (symbol && !runId) {
+        const ok = await deleteLongScanSymbol(String(symbol));
+        if (!ok) return res.status(404).json({ error: "Coin not found in scan log" });
+        return res.status(200).json({ ok: true });
+      }
       if (!runId) {
-        return res.status(400).json({ error: "runId required" });
+        return res.status(400).json({ error: "runId required (or symbol alone to remove coin)" });
       }
       if (symbol) {
-        const ok = await deleteLongScanHit(runId, symbol);
+        const ok = await deleteLongScanHit(runId, String(symbol));
         if (!ok) return res.status(404).json({ error: "Hit not found" });
         return res.status(200).json({ ok: true });
       }
