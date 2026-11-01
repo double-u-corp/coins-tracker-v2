@@ -240,9 +240,14 @@ export default function LongScanView({
   const coinGroups = useMemo(() => {
     type Row = Hit & { scannedAt: string; runId: string };
     const map = new Map<string, { symbol: string; name: string; rows: Row[] }>();
+    const rowSeen = new Set<string>(); // symbol|minute — drop dual-write twins
     for (const run of runs) {
       for (const h of run.hits || []) {
         const key = h.symbol.toUpperCase();
+        const minute = (run.scannedAt || "").slice(0, 16);
+        const rowKey = `${key}|${minute}`;
+        if (rowSeen.has(rowKey)) continue;
+        rowSeen.add(rowKey);
         let g = map.get(key);
         if (!g) {
           g = { symbol: h.symbol, name: h.name, rows: [] };

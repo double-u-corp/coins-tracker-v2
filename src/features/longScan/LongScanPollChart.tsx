@@ -86,6 +86,7 @@ export default function LongScanPollChart({ symbol, livePrice }: Props) {
   const [points, setPoints] = useState<PollPt[]>([]);
   const [daily, setDaily] = useState<DailyPt[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  const [hover, setHover] = useState<{ x: number; y: number; price: number } | null>(null);
 
   useEffect(() => {
     const el = rootRef.current;
@@ -216,7 +217,7 @@ export default function LongScanPollChart({ symbol, livePrice }: Props) {
     const last = series[series.length - 1];
 
     chart = (
-      <svg viewBox={`0 0 ${w} ${h}`} className="h-[140px] w-full sm:h-[160px]" role="img" aria-label={`${symbol} 3h + 20 SMA`}>
+      <svg viewBox={`0 0 ${w} ${h}`} className="h-[140px] w-full sm:h-[160px]" role="img" onMouseLeave={() => setHover(null)} aria-label={`${symbol} 3h + 20 SMA`}>
         {ticks.map((tv, i) => {
           const y = yAt(tv);
           return (
@@ -244,25 +245,29 @@ export default function LongScanPollChart({ symbol, livePrice }: Props) {
         )}
         <path d={path} fill="none" stroke="#4f46e5" strokeWidth={2} />
         {smaPath ? <path d={smaPath} fill="none" stroke="#f59e0b" strokeWidth={2} /> : null}
-        {smaPts.map((p, i) => {
-          const isLast = i === smaPts.length - 1;
-          const labelX = isLast ? Math.max(left + 4, p.x - 6) : p.x;
-          const anchor = isLast ? "end" : i === 0 ? "start" : "middle";
-          return (
-            <g key={`sma-${p.dayKey}-${i}`}>
-              <circle cx={p.x} cy={p.y} r={4} fill="#f59e0b" stroke="#fff" strokeWidth={1} />
-              <text
-                x={labelX}
-                y={Math.min(h - 4, p.y + 12)}
-                textAnchor={anchor}
-                className="fill-amber-800"
-                style={{ fontSize: 10, fontWeight: 700 }}
-              >
-                SMA {fmt(p.v)}
-              </text>
-            </g>
-          );
-        })}
+        {smaPts.map((p, i) => (
+          <g key={`sma-${p.dayKey}-${i}`}>
+            <circle
+              cx={p.x}
+              cy={p.y}
+              r={14}
+              fill="transparent"
+              className="cursor-pointer"
+              onMouseEnter={() => setHover({ x: p.x, y: p.y, price: p.v })}
+              onMouseMove={() => setHover({ x: p.x, y: p.y, price: p.v })}
+              onClick={() => setHover({ x: p.x, y: p.y, price: p.v })}
+            />
+            <circle
+              cx={p.x}
+              cy={p.y}
+              r={4}
+              fill="#f59e0b"
+              stroke="#fff"
+              strokeWidth={1}
+              className="pointer-events-none"
+            />
+          </g>
+        ))}
         {pts.map((p, i) => {
           const isLast = i === pts.length - 1;
           return (
@@ -277,16 +282,26 @@ export default function LongScanPollChart({ symbol, livePrice }: Props) {
             />
           );
         })}
-        {last && (
-          <text
-            x={Math.max(left + 4, xAt(currentIdx) - 6)}
-            y={Math.max(top + 10, yAt(last.price) - 8)}
-            textAnchor="end"
-            className="fill-emerald-800"
-            style={{ fontSize: 11, fontWeight: 800 }}
-          >
-            {formatPhp(last.price)}
-          </text>
+        {hover && (
+          <g pointerEvents="none">
+            <rect
+              x={Math.min(Math.max(hover.x - 50, left), w - right - 100)}
+              y={Math.max(hover.y - 28, 4)}
+              width={100}
+              height={24}
+              rx={5}
+              fill="#1e1b4b"
+              opacity={0.92}
+            />
+            <text
+              x={Math.min(Math.max(hover.x - 50, left), w - right - 100) + 8}
+              y={Math.max(hover.y - 28, 4) + 16}
+              fill="#fff"
+              style={{ fontSize: 12, fontWeight: 800 }}
+            >
+              {formatPhp(hover.price)}
+            </text>
+          </g>
         )}
       </svg>
     );
