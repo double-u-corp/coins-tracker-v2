@@ -67,6 +67,30 @@ type CoinSlotHighlight = {
   samples: number;
 };
 
+/** Per-coin tendency on a given Manila weekday */
+type CoinWeekdayBias = {
+  symbol: string;
+  name: string;
+  day: number;
+  dayLabel: string;
+  samples: number;
+  upSharePct: number;
+  avgSignedPct: number;
+  /** "buy-lean" if upShare >= 55, "sell-lean" if upShare <= 45, else "mixed" */
+  lean: "buy-lean" | "sell-lean" | "mixed";
+};
+
+type DayFlowSummary = {
+  day: number;
+  label: string;
+  upSharePct: number;
+  avgSignedPct: number;
+  /** Coins that most often rise this weekday */
+  topBuyLeanCoins: { symbol: string; name: string; upSharePct: number; samples: number }[];
+  /** Coins that most often fall this weekday */
+  topSellLeanCoins: { symbol: string; name: string; upSharePct: number; samples: number }[];
+};
+
 /** Biggest movers over the last ~48h only (independent of days window). */
 type Coin2dMover = {
   symbol: string;
@@ -95,6 +119,25 @@ type ResponseBody = {
   topMoversByHotSlot: CoinSlotHighlight[];
   /** Ranked by totalAbsPct over last 48h — not the 14/30/60 hot-slot list */
   topMovers2d: Coin2dMover[];
+  /** Weekdays sorted most buy-lean (high % up) → most sell-lean */
+  dayFlow: DayFlowSummary[];
+  /** Coins with clearest buy-lean day (need enough samples) */
+  coinsBuyLean: CoinWeekdayBias[];
+  /** Coins with clearest sell-lean day */
+  coinsSellLean: CoinWeekdayBias[];
+  /** All coins with weekday rows (for Timing coin selector) */
+  coinWeekdayTable: {
+    symbol: string;
+    name: string;
+    days: {
+      day: number;
+      dayLabel: string;
+      samples: number;
+      upSharePct: number;
+      avgSignedPct: number;
+      lean: "buy-lean" | "sell-lean" | "mixed";
+    }[];
+  }[];
   guidance: string[];
 };
 
@@ -190,6 +233,9 @@ export default async function handler(
     movesByWeekday.set(d, []);
     signedByWeekday.set(d, []);
   }
+  /** weekday -> symbol -> signed % moves */
+  const signedByWeekdayCoin = new Map<number, Map<string, number[]>>();
+  for (let d = 0; d <= 6; d++) signedByWeekdayCoin.set(d, new Map());
 
   const since2d = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
   const movers2dRaw: {
@@ -260,6 +306,9 @@ export default async function handler(
 
       movesByWeekday.get(weekday)!.push(absPct);
       signedByWeekday.get(weekday)!.push(signedPct);
+      const wdCoin = signedByWeekdayCoin.get(weekday)!;
+      if (!wdCoin.has(coin.symbol)) wdCoin.set(coin.symbol, []);
+      wdCoin.get(coin.symbol)!.push(signedPct);
     }
   }
 
@@ -373,6 +422,144 @@ export default async function handler(
       netPct: Number(x.netPct.toFixed(3)),
     }));
 
+  const nameBySym = new Map(coins.map((c) => [c.symbol, c.name]));
+  const MIN_COIN_SAMPLES = 8;
+
+  const dayFlow: DayFlowSummary[] = [1, 2, 3, 4, 5, 6, 0]
+    .map((d) => {
+      const wd = weekdays.find((w) => w.day === d);
+      if (!wd) return null;
+      const coinMap = signedByWeekdayCoin.get(d) || new Map();
+      const coinStats = [...coinMap.entries()]
+        .map(([symbol, arr]) => {
+          const dir = directionStats(arr);
+          const avgSigned =
+            arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+          return {
+            symbol,
+            name: nameBySym.get(symbol) || symbol,
+            samples: arr.length,
+            upSharePct: dir.upSharePct,
+            avgSignedPct: Number(avgSigned.toFixed(3)),
+          };
+        })
+        .filter((c) => c.samples >= MIN_COIN_SAMPLES);
+
+      const topBuyLeanCoins = [...coinStats]
+        .filter((c) => c.upSharePct >= 55)
+        .sort((a, b) => b.upSharePct - a.upSharePct || b.avgSignedPct - a.avgSignedPct)
+        .slice(0, 5)
+        .map(({ symbol, name, upSharePct, samples }) => ({
+          symbol,
+          name,
+          upSharePct,
+          samples,
+        }));
+
+      const topSellLeanCoins = [...coinStats]
+        .filter((c) => c.upSharePct <= 45)
+        .sort((a, b) => a.upSharePct - b.upSharePct || a.avgSignedPct - b.avgSignedPct)
+        .slice(0, 5)
+        .map(({ symbol, name, upSharePct, samples }) => ({
+          symbol,
+          name,
+          upSharePct,
+          samples,
+        }));
+
+      const signed = signedByWeekday.get(d) || [];
+      const avgSignedPct =
+        signed.length > 0
+          ? Number((signed.reduce((a, b) => a + b, 0) / signed.length).toFixed(3))
+          : 0;
+
+      return {
+        day: d,
+        label: wd.label,
+        upSharePct: wd.upSharePct,
+        avgSignedPct,
+        topBuyLeanCoins,
+        topSellLeanCoins,
+      };
+    })
+    .filter(Boolean) as DayFlowSummary[];
+
+  // Sort dayFlow: strongest buy days first
+  dayFlow.sort((a, b) => b.upSharePct - a.upSharePct);
+
+  // Per coin: pick best buy-lean day and best sell-lean day
+  const coinBestBuy: CoinWeekdayBias[] = [];
+  const coinBestSell: CoinWeekdayBias[] = [];
+  const allSymbols = new Set<string>();
+  for (const m of signedByWeekdayCoin.values()) {
+    for (const s of m.keys()) allSymbols.add(s);
+  }
+  for (const symbol of allSymbols) {
+    const perDay: CoinWeekdayBias[] = [];
+    for (let d = 0; d <= 6; d++) {
+      const arr = signedByWeekdayCoin.get(d)?.get(symbol) || [];
+      if (arr.length < MIN_COIN_SAMPLES) continue;
+      const dir = directionStats(arr);
+      const avgSigned = arr.reduce((a, b) => a + b, 0) / arr.length;
+      let lean: CoinWeekdayBias["lean"] = "mixed";
+      if (dir.upSharePct >= 55) lean = "buy-lean";
+      else if (dir.upSharePct <= 45) lean = "sell-lean";
+      perDay.push({
+        symbol,
+        name: nameBySym.get(symbol) || symbol,
+        day: d,
+        dayLabel: WEEKDAY_LABELS[d],
+        samples: arr.length,
+        upSharePct: dir.upSharePct,
+        avgSignedPct: Number(avgSigned.toFixed(3)),
+        lean,
+      });
+    }
+    const buys = perDay.filter((x) => x.lean === "buy-lean");
+    const sells = perDay.filter((x) => x.lean === "sell-lean");
+    if (buys.length) {
+      buys.sort((a, b) => b.upSharePct - a.upSharePct);
+      coinBestBuy.push(buys[0]);
+    }
+    if (sells.length) {
+      sells.sort((a, b) => a.upSharePct - b.upSharePct);
+      coinBestSell.push(sells[0]);
+    }
+  }
+  coinBestBuy.sort((a, b) => b.upSharePct - a.upSharePct);
+  coinBestSell.sort((a, b) => a.upSharePct - b.upSharePct);
+  const coinsBuyLean = coinBestBuy.slice(0, 10);
+  const coinsSellLean = coinBestSell.slice(0, 10);
+
+  // Every monitored coin (so the Timing dropdown is never empty)
+  const coinWeekdayTable: ResponseBody["coinWeekdayTable"] = [];
+  const symbolsForTable = coins.map((c) => c.symbol).sort((a, b) => a.localeCompare(b));
+  for (const symbol of symbolsForTable) {
+    const days: ResponseBody["coinWeekdayTable"][0]["days"] = [];
+    for (const d of [1, 2, 3, 4, 5, 6, 0]) {
+      const arr = signedByWeekdayCoin.get(d)?.get(symbol) || [];
+      if (arr.length < 1) continue;
+      const dir = directionStats(arr);
+      const avgSigned = arr.reduce((a, b) => a + b, 0) / arr.length;
+      let lean: "buy-lean" | "sell-lean" | "mixed" = "mixed";
+      if (dir.upSharePct >= 55) lean = "buy-lean";
+      else if (dir.upSharePct <= 45) lean = "sell-lean";
+      days.push({
+        day: d,
+        dayLabel: WEEKDAY_LABELS[d],
+        samples: arr.length,
+        upSharePct: dir.upSharePct,
+        avgSignedPct: Number(avgSigned.toFixed(3)),
+        lean,
+      });
+    }
+    coinWeekdayTable.push({
+      symbol,
+      name: nameBySym.get(symbol) || symbol,
+      days,
+    });
+  }
+
   const guidance: string[] = [];
   if (hottestSlot && quietestSlot) {
     guidance.push(
@@ -406,6 +593,23 @@ export default async function handler(
   guidance.push(
     `Macro catalysts (FOMC, CPI, NFP, PCE) often cluster in US hours → 8:05 PM–2:05 AM Manila can spike both ways. Check Home → Macro watch around those dates — correlation is situational, not a rule.`
   );
+  if (dayFlow.length) {
+    const bestBuy = dayFlow[0];
+    const bestSell = dayFlow[dayFlow.length - 1];
+    guidance.push(
+      `Across the book, Manila ${bestBuy.label} leans most UP (${bestBuy.upSharePct}% of prints up, avg signed ${bestBuy.avgSignedPct}%). ${bestSell.label} leans most DOWN (${bestSell.upSharePct}% up).`
+    );
+  }
+  if (coinsBuyLean[0]) {
+    guidance.push(
+      `Clearest buy-lean coin/day: ${coinsBuyLean[0].name} on ${coinsBuyLean[0].dayLabel} (${coinsBuyLean[0].upSharePct}% up). Still not a signal — confirm on Spot.`
+    );
+  }
+  if (coinsSellLean[0]) {
+    guidance.push(
+      `Clearest sell-lean coin/day: ${coinsSellLean[0].name} on ${coinsSellLean[0].dayLabel} (${coinsSellLean[0].upSharePct}% up / often red). Prefer not to chase adds that day without Spot bias.`
+    );
+  }
 
   return res.status(200).json({
     days,
@@ -425,6 +629,10 @@ export default async function handler(
     strongestDownWeekday,
     topMoversByHotSlot,
     topMovers2d,
+    dayFlow,
+    coinsBuyLean,
+    coinsSellLean,
+    coinWeekdayTable,
     guidance,
   });
 }

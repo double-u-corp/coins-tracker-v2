@@ -51,6 +51,26 @@ type Coin2dMover = {
   lastPrice: number;
 };
 
+type DayFlowSummary = {
+  day: number;
+  label: string;
+  upSharePct: number;
+  avgSignedPct: number;
+  topBuyLeanCoins: { symbol: string; name: string; upSharePct: number; samples: number }[];
+  topSellLeanCoins: { symbol: string; name: string; upSharePct: number; samples: number }[];
+};
+
+type CoinWeekdayBias = {
+  symbol: string;
+  name: string;
+  day: number;
+  dayLabel: string;
+  samples: number;
+  upSharePct: number;
+  avgSignedPct: number;
+  lean: "buy-lean" | "sell-lean" | "mixed";
+};
+
 type TimingResponse = {
   days: number;
   generatedAt: string;
@@ -67,6 +87,21 @@ type TimingResponse = {
   topMoversByHotSlot: CoinSlotHighlight[];
   /** Biggest movers last ~2 days only */
   topMovers2d?: Coin2dMover[];
+  dayFlow?: DayFlowSummary[];
+  coinsBuyLean?: CoinWeekdayBias[];
+  coinsSellLean?: CoinWeekdayBias[];
+  coinWeekdayTable?: {
+    symbol: string;
+    name: string;
+    days: {
+      day: number;
+      dayLabel: string;
+      samples: number;
+      upSharePct: number;
+      avgSignedPct: number;
+      lean: "buy-lean" | "sell-lean" | "mixed";
+    }[];
+  }[];
   guidance: string[];
 };
 
@@ -741,6 +776,32 @@ export default function SwingTimingView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
+  const [patternCoin, setPatternCoin] = useState<string>("");
+  const [coinOptions, setCoinOptions] = useState<{ symbol: string; name: string }[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/coins");
+        if (!res.ok) throw new Error("list failed");
+        const j = await res.json();
+        const list = (j.coins || []) as { symbol?: string; name?: string }[];
+        if (cancelled) return;
+        const opts = list
+          .filter((c) => c.symbol)
+          .map((c) => ({ symbol: String(c.symbol), name: String(c.name || c.symbol) }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        if (opts.length) setCoinOptions(opts);
+      } catch {
+        /* optional */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const [agentCopied, setAgentCopied] = useState<"timing" | "macro" | "why" | "slots" | "weekdays" | "journal" | null>(null);
   const [recentPolls, setRecentPolls] = useState<RecentPollSeries[]>([]);
   const [recentPollsLoading, setRecentPollsLoading] = useState(false);
@@ -1117,6 +1178,221 @@ export default function SwingTimingView() {
                 <li key={i}>{g}</li>
               ))}
             </ul>
+          )}
+
+          {/* Buy / sell day patterns */}
+          {data.dayFlow && data.dayFlow.length > 0 && (
+            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm space-y-4">
+              <div>
+                <h2 className="text-sm font-bold text-gray-900">
+                  Buy vs sell days (Manila · {data.days}d)
+                </h2>
+                <p className="mt-1 text-[11px] text-gray-500">
+                  From your 3h polls: which weekdays the book more often rises (buy-lean) vs falls
+                  (sell-lean), and which coins show that pattern most. Not a trade signal — monitor
+                  only; confirm on Spot.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                {[...data.dayFlow].map((d) => {
+                  const buyLean = d.upSharePct >= 52;
+                  const sellLean = d.upSharePct <= 48;
+                  return (
+                    <div
+                      key={d.day}
+                      className={`rounded-md border px-3 py-2 ${
+                        buyLean
+                          ? "border-emerald-200 bg-emerald-50/50"
+                          : sellLean
+                            ? "border-rose-200 bg-rose-50/50"
+                            : "border-slate-100 bg-slate-50/50"
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <span className="font-bold text-slate-900">{d.label}</span>
+                        <span className="font-mono text-slate-800">
+                          {d.upSharePct}% up · signed {d.avgSignedPct > 0 ? "+" : ""}
+                          {d.avgSignedPct}%
+                        </span>
+                      </div>
+                      {(d.topBuyLeanCoins.length > 0 || d.topSellLeanCoins.length > 0) && (
+                        <div className="mt-1.5 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                          {d.topBuyLeanCoins.length > 0 && (
+                            <div>
+                              <span className="font-semibold text-emerald-800">Often up: </span>
+                              {d.topBuyLeanCoins.map((c) => (
+                                <span key={c.symbol} className="mr-2 text-slate-700">
+                                  {c.name} ({c.upSharePct}%)
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {d.topSellLeanCoins.length > 0 && (
+                            <div>
+                              <span className="font-semibold text-rose-800">Often down: </span>
+                              {d.topSellLeanCoins.map((c) => (
+                                <span key={c.symbol} className="mr-2 text-slate-700">
+                                  {c.name} ({c.upSharePct}%)
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="rounded-md border border-indigo-100 bg-indigo-50/30 p-3 space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="text-[11px] font-bold text-indigo-950" htmlFor="pattern-coin">
+                    Coin pattern
+                  </label>
+                  <select
+                    id="pattern-coin"
+                    value={patternCoin}
+                    onChange={(e) => setPatternCoin(e.target.value)}
+                    className="min-w-[10rem] flex-1 rounded-md border border-indigo-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-900"
+                  >
+                    <option value="">Select a coin…</option>
+                    {(() => {
+                      const fromTable = (data.coinWeekdayTable || []).map((c) => ({
+                        symbol: c.symbol,
+                        name: c.name,
+                      }));
+                      const map = new Map<string, { symbol: string; name: string }>();
+                      for (const c of [...fromTable, ...coinOptions]) {
+                        if (!c.symbol) continue;
+                        map.set(c.symbol.toUpperCase(), {
+                          symbol: c.symbol,
+                          name: c.name || c.symbol,
+                        });
+                      }
+                      return [...map.values()]
+                        .sort((a, b) => a.name.localeCompare(b.name))
+                        .map((c) => (
+                          <option key={c.symbol} value={c.symbol}>
+                            {c.name} ({c.symbol})
+                          </option>
+                        ));
+                    })()}
+                  </select>
+                </div>
+                {(() => {
+                  const row = (data.coinWeekdayTable || []).find(
+                    (c) => c.symbol === patternCoin
+                  );
+                  if (!patternCoin) {
+                    return (
+                      <p className="text-[11px] text-slate-500">
+                        Pick a coin to see which Manila weekdays it more often rises vs falls.
+                      </p>
+                    );
+                  }
+                  if (!row || row.days.length === 0) {
+                    return (
+                      <p className="text-[11px] text-slate-500">
+                        Not enough samples for this coin in the window.
+                      </p>
+                    );
+                  }
+                  const bestBuy = [...row.days]
+                    .filter((d) => d.lean === "buy-lean")
+                    .sort((a, b) => b.upSharePct - a.upSharePct)[0];
+                  const bestSell = [...row.days]
+                    .filter((d) => d.lean === "sell-lean")
+                    .sort((a, b) => a.upSharePct - b.upSharePct)[0];
+                  return (
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap gap-2 text-[11px]">
+                        {bestBuy && (
+                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-900">
+                            Most up: {bestBuy.dayLabel} ({bestBuy.upSharePct}%)
+                          </span>
+                        )}
+                        {bestSell && (
+                          <span className="rounded-full bg-rose-100 px-2 py-0.5 font-semibold text-rose-900">
+                            Most down: {bestSell.dayLabel} ({bestSell.upSharePct}% up)
+                          </span>
+                        )}
+                        {!bestBuy && !bestSell && (
+                          <span className="text-slate-500">Mixed across weekdays — no strong lean.</span>
+                        )}
+                      </div>
+                      <div className="space-y-1.5">
+                        {row.days.map((d) => (
+                          <div
+                            key={d.day}
+                            className={`flex flex-wrap items-center justify-between gap-2 rounded px-2 py-1.5 text-xs ${
+                              d.lean === "buy-lean"
+                                ? "bg-emerald-50 text-emerald-950"
+                                : d.lean === "sell-lean"
+                                  ? "bg-rose-50 text-rose-950"
+                                  : "bg-white text-slate-800"
+                            }`}
+                          >
+                            <span className="font-semibold">{d.dayLabel}</span>
+                            <span className="font-mono">
+                              {d.upSharePct}% up · signed {d.avgSignedPct > 0 ? "+" : ""}
+                              {d.avgSignedPct}% · n={d.samples}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-slate-500">
+                        Buy-lean ≥55% up · sell-lean ≤45% up · mixed otherwise. Confirm on Spot before
+                        acting.
+                      </p>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {data.coinsBuyLean && data.coinsBuyLean.length > 0 && (
+                  <div className="rounded-md border border-emerald-100 bg-emerald-50/40 p-3">
+                    <h3 className="text-[11px] font-bold uppercase tracking-wide text-emerald-900">
+                      Coins that most often rise on a day
+                    </h3>
+                    <ul className="mt-2 space-y-1.5 text-xs">
+                      {data.coinsBuyLean.map((c) => (
+                        <li key={`${c.symbol}-buy`} className="flex justify-between gap-2">
+                          <span className="font-semibold text-slate-900">
+                            {c.name}{" "}
+                            <span className="font-normal text-slate-500">· {c.dayLabel}</span>
+                          </span>
+                          <span className="font-mono text-emerald-800 shrink-0">
+                            {c.upSharePct}% up
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {data.coinsSellLean && data.coinsSellLean.length > 0 && (
+                  <div className="rounded-md border border-rose-100 bg-rose-50/40 p-3">
+                    <h3 className="text-[11px] font-bold uppercase tracking-wide text-rose-900">
+                      Coins that most often fall on a day
+                    </h3>
+                    <ul className="mt-2 space-y-1.5 text-xs">
+                      {data.coinsSellLean.map((c) => (
+                        <li key={`${c.symbol}-sell`} className="flex justify-between gap-2">
+                          <span className="font-semibold text-slate-900">
+                            {c.name}{" "}
+                            <span className="font-normal text-slate-500">· {c.dayLabel}</span>
+                          </span>
+                          <span className="font-mono text-rose-800 shrink-0">
+                            {c.upSharePct}% up
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
           )}
 
           {/* Weekday section */}
