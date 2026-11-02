@@ -327,11 +327,18 @@ export async function listLongScanRuns(): Promise<LongScanRunPayload[]> {
         (groups.get(key) || groups.set(key, []).get(key)!).push(payload);
       }
       for (const [key, groupHits] of groups) {
+        const scannedAt = times.get(key) || key;
+        // Skip if CatalystLog already has a run in the same minute (dual-write duplicate)
+        const minute = scannedAt.slice(0, 16);
+        const already = [...byId.values()].some(
+          (x) => x.scannedAt.slice(0, 16) === minute && !String(x.id).startsWith("prisma_")
+        );
+        if (already) continue;
         const id = `prisma_${key}`;
         if (byId.has(id)) continue;
         byId.set(id, {
           id,
-          scannedAt: times.get(key) || key,
+          scannedAt,
           scanned: groupHits.length,
           saved: groupHits.length,
           pruned: 0,
@@ -371,7 +378,31 @@ export async function listLongScanRuns(): Promise<LongScanRunPayload[]> {
     /* tables may not exist on this deploy */
   }
 
-  return [...byId.values()].sort((a, b) => b.scannedAt.localeCompare(a.scannedAt));
+  // Collapse dual-write / same-minute duplicates (CatalystLog + LongScanHit)
+  const ranked = [...byId.values()].sort((a, b) => {
+    const tcmp = b.scannedAt.localeCompare(a.scannedAt);
+    if (tcmp !== 0) return tcmp;
+    // Prefer non-prisma (CatalystLog) when timestamps equal
+    const ap = String(a.id).startsWith("prisma_") ? 1 : 0;
+    const bp = String(b.id).startsWith("prisma_") ? 1 : 0;
+    return ap - bp;
+  });
+  const seenMinute = new Set<string>();
+  const deduped: LongScanRunPayload[] = [];
+  for (const run of ranked) {
+    const minute = (run.scannedAt || "").slice(0, 16);
+    if (minute && seenMinute.has(minute)) continue;
+    if (minute) seenMinute.add(minute);
+    const hitSeen = new Set<string>();
+    const hits = (run.hits || []).filter((h) => {
+      const s = (h.symbol || "").toUpperCase();
+      if (!s || hitSeen.has(s)) return false;
+      hitSeen.add(s);
+      return true;
+    });
+    deduped.push({ ...run, hits, saved: hits.length });
+  }
+  return deduped;
 }
 
 async function appendRunToLog(run: LongScanRunPayload): Promise<void> {
@@ -412,8 +443,10 @@ export async function deleteLongScanHit(runId: string, symbol: string): Promise<
   let changed = false;
   const next = existing.map((r) => {
     if (r.id !== runId) return r;
-    const hits = r.hits.filter((h) => h.symbol !== symbol);
-    if (hits.length !== r.hits.length) {
+    const hits = (r.hits || []).filter(
+      (h) => h.symbol.toUpperCase() !== String(symbol).toUpperCase()
+    );
+    if (hits.length !== (r.hits || []).length) {
       changed = true;
       return { ...r, hits, saved: hits.length };
     }
@@ -431,6 +464,34 @@ export async function deleteLongScanHit(runId: string, symbol: string): Promise<
   });
   return true;
 }
+
+/** Remove this coin from every run (all listed scan responses). */
+export async function deleteLongScanSymbol(symbol: string): Promise<boolean> {
+  const sym = String(symbol || "").toUpperCase();
+  if (!sym) return false;
+  const existing = await listLongScanRuns();
+  let changed = false;
+  const next = existing.map((r) => {
+    const hits = (r.hits || []).filter((h) => h.symbol.toUpperCase() !== sym);
+    if (hits.length !== (r.hits || []).length) {
+      changed = true;
+      return { ...r, hits, saved: hits.length };
+    }
+    return r;
+  });
+  if (!changed) return false;
+  await prisma.catalystLog.upsert({
+    where: { promptId: LOG_PROMPT_ID },
+    create: {
+      promptId: LOG_PROMPT_ID,
+      category: LOG_CATEGORY,
+      response: serializeLogStore(next),
+    },
+    update: { response: serializeLogStore(next) },
+  });
+  return true;
+}
+
 
 /**
  * Full-watchlist confluence scan (server).
