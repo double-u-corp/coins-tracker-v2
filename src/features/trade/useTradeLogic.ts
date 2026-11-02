@@ -63,6 +63,111 @@ function loadRiskBudget(): RiskBudgetSettings {
   }
 }
 
+/**
+ * A manual unit price always wins: PHP is recorded as price × coins (to the cent),
+ * so the saved price (PHP ÷ coins) comes out as the price you typed.
+ */
+export function phpFromPrice(price: number, coins: number): number {
+  return Math.round(price * coins * 100) / 100;
+}
+
+/** Oldest first; same timestamp (date-only entries share midnight) falls back to id so replay order is stable. */
+export function sortTxChrono<T extends { transactedAt: string; id: number }>(list: T[]): T[] {
+  return [...list].sort(
+    (a, b) =>
+      new Date(a.transactedAt).getTime() - new Date(b.transactedAt).getTime() ||
+      Number(a.id) - Number(b.id)
+  );
+}
+
+/**
+ * first_buy: very first buy of the coin
+ * add:       buy while you still hold some (e.g. sold 1 of 2, then buy 3 more)
+ * rebuy:     buy after you were fully out
+ * trim:      sell that leaves coins in the bag
+ * exit:      sell that takes the balance to zero
+ */
+export type LedgerKind = "first_buy" | "add" | "rebuy" | "trim" | "exit";
+
+export interface LedgerRow {
+  id: number;
+  at: string;
+  type: "buy" | "sell";
+  kind: LedgerKind;
+  coins: number;
+  php: number;
+  price: number;
+  /** Coins held right before / right after this trade. */
+  balanceBefore: number;
+  balanceAfter: number;
+  avgCostBefore: number | null;
+  avgCostAfter: number | null;
+  /** Sells only: proceeds minus avg cost of the coins sold. */
+  realizedPnl: number | null;
+  /** Increments each time you buy from a zero balance. */
+  round: number;
+}
+
+/** Buy/sell ledger for one coin with a running coin balance (oldest first). */
+export function buildCoinLedger(txList: TransactionView[], symbol: string): LedgerRow[] {
+  const EPS = 1e-10;
+  const out: LedgerRow[] = [];
+  let units = 0;
+  let cost = 0;
+  let round = 0;
+  let seen = false;
+
+  for (const t of sortTxChrono(txList.filter((x) => x.symbol === symbol))) {
+    const ty = String(t.type).toLowerCase();
+    if (ty !== "buy" && ty !== "sell") continue;
+    const coins = Number(t.coinAmount) || 0;
+    const php = Number(t.phpAmount) || 0;
+    if (coins <= 0) continue;
+    const price = php / coins;
+
+    const before = units;
+    const avgBefore = units > EPS ? cost / units : null;
+    let kind: LedgerKind;
+    let realized: number | null = null;
+
+    if (ty === "buy") {
+      kind = before > EPS ? "add" : seen ? "rebuy" : "first_buy";
+      if (before <= EPS) round += 1;
+      units += coins;
+      cost += php;
+    } else {
+      const avg = units > EPS ? cost / units : 0;
+      const sold = Math.min(coins, units > EPS ? units : coins);
+      realized = php - avg * sold;
+      units = Math.max(0, units - sold);
+      cost = Math.max(0, cost - avg * sold);
+      if (units < EPS) {
+        units = 0;
+        cost = 0;
+      }
+      kind = units <= 0 ? "exit" : "trim";
+    }
+    seen = true;
+
+    out.push({
+      id: t.id,
+      at: t.transactedAt,
+      type: ty,
+      kind,
+      coins,
+      php,
+      price,
+      balanceBefore: before,
+      balanceAfter: units,
+      avgCostBefore: avgBefore,
+      avgCostAfter: units > EPS ? cost / units : null,
+      realizedPnl: realized,
+      round: Math.max(round, 1),
+    });
+  }
+  return out;
+}
+
 /** Post-trade review prompt for a closed cycle (journal / agent). */
 export function formatCycleReviewPrompt(input: {
   symbol: string;
@@ -147,6 +252,13 @@ export interface CoinAnalytics {
   /** PHP bought / sold so far in the open cycle. */
   openCycleBoughtPhp: number;
   openCycleSoldPhp: number;
+  /** Index of the open cycle (0 when flat). */
+  openCycleIndex: number;
+  /**
+   * Self-check: (realized + unrealized) minus (sold − bought + current value).
+   * ~0 when the books add up; a big number means a missing/edited trade or a stale mark.
+   */
+  pnlCheckGap: number | null;
 }
 
 /**
@@ -215,9 +327,7 @@ export function buildCoinAnalytics(
     return s;
   };
 
-  const sorted = [...txList]
-    .filter((t) => t.symbol && t.symbol !== "PHP")
-    .sort((a, b) => new Date(a.transactedAt).getTime() - new Date(b.transactedAt).getTime());
+  const sorted = sortTxChrono(txList.filter((t) => t.symbol && t.symbol !== "PHP"));
 
   for (const t of sorted) {
     const tType = String(t.type).toLowerCase();
@@ -234,6 +344,18 @@ export function buildCoinAnalytics(
         state.units > 0 &&
         state.cycleBoughtPhp > 0 &&
         state.cycleSoldPhp >= state.cycleBoughtPhp;
+
+      // Orphan residual after a closed cycle (cycleStartAt cleared but dust units left)
+      if (state.units > 0 && state.cycleStartAt == null && !recoveredWhileHolding) {
+        state.cycleIndex += 1;
+        state.cycleStartAt = t.transactedAt;
+        state.cycleBoughtPhp = 0;
+        state.cycleSoldPhp = 0;
+        state.cycleCoinsBought = 0;
+        state.cycleCoinsSold = 0;
+        state.cycleRealizedPnl = 0;
+        // Keep residual cost basis on remaining units; new buy adds below
+      }
 
       // (1) Flat → new cycle
       // (2) Still holding but cost already recovered → freeze prior cycle (free bag snapshot), then new cycle for fresh capital
@@ -260,7 +382,11 @@ export function buildCoinAnalytics(
             closeReason: "recovered_reentry",
             freeCoinsCarried: state.units, // bag before this buy
           });
-          // House-money bag: cost already returned via sells — remaining units carry 0 cost into next cycle
+          // House-money bag: remaining coins carry 0 cost into the next cycle.
+          // The cost basis we drop here was never "realized" by a sell, so book it now.
+          // Without this, Locked P&L is overstated by exactly the dropped cost (and
+          // realized + unrealized stops matching cash in/out).
+          state.realizedPnl -= state.costPhp;
           state.costPhp = 0;
         }
 
@@ -432,12 +558,14 @@ export function buildCoinAnalytics(
       (state?.cycleBoughtPhp ?? 0) > 0 &&
       (state?.cycleSoldPhp ?? 0) >= (state?.cycleBoughtPhp ?? 0);
 
-    // New capital after a recovered_reentry still has cycleStartAt = that new buy → timed.
-    // Pure recovered bag (no new paid capital yet): no hold-day tracking.
-    const positionStart = openCycleCostRecovered ? null : openCycleStartAt || (holdings > 0 ? firstBuyAt : null);
+    // Hold clock = this open cycle only (cycleStartAt). Never fall back to lifetime firstBuyAt
+    // (that showed "Held 35d" after a fresh re-buy on an old first-buy date).
+    const positionStart = openCycleCostRecovered ? null : openCycleStartAt;
     const daysSinceFirstBuy = positionStart
       ? Math.max(0, Math.round((now - new Date(positionStart).getTime()) / (1000 * 60 * 60 * 24)))
-      : null;
+      : holdings > 0
+        ? 0
+        : null;
 
     const isUnderwater =
       holdings > 0 && !openCycleCostRecovered && unrealizedPnl != null ? unrealizedPnl < 0 : false;
@@ -459,6 +587,13 @@ export function buildCoinAnalytics(
 
     const avgDaysToSell =
       state && state.sellCount > 0 ? Math.round(state.sellHoldDaysSum / state.sellCount) : null;
+
+    // Cash-in/cash-out view of P&L; must equal realized + unrealized
+    let pnlCheckGap: number | null = null;
+    if (state) {
+      const cashPnl = state.totalSoldPhp - state.totalBoughtPhp + (holdings > EPS ? (currentValue ?? NaN) : 0);
+      if (Number.isFinite(cashPnl) && totalPnl != null) pnlCheckGap = totalPnl - cashPnl;
+    }
 
     rows.push({
       symbol,
@@ -490,6 +625,8 @@ export function buildCoinAnalytics(
       openCycleRealizedPnl: state?.cycleRealizedPnl ?? 0,
       openCycleBoughtPhp: state?.cycleBoughtPhp ?? 0,
       openCycleSoldPhp: state?.cycleSoldPhp ?? 0,
+      openCycleIndex: state?.cycleIndex ?? 0,
+      pnlCheckGap,
     });
   }
 
@@ -575,8 +712,9 @@ export function useTradeLogic() {
   const [editError, setEditError] = useState<string | null>(null);
   const [editSaving, setEditSaving] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // silent = refresh after a save/delete without swapping the page back to skeletons
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setLoadError(null);
     try {
       const [coinsRes, txRes] = await Promise.all([fetch("/api/coins"), fetch("/api/transactions")]);
@@ -661,16 +799,31 @@ export function useTradeLogic() {
       setSubmitError("Select a coin first");
       return;
     }
-    const amount = Number(phpAmount);
-    if (!phpAmount || Number.isNaN(amount) || amount <= 0) {
+    const coins = Number(coinAmount);
+    const override = Number(customPrice);
+    // Manual price wins over whatever PHP was typed (PHP becomes price × coins)
+    // Buy/sell: price per unit is required and PHP is always price × coins
+    if (!isCashFlow && (!customPrice || Number.isNaN(override) || override <= 0)) {
+      setSubmitError("Enter the price per unit (PHP per coin)");
+      return;
+    }
+    const useOverride = !isCashFlow && override > 0 && coins > 0;
+    const amount = useOverride ? phpFromPrice(override, coins) : Number(phpAmount);
+    if (!useOverride && (!phpAmount || Number.isNaN(amount) || amount <= 0)) {
       setSubmitError("Enter a valid PHP amount greater than 0");
       return;
     }
 
-    const coins = Number(coinAmount);
     if (!isCashFlow && (!coinAmount || Number.isNaN(coins) || coins <= 0)) {
       setSubmitError("Enter a valid number of coins greater than 0");
       return;
+    }
+    if (type === "sell") {
+      const held = coinAnalytics.find((c) => c.symbol === symbol)?.holdings ?? 0;
+      if (coins > held + 1e-8 + held * 1e-9) {
+        setSubmitError(`You only hold ${held} — can't sell ${coins}. Log the missing buy first.`);
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -695,7 +848,7 @@ export function useTradeLogic() {
       setPhpAmount("");
       setCoinAmount("");
       setCustomPrice("");
-      await load();
+      await load(true);
     } catch (err) {
       setSubmitError((err as Error).message);
     } finally {
@@ -715,7 +868,7 @@ export function useTradeLogic() {
         const data = (await res.json()) as { error?: string };
         throw new Error(data.error ?? "Failed to delete transaction");
       }
-      await load();
+      await load(true);
     } catch (err) {
       setSubmitError((err as Error).message);
     } finally {
@@ -743,7 +896,17 @@ export function useTradeLogic() {
     const phpAmountNum = Number(editPhpAmount);
     const priceNum = Number(editPrice);
 
-    if (Number.isNaN(phpAmountNum) || phpAmountNum <= 0) {
+    // If the Price/Unit field was changed, it wins: PHP becomes price × coins
+    const original = transactions.find((t) => t.id === editingId);
+    const origPrice = Number(original?.price);
+    const priceChanged =
+      priceNum > 0 &&
+      coinAmountNum > 0 &&
+      Number.isFinite(origPrice) &&
+      Math.abs(priceNum - origPrice) / Math.max(origPrice, 1e-12) > 1e-9;
+    const phpFinal = priceChanged ? phpFromPrice(priceNum, coinAmountNum) : phpAmountNum;
+
+    if (Number.isNaN(phpFinal) || phpFinal <= 0) {
       setEditError("Enter a valid PHP amount greater than 0");
       return;
     }
@@ -757,7 +920,7 @@ export function useTradeLogic() {
         body: JSON.stringify({
           id: editingId,
           coinAmount: coinAmountNum,
-          phpAmount: phpAmountNum,
+          phpAmount: phpFinal,
           price: !Number.isNaN(priceNum) && priceNum > 0 ? priceNum : undefined,
         }),
       });
@@ -766,7 +929,7 @@ export function useTradeLogic() {
         throw new Error(data.error ?? "Failed to update transaction");
       }
       setEditingId(null);
-      await load();
+      await load(true);
     } catch (err) {
       setEditError((err as Error).message);
     } finally {

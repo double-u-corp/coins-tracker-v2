@@ -8,10 +8,8 @@ import {
   Tooltip,
   CartesianGrid,
   ReferenceLine,
-  Scatter,
   Legend,
 } from "recharts";
-import type { TransactionView } from "@/validators/transactionSchema";
 import { formatPhp, formatCoinAmount } from "@/lib/format";
 
 type ChartPoint = {
@@ -22,10 +20,29 @@ type ChartPoint = {
   close?: number;
 };
 
+/** Structural types — pass buildCoinLedger() rows and the coin's CoinAnalytics straight in. */
+export interface TimelineLedgerRow {
+  at: string;
+  type: "buy" | "sell";
+  coins: number;
+  php: number;
+  balanceAfter: number;
+}
+
+export interface TimelineAnalytics {
+  holdings: number;
+  avgCost: number | null;
+  closedCycles: { cycleIndex: number; startAt: string; endAt: string; realizedPnl: number }[];
+  openCycleStartAt: string | null;
+  openCycleIndex: number;
+  openCycleRealizedPnl: number;
+}
+
 export interface TradeTimelineChartProps {
   symbol: string;
   name?: string;
-  transactions: TransactionView[];
+  ledger: TimelineLedgerRow[]; // oldest first
+  analytics: TimelineAnalytics | null;
 }
 
 type CycleInfo = {
@@ -34,6 +51,17 @@ type CycleInfo = {
   endAt: string | null; // null = still open
   realizedPnl: number;
   status: "open" | "closed";
+};
+
+type DayRow = {
+  day: string;
+  label: string;
+  price: number | null;
+  buy: number | null;
+  sell: number | null;
+  buyMeta?: string;
+  sellMeta?: string;
+  held: number;
 };
 
 function dayKey(iso: string): string {
@@ -45,18 +73,35 @@ function formatDayLabel(isoOrKey: string): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" });
 }
 
-export default function TradeTimelineChart({ symbol, name, transactions }: TradeTimelineChartProps) {
+/** Round up so a trade older than a year still gets a price line behind it (max 5y). */
+function yearsToFetch(firstTradeAt: string | undefined): string {
+  if (!firstTradeAt) return "1.00";
+  const days = (Date.now() - new Date(firstTradeAt).getTime()) / 86_400_000;
+  return Math.min(5, Math.max(1, Math.ceil(((days + 14) / 365) * 4) / 4)).toFixed(2);
+}
+
+function markerDot(color: string) {
+  // eslint-disable-next-line react/display-name
+  return (props: any) => {
+    const { cx, cy, value, index } = props;
+    if (value == null || cx == null || cy == null) return <g key={`m-${index}`} />;
+    return <circle key={`m-${index}`} cx={cx} cy={cy} r={5} fill={color} stroke="#fff" strokeWidth={1.5} />;
+  };
+}
+
+export default function TradeTimelineChart({ symbol, name, ledger, analytics }: TradeTimelineChartProps) {
   const [pricePoints, setPricePoints] = useState<ChartPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const years = yearsToFetch(ledger[0]?.at);
 
   useEffect(() => {
     if (!symbol) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
-    // ~1 year daily is enough for trade markers without a huge payload
-    fetch(`/api/coins?type=chart&symbol=${encodeURIComponent(symbol)}&years=1.00&granularity=daily`)
+    fetch(`/api/coins?type=chart&symbol=${encodeURIComponent(symbol)}&years=${years}&granularity=daily`)
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to load price history (${res.status})`);
         return res.json();
@@ -73,171 +118,111 @@ export default function TradeTimelineChart({ symbol, name, transactions }: Trade
     return () => {
       cancelled = true;
     };
-  }, [symbol]);
+  }, [symbol, years]);
 
-  const coinTxs = useMemo(() => {
-    return transactions
-      .filter((t) => t.symbol === symbol)
-      .filter((t) => {
-        const ty = t.type.toLowerCase();
-        return ty === "buy" || ty === "sell";
-      })
-      .sort((a, b) => new Date(a.transactedAt).getTime() - new Date(b.transactedAt).getTime());
-  }, [transactions, symbol]);
-
-  const { cycles, lastSellPrice, openAvgCost, currentUnits } = useMemo(() => {
-    let units = 0;
-    let cost = 0;
-    let realizedInCycle = 0;
-    let cycleStart: string | null = null;
-    const cyclesOut: CycleInfo[] = [];
-    let cycleIdx = 0;
-    let lastSell: number | null = null;
-
-    for (const t of coinTxs) {
-      const ty = t.type.toLowerCase();
-      const coins = Number(t.coinAmount) || 0;
-      const php = Number(t.phpAmount) || 0;
-      const price = coins > 0 ? php / coins : Number(t.price) || 0;
-
-      if (ty === "buy" && coins > 0) {
-        if (units <= 0) {
-          cycleStart = t.transactedAt;
-          realizedInCycle = 0;
-          cycleIdx += 1;
-        }
-        units += coins;
-        cost += php;
-      } else if (ty === "sell" && coins > 0) {
-        const avg = units > 0 ? cost / units : 0;
-        const sold = Math.min(coins, units > 0 ? units : coins);
-        const realized = php - avg * sold;
-        realizedInCycle += realized;
-        units = Math.max(0, units - sold);
-        cost = Math.max(0, cost - avg * sold);
-        if (units < 1e-12) {
-          units = 0;
-          cost = 0;
-        }
-        lastSell = price;
-        if (units <= 0 && cycleStart) {
-          cyclesOut.push({
-            index: cycleIdx,
-            startAt: cycleStart,
-            endAt: t.transactedAt,
-            realizedPnl: realizedInCycle,
-            status: "closed",
-          });
-          cycleStart = null;
-          realizedInCycle = 0;
-        }
-      }
-    }
-
-    if (units > 0 && cycleStart) {
-      cyclesOut.push({
-        index: cycleIdx,
-        startAt: cycleStart,
+  // Cycles come from the same replay as the cards (no second, slightly different walk here)
+  const cycles = useMemo<CycleInfo[]>(() => {
+    if (!analytics) return [];
+    const out: CycleInfo[] = analytics.closedCycles.map((c) => ({
+      index: c.cycleIndex,
+      startAt: c.startAt,
+      endAt: c.endAt,
+      realizedPnl: c.realizedPnl,
+      status: "closed",
+    }));
+    if (analytics.holdings > 0 && analytics.openCycleStartAt) {
+      out.push({
+        index: analytics.openCycleIndex,
+        startAt: analytics.openCycleStartAt,
         endAt: null,
-        realizedPnl: realizedInCycle,
+        realizedPnl: analytics.openCycleRealizedPnl,
         status: "open",
       });
     }
+    return out;
+  }, [analytics]);
 
-    return {
-      cycles: cyclesOut,
-      lastSellPrice: lastSell,
-      openAvgCost: units > 0 && cost > 0 ? cost / units : null,
-      currentUnits: units,
-    };
-  }, [coinTxs]);
+  const holdings = analytics?.holdings ?? 0;
+  const openAvgCost = holdings > 0 ? (analytics?.avgCost ?? null) : null;
+  const lastSellRow = useMemo(() => [...ledger].reverse().find((r) => r.type === "sell") ?? null, [ledger]);
+  const lastSellPrice = lastSellRow && lastSellRow.coins > 0 ? lastSellRow.php / lastSellRow.coins : null;
 
-  const chartData = useMemo(() => {
-    // Map price by calendar day
-    const byDay = new Map<
-      string,
-      {
-        day: string;
-        label: string;
-        price: number | null;
-        buy: number | null;
-        sell: number | null;
-        buyMeta?: string;
-        sellMeta?: string;
-      }
-    >();
+  const chartData = useMemo<DayRow[]>(() => {
+    const byDay = new Map<string, DayRow>();
 
     for (const p of pricePoints) {
-      const raw = p.period || p.label;
-      const key = dayKey(raw);
+      const key = dayKey(p.period || p.label);
       const mid =
         typeof p.close === "number"
           ? p.close
           : p.high != null && p.low != null
             ? (Number(p.high) + Number(p.low)) / 2
             : null;
-      byDay.set(key, {
-        day: key,
-        label: formatDayLabel(key),
-        price: mid,
-        buy: null,
-        sell: null,
-      });
+      byDay.set(key, { day: key, label: formatDayLabel(key), price: mid, buy: null, sell: null, held: 0 });
     }
-
-    // Ensure trade days exist even if price series missed that day
-    for (const t of coinTxs) {
-      const key = dayKey(t.transactedAt);
+    for (const r of ledger) {
+      const key = dayKey(r.at);
       if (!byDay.has(key)) {
-        byDay.set(key, {
-          day: key,
-          label: formatDayLabel(key),
-          price: null,
-          buy: null,
-          sell: null,
-        });
+        byDay.set(key, { day: key, label: formatDayLabel(key), price: null, buy: null, sell: null, held: 0 });
       }
     }
 
-    for (const t of coinTxs) {
-      const key = dayKey(t.transactedAt);
+    // Several trades on one day → one marker at the weighted average, with the total size
+    const agg = new Map<string, { buyCoins: number; buyPhp: number; buyN: number; sellCoins: number; sellPhp: number; sellN: number; heldAfter: number }>();
+    for (const r of ledger) {
+      const key = dayKey(r.at);
+      const a = agg.get(key) ?? { buyCoins: 0, buyPhp: 0, buyN: 0, sellCoins: 0, sellPhp: 0, sellN: 0, heldAfter: 0 };
+      if (r.type === "buy") {
+        a.buyCoins += r.coins;
+        a.buyPhp += r.php;
+        a.buyN += 1;
+      } else {
+        a.sellCoins += r.coins;
+        a.sellPhp += r.php;
+        a.sellN += 1;
+      }
+      a.heldAfter = r.balanceAfter; // ledger is chronological → last write wins
+      agg.set(key, a);
+    }
+    for (const [key, a] of agg) {
       const row = byDay.get(key)!;
-      const coins = Number(t.coinAmount) || 0;
-      const php = Number(t.phpAmount) || 0;
-      const px = coins > 0 ? php / coins : Number(t.price) || 0;
-      const ty = t.type.toLowerCase();
-      if (ty === "buy") {
-        row.buy = px;
-        row.buyMeta = `Buy ${formatCoinAmount(coins)} @ ${formatPhp(px)}`;
-        if (row.price == null) row.price = px;
-      } else if (ty === "sell") {
-        row.sell = px;
-        row.sellMeta = `Sell ${formatCoinAmount(coins)} @ ${formatPhp(px)}`;
-        if (row.price == null) row.price = px;
+      if (a.buyCoins > 0) {
+        row.buy = a.buyPhp / a.buyCoins;
+        row.buyMeta = `Buy ${formatCoinAmount(a.buyCoins)} @ ${formatPhp(row.buy)}${a.buyN > 1 ? ` (${a.buyN} buys)` : ""}`;
+        if (row.price == null) row.price = row.buy;
+      }
+      if (a.sellCoins > 0) {
+        row.sell = a.sellPhp / a.sellCoins;
+        row.sellMeta = `Sell ${formatCoinAmount(a.sellCoins)} @ ${formatPhp(row.sell)}${a.sellN > 1 ? ` (${a.sellN} sells)` : ""}`;
+        if (row.price == null) row.price = row.sell;
       }
     }
 
-    return Array.from(byDay.values()).sort((a, b) => a.day.localeCompare(b.day));
-  }, [pricePoints, coinTxs]);
+    // Coins held over time: carry the balance forward between trades
+    const rows = Array.from(byDay.values()).sort((a, b) => a.day.localeCompare(b.day));
+    let held = 0;
+    for (const row of rows) {
+      const a = agg.get(row.day);
+      if (a) held = a.heldAfter;
+      row.held = held;
+    }
+    return rows;
+  }, [pricePoints, ledger]);
 
   const openCycle = cycles.find((c) => c.status === "open");
   const lastClosed = [...cycles].reverse().find((c) => c.status === "closed");
 
   if (!symbol) {
-    return (
-      <p className="py-6 text-center text-sm text-gray-500">Select a coin to view its trade timeline.</p>
-    );
+    return <p className="py-6 text-center text-sm text-gray-500">Select a coin to view its trade timeline.</p>;
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm space-y-3">
+    <div className="space-y-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h3 className="text-sm font-semibold text-gray-900">
-            Trade timeline — {name || symbol}
-          </h3>
+          <h3 className="text-sm font-semibold text-gray-900">Trade timeline — {name || symbol}</h3>
           <p className="text-[11px] text-gray-400">
-            Price line with 🟢 buy and 🔴 sell markers. Full exit starts a new cycle when you buy again.
+            Price line with 🟢 buy and 🔴 sell markers. The grey step line is how many coins you held (right axis).
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-[11px]">
@@ -245,7 +230,7 @@ export default function TradeTimelineChart({ symbol, name, transactions }: Trade
             <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-800">
               Cycle {openCycle.index} open
               {openAvgCost != null ? ` · avg ${formatPhp(openAvgCost)}` : ""}
-              {currentUnits > 0 ? ` · ${formatCoinAmount(currentUnits)} held` : ""}
+              {holdings > 0 ? ` · ${formatCoinAmount(holdings)} held` : ""}
             </span>
           )}
           {!openCycle && lastClosed && (
@@ -271,10 +256,11 @@ export default function TradeTimelineChart({ symbol, name, transactions }: Trade
       ) : (
         <div className="h-72 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+            <ComposedChart data={chartData} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
               <XAxis dataKey="label" tick={{ fontSize: 10 }} stroke="#9ca3af" minTickGap={28} />
               <YAxis
+                yAxisId="price"
                 tick={{ fontSize: 10 }}
                 stroke="#9ca3af"
                 width={52}
@@ -283,6 +269,16 @@ export default function TradeTimelineChart({ symbol, name, transactions }: Trade
                   Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : Number(v).toFixed(v < 10 ? 2 : 0)
                 }
               />
+              <YAxis
+                yAxisId="held"
+                orientation="right"
+                tick={{ fontSize: 10 }}
+                stroke="#cbd5e1"
+                width={40}
+                domain={[0, "auto"]}
+                allowDecimals
+                tickFormatter={(v) => formatCoinAmount(Number(v))}
+              />
               <Tooltip content={<TimelineTooltip />} />
               <Legend
                 wrapperStyle={{ fontSize: 12 }}
@@ -290,9 +286,22 @@ export default function TradeTimelineChart({ symbol, name, transactions }: Trade
                   { value: "Price", type: "line", color: "#6366f1" },
                   { value: "Buy", type: "circle", color: "#16a34a" },
                   { value: "Sell", type: "circle", color: "#dc2626" },
+                  { value: "Coins held", type: "line", color: "#94a3b8" },
                 ]}
               />
               <Line
+                yAxisId="held"
+                type="stepAfter"
+                dataKey="held"
+                name="Coins held"
+                stroke="#94a3b8"
+                strokeWidth={1.25}
+                dot={false}
+                activeDot={false}
+                isAnimationActive={false}
+              />
+              <Line
+                yAxisId="price"
                 type="monotone"
                 dataKey="price"
                 name="Price"
@@ -301,10 +310,29 @@ export default function TradeTimelineChart({ symbol, name, transactions }: Trade
                 dot={false}
                 connectNulls
               />
-              <Scatter dataKey="buy" name="Buy" fill="#16a34a" line={false} shape="circle" />
-              <Scatter dataKey="sell" name="Sell" fill="#dc2626" line={false} shape="circle" />
+              <Line
+                yAxisId="price"
+                dataKey="buy"
+                name="Buy"
+                stroke="none"
+                dot={markerDot("#16a34a")}
+                activeDot={false}
+                isAnimationActive={false}
+                legendType="none"
+              />
+              <Line
+                yAxisId="price"
+                dataKey="sell"
+                name="Sell"
+                stroke="none"
+                dot={markerDot("#dc2626")}
+                activeDot={false}
+                isAnimationActive={false}
+                legendType="none"
+              />
               {openAvgCost != null && (
                 <ReferenceLine
+                  yAxisId="price"
                   y={openAvgCost}
                   stroke="#f59e0b"
                   strokeDasharray="4 4"
@@ -313,15 +341,11 @@ export default function TradeTimelineChart({ symbol, name, transactions }: Trade
               )}
               {lastSellPrice != null && !openCycle && (
                 <ReferenceLine
+                  yAxisId="price"
                   y={lastSellPrice}
                   stroke="#f97316"
                   strokeDasharray="4 4"
-                  label={{
-                    value: "Last exit (re-entry)",
-                    fill: "#ea580c",
-                    fontSize: 10,
-                    position: "insideTopLeft",
-                  }}
+                  label={{ value: "Last exit (re-entry)", fill: "#ea580c", fontSize: 10, position: "insideTopLeft" }}
                 />
               )}
             </ComposedChart>
@@ -333,7 +357,7 @@ export default function TradeTimelineChart({ symbol, name, transactions }: Trade
         <div className="flex flex-wrap gap-2 border-t border-gray-100 pt-3">
           {cycles.map((c) => (
             <div
-              key={c.index}
+              key={`${c.index}-${c.startAt}`}
               className={`rounded-md border px-2.5 py-1.5 text-[11px] ${
                 c.status === "open"
                   ? "border-emerald-200 bg-emerald-50 text-emerald-900"
@@ -345,7 +369,7 @@ export default function TradeTimelineChart({ symbol, name, transactions }: Trade
               {formatDayLabel(c.startAt)}
               {c.endAt ? ` → ${formatDayLabel(c.endAt)}` : " → now"}
               {c.status === "closed" && (
-                <span className={c.realizedPnl >= 0 ? " text-green-700 font-semibold" : " text-red-700 font-semibold"}>
+                <span className={c.realizedPnl >= 0 ? " font-semibold text-green-700" : " font-semibold text-red-700"}>
                   {" "}
                   · {c.realizedPnl >= 0 ? "+" : ""}
                   {formatPhp(c.realizedPnl)}
@@ -362,23 +386,23 @@ export default function TradeTimelineChart({ symbol, name, transactions }: Trade
 
 function TimelineTooltip({ active, payload }: any) {
   if (!active || !payload?.length) return null;
-  const row = payload[0]?.payload;
+  const row = payload[0]?.payload as DayRow | undefined;
   if (!row) return null;
   return (
-    <div className="rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs shadow-md max-w-[220px]">
-      <div className="mb-1 font-semibold text-gray-700 border-b border-gray-100 pb-1">{row.label}</div>
+    <div className="max-w-[220px] rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs shadow-md">
+      <div className="mb-1 border-b border-gray-100 pb-1 font-semibold text-gray-700">{row.label}</div>
       {row.price != null && (
         <div className="flex justify-between gap-3 text-gray-600">
           <span>Price</span>
           <span className="font-semibold text-gray-900">{formatPhp(row.price)}</span>
         </div>
       )}
-      {row.buy != null && (
-        <div className="mt-1 text-emerald-700 font-medium">{row.buyMeta ?? `Buy @ ${formatPhp(row.buy)}`}</div>
-      )}
-      {row.sell != null && (
-        <div className="mt-1 text-red-700 font-medium">{row.sellMeta ?? `Sell @ ${formatPhp(row.sell)}`}</div>
-      )}
+      <div className="flex justify-between gap-3 text-gray-600">
+        <span>Holding</span>
+        <span className="font-semibold text-gray-900">{formatCoinAmount(row.held)}</span>
+      </div>
+      {row.buy != null && <div className="mt-1 font-medium text-emerald-700">{row.buyMeta}</div>}
+      {row.sell != null && <div className="mt-1 font-medium text-red-700">{row.sellMeta}</div>}
     </div>
   );
 }

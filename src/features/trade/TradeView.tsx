@@ -3,7 +3,14 @@ import Link from "next/link";
 import Dropdown from "@/components/Dropdown";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp, formatCoinAmount } from "@/lib/format";
-import { useTradeLogic, TradeType, formatCycleReviewPrompt } from "./useTradeLogic";
+import { useTradeLogic, TradeType, formatCycleReviewPrompt, buildCoinLedger, phpFromPrice } from "./useTradeLogic";
+import CoinLedger from "./CoinLedger";
+import TradeTimelineChart from "./TradeTimelineChart"; // adjust path if the chart lives elsewhere
+
+/** Number -> string safe for an <input type="number"> (no 0.30000000000000004). */
+function fmtInput(n: number): string {
+  return String(Number(n.toPrecision(12)));
+}
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -33,7 +40,6 @@ export default function TradeView() {
   const {
     coinOptions,
     transactions,
-    portfolio,
     loading,
     loadError,
     type,
@@ -172,11 +178,46 @@ export default function TradeView() {
     };
   }, [coinAnalytics]);
 
-  const selectedCoinOnHand = useMemo(() => {
-    if (isCashFlow || !symbol) return 0;
-    const found = portfolio.find((p) => p.symbol === symbol);
-    return found ? found.holdings : 0;
-  }, [portfolio, symbol, isCashFlow]);
+  // Holdings come from the same tx replay as the cards (server portfolio can be stale)
+  const selectedAnalytics = useMemo(
+    () => (symbol ? coinAnalytics.find((c) => c.symbol === symbol) ?? null : null),
+    [coinAnalytics, symbol]
+  );
+  const selectedCoinOnHand = isCashFlow ? 0 : selectedAnalytics?.holdings ?? 0;
+
+  const ledgerRows = useMemo(() => (symbol ? buildCoinLedger(transactions, symbol) : []), [transactions, symbol]);
+  const selectedName =
+    selectedAnalytics?.name || coinOptions.find((c) => c.symbol === symbol)?.name || symbol;
+  const lastBuyRow = useMemo(() => [...ledgerRows].reverse().find((r) => r.type === "buy") ?? null, [ledgerRows]);
+  const lastSellRow = useMemo(() => [...ledgerRows].reverse().find((r) => r.type === "sell") ?? null, [ledgerRows]);
+
+  // Live preview of the trade being typed
+  const preview = useMemo(() => {
+    if (isCashFlow || !symbol) return null;
+    const coins = Number(coinAmount);
+    const override = Number(customPrice);
+    const php = override > 0 && coins > 0 ? phpFromPrice(override, coins) : Number(phpAmount);
+    if (!coins || coins <= 0) return null;
+    const held = selectedCoinOnHand;
+    const avg = selectedAnalytics?.avgCost ?? null;
+    if (type === "buy") {
+      const after = held + coins;
+      const costBefore = avg != null ? avg * held : 0;
+      const avgAfter = php > 0 ? (costBefore + php) / after : null;
+      return { kind: "buy" as const, held, after, avgAfter, realized: null as number | null };
+    }
+    if (type === "sell") {
+      const after = Math.max(0, held - coins);
+      const realized = php > 0 && avg != null ? php - avg * Math.min(coins, held) : null;
+      return { kind: "sell" as const, held, after, avgAfter: null as number | null, realized };
+    }
+    return null;
+  }, [isCashFlow, symbol, coinAmount, phpAmount, customPrice, type, selectedCoinOnHand, selectedAnalytics]);
+
+  const jumpToHistory = (sym: string) => {
+    setSymbol(sym);
+    setTimeout(() => document.getElementById("coin-history")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  };
 
   return (
     <div className="flex flex-col gap-8">
@@ -215,27 +256,23 @@ export default function TradeView() {
             />
           )}
 
-          <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
-            <span>
-              {type === "buy"
-                ? "PHP amount spent"
-                : type === "sell"
-                ? "PHP amount received"
-                : type === "deposit"
-                ? "PHP Deposited"
-                : "PHP Withdrawn"}
-            </span>
-            <input
-              type="number"
-              inputMode="decimal"
-              min="0"
-              step="0.01"
-              value={phpAmount}
-              onChange={(e) => setPhpAmount(e.target.value)}
-              placeholder="e.g. 1000"
-              className="w-full max-w-xs rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-            />
-          </label>
+          {isCashFlow && (
+            <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
+              <span>
+                {type === "deposit" ? "PHP Deposited" : "PHP Withdrawn"}
+              </span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                value={phpAmount}
+                onChange={(e) => setPhpAmount(e.target.value)}
+                placeholder="e.g. 1000"
+                className="w-full max-w-xs rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
+            </label>
+          )}
 
           {!isCashFlow && (
             <>
@@ -246,7 +283,7 @@ export default function TradeView() {
                     (type === "sell" ? (
                       <button
                         type="button"
-                        onClick={() => setCoinAmount(selectedCoinOnHand.toString())}
+                        onClick={() => setCoinAmount(fmtInput(selectedCoinOnHand))}
                         className="text-xs font-semibold text-blue-600 hover:underline"
                       >
                         Max: {formatCoinAmount(selectedCoinOnHand)}
@@ -270,16 +307,36 @@ export default function TradeView() {
               </label>
 
               <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
-                <span>Price / Unit Override (Optional)</span>
+                <span>
+                  {type === "buy" ? "Buy price / unit" : "Sell price / unit"}{" "}
+                  <span className="text-red-600" aria-hidden="true">*</span>
+                </span>
                 <input
                   type="number"
                   inputMode="decimal"
                   min="0"
                   step="any"
+                  required
                   value={customPrice}
                   onChange={(e) => setCustomPrice(e.target.value)}
-                  placeholder="Fix inaccurate API price"
+                  placeholder="PHP per coin, e.g. 247500"
                   className="w-full max-w-xs rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                />
+              </label>
+
+              <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
+                <span>{type === "buy" ? "Total spent (PHP)" : "Total received (PHP)"}</span>
+                <input
+                  type="text"
+                  readOnly
+                  tabIndex={-1}
+                  value={
+                    Number(coinAmount) > 0 && Number(customPrice) > 0
+                      ? formatPhp(phpFromPrice(Number(customPrice), Number(coinAmount)))
+                      : ""
+                  }
+                  placeholder="price × coins"
+                  className="w-full max-w-xs cursor-default rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold tabular-nums text-gray-700 shadow-sm"
                 />
               </label>
             </>
@@ -322,6 +379,96 @@ export default function TradeView() {
               variant="success"
               message={`Successfully recorded ${lastTransaction.type} of ${formatPhp(lastTransaction.phpAmount)}.`}
             />
+          </div>
+        )}
+
+        {!isCashFlow && symbol && (type === "buy" || type === "sell") && (
+          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-xs text-slate-700">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="font-semibold text-slate-900">
+                {selectedName}: holding{" "}
+                <span className="tabular-nums">{formatCoinAmount(selectedCoinOnHand)}</span>
+                {selectedCoinOnHand > 0 && selectedAnalytics?.avgCost != null && (
+                  <span className="font-normal text-slate-500"> · avg {formatPhp(selectedAnalytics.avgCost)}</span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => jumpToHistory(symbol)}
+                className="text-[11px] font-bold text-violet-700 hover:underline"
+              >
+                Full history ↓
+              </button>
+            </div>
+
+            <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-slate-500">
+              {lastBuyRow ? (
+                <span>
+                  Last buy: <b className="tabular-nums text-slate-700">{formatCoinAmount(lastBuyRow.coins)}</b> @{" "}
+                  {formatPhp(lastBuyRow.price)} · had{" "}
+                  <b className="tabular-nums text-slate-700">{formatCoinAmount(lastBuyRow.balanceBefore)}</b> before it
+                </span>
+              ) : (
+                <span>No buys yet</span>
+              )}
+              {lastSellRow && (
+                <span>
+                  Last sell: <b className="tabular-nums text-slate-700">{formatCoinAmount(lastSellRow.coins)}</b> @{" "}
+                  {formatPhp(lastSellRow.price)}
+                </span>
+              )}
+            </div>
+
+            {type === "sell" && selectedCoinOnHand > 0 && (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Quick size</span>
+                {lastBuyRow && (
+                  <button
+                    type="button"
+                    onClick={() => setCoinAmount(fmtInput(Math.min(lastBuyRow.coins, selectedCoinOnHand)))}
+                    className="rounded-full bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-100"
+                  >
+                    Last buy size ({formatCoinAmount(Math.min(lastBuyRow.coins, selectedCoinOnHand))})
+                  </button>
+                )}
+                {[0.25, 0.5].map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setCoinAmount(fmtInput(selectedCoinOnHand * f))}
+                    className="rounded-full bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-100"
+                  >
+                    {f * 100}%
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setCoinAmount(fmtInput(selectedCoinOnHand))}
+                  className="rounded-full bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-100"
+                >
+                  All
+                </button>
+              </div>
+            )}
+
+            {preview && (
+              <div
+                className={`mt-2 rounded-lg px-2.5 py-1.5 font-semibold tabular-nums ${
+                  preview.kind === "buy" ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-800"
+                }`}
+              >
+                After this {preview.kind}: {formatCoinAmount(preview.held)} → {formatCoinAmount(preview.after)} coins
+                {preview.kind === "buy" && preview.avgAfter != null && ` · new avg ${formatPhp(preview.avgAfter)}`}
+                {preview.kind === "sell" && preview.realized != null && (
+                  <>
+                    {" "}
+                    · {preview.realized >= 0 ? "+" : ""}
+                    {formatPhp(preview.realized)} realized
+                  </>
+                )}
+                {preview.kind === "sell" && preview.after === 0 && " · closes the position"}
+              </div>
+            )}
           </div>
         )}
       </section>
@@ -543,6 +690,13 @@ export default function TradeView() {
                           >
                             Chart
                           </Link>
+                          <button
+                            type="button"
+                            onClick={() => jumpToHistory(c.symbol)}
+                            className="text-[10px] font-bold text-sky-700 hover:underline"
+                          >
+                            History
+                          </button>
                         </div>
                       </div>
                       <div className="grid grid-cols-4 gap-px bg-slate-100 text-center">
@@ -592,24 +746,18 @@ export default function TradeView() {
                               ? `${c.unrealizedPnl >= 0 ? "+" : ""}${formatPhp(c.unrealizedPnl)}`
                               : "—"}
                           </div>
+                          {c.holdings > 0 && c.currentPrice != null && (
+                            <div className="mt-0.5 truncate text-[9px] font-medium tabular-nums text-slate-400">
+                              now {formatPhp(c.currentPrice)}
+                            </div>
+                          )}
                         </div>
                       </div>
-                      <div className="flex items-center justify-between px-3 py-1.5 text-[10px]">
-                        <span className="text-slate-400">
-                          Locked{" "}
-                          <span
-                            className={`font-bold ${
-                              c.realizedPnl >= 0 ? "text-emerald-600" : "text-rose-600"
-                            }`}
-                          >
-                            {c.realizedPnl >= 0 ? "+" : ""}
-                            {formatPhp(c.realizedPnl)}
-                          </span>
-                        </span>
-                        {(c.closedCycles?.length ?? 0) > 0 && (
-                          <span className="font-medium text-slate-400">{c.closedCycles.length}× closed</span>
-                        )}
-                      </div>
+                      {(c.closedCycles?.length ?? 0) > 0 && (
+                        <div className="px-3 py-1.5 text-right text-[10px] font-medium text-slate-400">
+                          {c.closedCycles.length}× closed
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -752,6 +900,44 @@ export default function TradeView() {
               </div>
             );
           })()
+        )}
+      </section>
+
+      {/* —— Per-coin history: balance before/after every buy and sell —— */}
+      <section id="coin-history" className="scroll-mt-4 space-y-3">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2 className="text-base font-bold tracking-tight text-slate-900">Coin history</h2>
+            <p className="text-[11px] text-slate-500">
+              Every buy and sell with the coins you held before and after — see what was left before you re-buy.
+            </p>
+          </div>
+          <select
+            value={symbol}
+            onChange={(e) => setSymbol(e.target.value)}
+            className="rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm"
+          >
+            {coinOptions.map((c) => (
+              <option key={c.symbol} value={c.symbol}>
+                {c.name} ({c.symbol})
+              </option>
+            ))}
+          </select>
+        </div>
+        {loading ? (
+          <TableSkeleton />
+        ) : !symbol ? (
+          <p className="text-sm text-gray-500">Select a coin to see its history.</p>
+        ) : (
+          <>
+            <TradeTimelineChart
+              symbol={symbol}
+              name={selectedName}
+              ledger={ledgerRows}
+              analytics={selectedAnalytics}
+            />
+            <CoinLedger symbol={symbol} name={selectedName} rows={ledgerRows} />
+          </>
         )}
       </section>
 
