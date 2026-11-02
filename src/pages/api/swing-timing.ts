@@ -179,9 +179,9 @@ function directionStats(signed: number[]) {
     upCount: ups.length,
     downCount: downs.length,
     upSharePct: Number((n > 0 ? (ups.length / n) * 100 : 0).toFixed(1)),
-    avgUpPct: Number((ups.length ? ups.reduce((a, b) => a + b, 0) / ups.length : 0).toFixed(3)),
+    avgUpPct: Number((ups.length ? ups.reduce((a: number, b: number) => a + b, 0) / ups.length : 0).toFixed(3)),
     avgDownPct: Number(
-      (downs.length ? downs.reduce((a, b) => a + Math.abs(b), 0) / downs.length : 0).toFixed(3)
+      (downs.length ? downs.reduce((a: number, b: number) => a + Math.abs(b), 0) / downs.length : 0).toFixed(3)
     ),
   };
 }
@@ -431,10 +431,10 @@ export default async function handler(
       if (!wd) return null;
       const coinMap = signedByWeekdayCoin.get(d) || new Map();
       const coinStats = [...coinMap.entries()]
-        .map(([symbol, arr]) => {
+        .map(([symbol, arr]: [string, number[]]) => {
           const dir = directionStats(arr);
           const avgSigned =
-            arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+            arr.length > 0 ? arr.reduce((a: number, b: number) => a + b, 0) / arr.length : 0;
           return {
             symbol,
             name: nameBySym.get(symbol) || symbol,
@@ -470,7 +470,7 @@ export default async function handler(
       const signed = signedByWeekday.get(d) || [];
       const avgSignedPct =
         signed.length > 0
-          ? Number((signed.reduce((a, b) => a + b, 0) / signed.length).toFixed(3))
+          ? Number((signed.reduce((a: number, b: number) => a + b, 0) / signed.length).toFixed(3))
           : 0;
 
       return {
@@ -500,7 +500,7 @@ export default async function handler(
       const arr = signedByWeekdayCoin.get(d)?.get(symbol) || [];
       if (arr.length < MIN_COIN_SAMPLES) continue;
       const dir = directionStats(arr);
-      const avgSigned = arr.reduce((a, b) => a + b, 0) / arr.length;
+      const avgSigned = arr.reduce((a: number, b: number) => a + b, 0) / arr.length;
       let lean: CoinWeekdayBias["lean"] = "mixed";
       if (dir.upSharePct >= 55) lean = "buy-lean";
       else if (dir.upSharePct <= 45) lean = "sell-lean";
@@ -540,7 +540,7 @@ export default async function handler(
       const arr = signedByWeekdayCoin.get(d)?.get(symbol) || [];
       if (arr.length < 1) continue;
       const dir = directionStats(arr);
-      const avgSigned = arr.reduce((a, b) => a + b, 0) / arr.length;
+      const avgSigned = arr.reduce((a: number, b: number) => a + b, 0) / arr.length;
       let lean: "buy-lean" | "sell-lean" | "mixed" = "mixed";
       if (dir.upSharePct >= 55) lean = "buy-lean";
       else if (dir.upSharePct <= 45) lean = "sell-lean";
