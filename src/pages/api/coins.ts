@@ -236,27 +236,101 @@ async function handleChart(
     orderBy: { createdAt: "asc" },
   });
 
-  const buckets = new Map<string, { label: string; high: number; low: number; close: number }>();
+  type BucketAcc = {
+    label: string;
+    high: number;
+    low: number;
+    close: number;
+    open: number;
+    openLocked: boolean; // true once 02:05 (or carried 23:05) set
+  };
+  const buckets = new Map<string, BucketAcc>();
+  /** Manila calendar day (YYYY-MM-DD) → price nearest 23:05 for next-day open carry */
+  const manilaEveningOpen = new Map<string, number>();
+
+  const manilaParts = (d: Date) => {
+    // Asia/Manila = UTC+8 year-round
+    const m = new Date(d.getTime() + 8 * 60 * 60 * 1000);
+    return {
+      day: m.toISOString().slice(0, 10),
+      hour: m.getUTCHours(),
+      minute: m.getUTCMinutes(),
+    };
+  };
+  const nearSlot = (hour: number, minute: number, targetHour: number) => {
+    const mins = hour * 60 + minute;
+    const target = targetHour * 60 + 5;
+    let dist = Math.abs(mins - target);
+    dist = Math.min(dist, 24 * 60 - dist);
+    return dist <= 90; // within ~90 minutes of :05
+  };
+
   for (const record of records) {
     const { period, label } = chartBucketKey(record.createdAt, granularityResult.data);
+    const mp = manilaParts(record.createdAt);
+    const isOpen205 = nearSlot(mp.hour, mp.minute, 2);
+    const isEvening1105 = nearSlot(mp.hour, mp.minute, 23);
+
+    if (isEvening1105) {
+      manilaEveningOpen.set(mp.day, record.price);
+    }
+
     const existing = buckets.get(period);
     if (!existing) {
-      buckets.set(period, { label, high: record.price, low: record.price, close: record.price });
+      // Prefer 02:05 as open when this first print *is* that slot; else first print (may upgrade later)
+      buckets.set(period, {
+        label,
+        high: record.price,
+        low: record.price,
+        close: record.price,
+        open: record.price,
+        openLocked: isOpen205,
+      });
     } else {
       existing.high = Math.max(existing.high, record.price);
       existing.low = Math.min(existing.low, record.price);
-      // Records within a bucket are processed in createdAt-ascending order
-      // (see the query above), so simply overwriting `close` on every
-      // record in this bucket naturally leaves it holding the LAST price
-      // seen once the loop moves past this bucket — a real close, not the
-      // high/low midpoint approximation the rest of the app falls back to
-      // when this field is absent.
       existing.close = record.price;
+      // Lock open on 02:05 Manila when we see it
+      if (isOpen205) {
+        existing.open = record.price;
+        existing.openLocked = true;
+      }
+    }
+  }
+
+  // Carry prior Manila day 23:05 into days that never locked a 02:05 open
+  if (granularityResult.data === "daily") {
+    const sortedPeriods = [...buckets.keys()].sort();
+    for (const period of sortedPeriods) {
+      const b = buckets.get(period)!;
+      if (b.openLocked) continue;
+      // period is UTC date key; try previous calendar day evening map by scanning manilaEveningOpen
+      // Best effort: use any evening print from the previous UTC day key
+      const prev = new Date(period + "T12:00:00.000Z");
+      prev.setUTCDate(prev.getUTCDate() - 1);
+      const prevKey = prev.toISOString().slice(0, 10);
+      // Manila evening on prevKey might be stored under Manila day = prevKey or period-1
+      const evening =
+        manilaEveningOpen.get(prevKey) ??
+        manilaEveningOpen.get(period) ??
+        null;
+      // Also try Manila day before period (UTC period ±1 due to timezone)
+      if (evening != null) {
+        b.open = evening;
+        b.openLocked = true;
+      }
     }
   }
 
   const points: ChartPoint[] = Array.from(buckets.entries())
-    .map(([period, { label, high, low, close }]) => ({ period, label, high, low, close }))
+    .map(([period, { label, high, low, close, open }]) => ({
+      period,
+      label,
+      high,
+      low,
+      close,
+      open,
+    }))
     .sort((a, b) => a.period.localeCompare(b.period));
 
   res.status(200).json({ points });

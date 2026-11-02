@@ -296,7 +296,8 @@ export function buildCoinAnalytics(
       state.cycleCoinsSold += sellUnits;
       state.units = Math.max(0, state.units - sellUnits);
       state.costPhp = Math.max(0, state.costPhp - costRemoved);
-      if (state.units < 1e-12) {
+      // Only wipe true float dust — never % of bag (0.5% of XAUT can still be large PHP)
+      if (state.units > 0 && state.units < 1e-10) {
         state.units = 0;
         state.costPhp = 0;
       }
@@ -363,8 +364,18 @@ export function buildCoinAnalytics(
 
     const holdingsFromTx = state?.units ?? 0;
     const holdingsFromServer = entry?.holdings != null ? Number(entry.holdings) : 0;
-    // Prefer server holdings when present (source of truth for on-hand)
-    const holdings = holdingsFromServer > 0 || !state ? holdingsFromServer : holdingsFromTx;
+    /**
+     * Prefer transaction replay when we have buy/sell history.
+     * Server portfolio was preferred before and kept sold coins (e.g. XAUT) as "held"
+     * when the portfolio row was stale or residual.
+     */
+    const EPS = 1e-8;
+    let holdings: number;
+    if (state) {
+      holdings = holdingsFromTx > EPS ? holdingsFromTx : 0;
+    } else {
+      holdings = holdingsFromServer > EPS ? holdingsFromServer : 0;
+    }
 
     const costPhp = state?.costPhp ?? 0;
     const avgCost =
@@ -374,10 +385,22 @@ export function buildCoinAnalytics(
           ? Number(entry.spent) / holdings
           : null;
 
-    const currentValue =
+    // Server mark is often based on server holdings — scale to tx holdings when both known
+    let currentValue: number | null =
       entry?.currentValue != null && !Number.isNaN(Number(entry.currentValue))
         ? Number(entry.currentValue)
         : null;
+    if (
+      currentValue != null &&
+      holdingsFromServer > EPS &&
+      holdings > EPS &&
+      Math.abs(holdingsFromServer - holdings) / holdingsFromServer > 0.01
+    ) {
+      currentValue = currentValue * (holdings / holdingsFromServer);
+    }
+    if (holdings <= EPS) {
+      currentValue = null;
+    }
     const currentPrice =
       holdings > 0 && currentValue != null
         ? currentValue / holdings
@@ -401,7 +424,7 @@ export function buildCoinAnalytics(
 
     const firstBuyAt = state?.firstBuyAt ?? null;
     const openCycleStartAt =
-      state?.cycleStartAt && (state.units > 0 || holdings > 0) ? state.cycleStartAt : null;
+      state?.cycleStartAt && holdings > EPS ? state.cycleStartAt : null;
 
     // House money: this cycle's sells already covered buys. Do not run hold/underwater clocks on free bag.
     const openCycleCostRecovered =

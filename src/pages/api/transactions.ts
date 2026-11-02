@@ -229,13 +229,27 @@ async function handleCreate(req: NextApiRequest, res: NextApiResponse<CreateResp
         select: { type: true, coinAmount: true },
       });
       const currentlyHeld = existing.reduce(
-        (sum, t) => sum + (t.type.toLowerCase() === "buy" ? Number(t.coinAmount) : t.type.toLowerCase() === "sell" ? -Number(t.coinAmount) : 0),
+        (sum, t) =>
+          sum +
+          (t.type.toLowerCase() === "buy"
+            ? Number(t.coinAmount)
+            : t.type.toLowerCase() === "sell"
+              ? -Number(t.coinAmount)
+              : 0),
         0
       );
-      if (finalCoinAmount > currentlyHeld) {
+      // Float tolerance: UI often posts the same 0.17372 that we compute as 0.173719999…
+      const EPS = 1e-8;
+      if (finalCoinAmount > currentlyHeld + EPS) {
         return res.status(400).json({
-          error: `You only hold ${currentlyHeld.toLocaleString(undefined, { maximumFractionDigits: 8 })} ${symbol}, can't sell ${finalCoinAmount}.`,
+          error: `You only hold ${currentlyHeld.toLocaleString(undefined, {
+            maximumFractionDigits: 8,
+          })} ${symbol}, can't sell ${finalCoinAmount}.`,
         });
+      }
+      // Full exit: clamp to exact held so residual dust does not remain
+      if (finalCoinAmount >= currentlyHeld - EPS) {
+        finalCoinAmount = Math.max(0, currentlyHeld);
       }
     }
 

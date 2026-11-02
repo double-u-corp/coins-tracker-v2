@@ -127,16 +127,14 @@ export default function TradeView() {
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [transactions]);
 
-  // Combined single-pass calculation for cash and flow stats
+  // Cash from deposits / sells / buys / withdrawals
   const { totalDeposited, totalWithdrawn, availableCash } = useMemo(() => {
     let dep = 0;
     let wit = 0;
     let cash = 0;
-
     for (const t of transactions) {
       const amt = Number(t.phpAmount) || 0;
       const tType = String(t.type).toLowerCase();
-
       if (tType === "deposit") {
         dep += amt;
         cash += amt;
@@ -149,29 +147,36 @@ export default function TradeView() {
         cash -= amt;
       }
     }
-
     return { totalDeposited: dep, totalWithdrawn: wit, availableCash: cash };
   }, [transactions]);
+
+  // Open crypto mark from analytics (tx-based holdings), not the old per-coin card list
+  const portfolioSnapshot = useMemo(() => {
+    let crypto = 0;
+    let openGl = 0;
+    let spentOpen = 0;
+    let hasGl = false;
+    for (const c of coinAnalytics) {
+      if (!(c.holdings > 0)) continue;
+      if (c.currentValue != null) crypto += c.currentValue;
+      if (c.unrealizedPnl != null) {
+        openGl += c.unrealizedPnl;
+        hasGl = true;
+      }
+      if (c.avgCost != null) spentOpen += c.avgCost * c.holdings;
+    }
+    return {
+      cryptoValue: crypto,
+      openGl: hasGl ? openGl : null,
+      spentOpen,
+    };
+  }, [coinAnalytics]);
 
   const selectedCoinOnHand = useMemo(() => {
     if (isCashFlow || !symbol) return 0;
     const found = portfolio.find((p) => p.symbol === symbol);
     return found ? found.holdings : 0;
   }, [portfolio, symbol, isCashFlow]);
-
-  const portfolioTotals = useMemo(() => {
-    const totalSpent = portfolio.reduce((sum, p) => sum + Math.max(0, p.spent), 0);
-    const totalSold = portfolio.reduce((sum, p) => sum + p.sold, 0);
-    const withKnownPrice = portfolio.filter((p) => p.currentValue !== null && p.gainLoss !== null);
-    
-    const totalCurrentValue =
-      withKnownPrice.length > 0 ? withKnownPrice.reduce((sum, p) => sum + (p.currentValue as number), 0) : null;
-    
-    const totalGainLoss =
-      withKnownPrice.length > 0 ? withKnownPrice.reduce((sum, p) => sum + (p.gainLoss as number), 0) : null;
-
-    return { totalSpent, totalSold, totalCurrentValue, totalGainLoss };
-  }, [portfolio]);
 
   return (
     <div className="flex flex-col gap-8">
@@ -321,144 +326,78 @@ export default function TradeView() {
         )}
       </section>
 
-      {/* —— Snapshot: cash + live holdings —— */}
+      {/* —— Snapshot: cash + totals (no per-coin holdings grid) —— */}
       <section className="space-y-3">
-        <div className="flex items-baseline justify-between gap-2">
-          <div>
-            <h2 className="text-base font-bold tracking-tight text-slate-900">Portfolio &amp; cash</h2>
-            <p className="text-[11px] text-slate-500">Live mark · open holdings only</p>
-          </div>
+        <div>
+          <h2 className="text-base font-bold tracking-tight text-slate-900">Portfolio &amp; cash</h2>
+          <p className="text-[11px] text-slate-500">Live mark · open totals only (per-coin list removed)</p>
         </div>
         {loading ? (
           <OverviewSkeleton />
         ) : (
-          <>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-              <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white px-3 py-2.5 shadow-sm">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Net equity</div>
-                <div className="mt-0.5 text-base font-bold tabular-nums text-slate-900 leading-tight">
-                  {formatPhp(availableCash + (portfolioTotals.totalCurrentValue ?? 0))}
-                </div>
-                <p className="mt-0.5 text-[10px] text-slate-400">Cash + crypto</p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+            <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white px-3 py-2.5 shadow-sm">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Net equity</div>
+              <div className="mt-0.5 text-base font-bold tabular-nums text-slate-900 leading-tight">
+                {formatPhp(availableCash + portfolioSnapshot.cryptoValue)}
               </div>
-              <div className="rounded-xl border border-sky-100 bg-gradient-to-br from-sky-50 to-white px-3 py-2.5 shadow-sm">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Cash</div>
-                <div className={`mt-0.5 text-base font-bold tabular-nums leading-tight ${availableCash < 0 ? "text-rose-600" : "text-sky-600"}`}>
-                  {formatPhp(availableCash)}
-                </div>
-                <p className="mt-1 text-[10px] text-slate-500 leading-snug">
-                  Cash = deposits + <span className="font-semibold">sell proceeds</span> − buys − withdrawals.
-                  You do <span className="font-semibold">not</span> need a deposit to reuse profit — log a{" "}
-                  <span className="font-semibold">sell</span> and proceeds become spendable. ₱0 cash with open bags
-                  means capital is still in coins (sell to free cash).
-                </p>
-                <p className="mt-0.5 text-[10px] text-slate-400 truncate">Net in {formatPhp(totalDeposited - totalWithdrawn)}</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-3 py-2.5 shadow-sm">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Cash flow</div>
-                <div className="mt-1 flex items-center gap-2 text-xs font-bold">
-                  <span className="text-emerald-600">↑ {formatPhp(totalDeposited)}</span>
-                  <span className="text-slate-300">·</span>
-                  <span className="text-amber-600">↓ {formatPhp(totalWithdrawn)}</span>
-                </div>
-              </div>
-              <div className="rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50 to-white px-3 py-2.5 shadow-sm">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Crypto</div>
-                <div className="mt-0.5 text-base font-bold tabular-nums text-violet-700 leading-tight">
-                  {portfolioTotals.totalCurrentValue !== null ? formatPhp(portfolioTotals.totalCurrentValue) : "—"}
-                </div>
-                <p className="mt-0.5 text-[10px] text-slate-400">In {formatPhp(portfolioTotals.totalSpent)}</p>
-              </div>
+              <p className="mt-0.5 text-[10px] text-slate-400">Cash + crypto</p>
+            </div>
+            <div className="rounded-xl border border-sky-100 bg-gradient-to-br from-sky-50 to-white px-3 py-2.5 shadow-sm">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Cash</div>
               <div
-                className={`rounded-xl border bg-gradient-to-br to-white px-3 py-2.5 shadow-sm col-span-2 sm:col-span-1 ${
-                  portfolioTotals.totalGainLoss != null && portfolioTotals.totalGainLoss >= 0
-                    ? "border-emerald-100 from-emerald-50"
-                    : portfolioTotals.totalGainLoss != null
-                    ? "border-rose-100 from-rose-50"
-                    : "border-slate-200 from-slate-50"
+                className={`mt-0.5 text-base font-bold tabular-nums leading-tight ${
+                  availableCash < 0 ? "text-rose-600" : "text-sky-600"
                 }`}
               >
-                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Open G/L</div>
-                <div
-                  className={`mt-0.5 text-base font-bold tabular-nums leading-tight ${
-                    portfolioTotals.totalGainLoss === null
-                      ? "text-slate-400"
-                      : portfolioTotals.totalGainLoss >= 0
-                      ? "text-emerald-600"
-                      : "text-rose-600"
-                  }`}
-                >
-                  {portfolioTotals.totalGainLoss !== null
-                    ? `${portfolioTotals.totalGainLoss >= 0 ? "+" : ""}${formatPhp(portfolioTotals.totalGainLoss)}`
-                    : "—"}
-                </div>
-                <p className="mt-0.5 text-[10px] text-slate-400">Vs net spent</p>
+                {formatPhp(availableCash)}
+              </div>
+              <p className="mt-1 text-[10px] text-slate-500 leading-snug">
+                Cash = deposits + <span className="font-semibold">sell proceeds</span> − buys −
+                withdrawals. You do <span className="font-semibold">not</span> need a deposit to
+                reuse profit — log a <span className="font-semibold">sell</span> and proceeds become
+                spendable. ₱0 cash with open bags means capital is still in coins (sell to free
+                cash).
+              </p>
+              <p className="mt-0.5 text-[10px] text-slate-400 truncate">
+                Net in {formatPhp(totalDeposited - totalWithdrawn)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-3 py-2.5 shadow-sm">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Cash flow</div>
+              <div className="mt-0.5 text-sm font-bold tabular-nums text-slate-800">
+                <span className="text-emerald-600">↑ {formatPhp(totalDeposited)}</span>
+                <span className="text-slate-300"> · </span>
+                <span className="text-rose-600">↓ {formatPhp(totalWithdrawn)}</span>
               </div>
             </div>
-
-            {portfolio.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-slate-200 py-5 text-center text-xs text-slate-400">
-                No open holdings
-              </p>
-            ) : (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {portfolio.map((entry) => {
-                  const displaySpent = Math.max(0, entry.spent);
-                  const gl = entry.gainLoss;
-                  return (
-                    <div
-                      key={entry.symbol}
-                      className="group relative overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:border-slate-300 hover:shadow-md"
-                    >
-                      <div
-                        className={`absolute inset-y-0 left-0 w-1 ${
-                          gl == null ? "bg-slate-200" : gl >= 0 ? "bg-emerald-400" : "bg-rose-400"
-                        }`}
-                      />
-                      <div className="pl-3.5 pr-3 py-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-bold text-slate-900">{entry.name}</div>
-                            <div className="text-[10px] font-medium text-slate-400">{entry.symbol}</div>
-                          </div>
-                          <Link
-                            href={`/chart?symbol=${encodeURIComponent(entry.symbol)}`}
-                            className="shrink-0 rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-bold text-violet-700 hover:bg-violet-100"
-                          >
-                            Chart
-                          </Link>
-                        </div>
-                        <div className="mt-2.5 flex items-end justify-between gap-2">
-                          <div>
-                            <div className="text-[10px] text-slate-400">Holdings</div>
-                            <div className="text-xs font-semibold tabular-nums text-slate-800">
-                              {formatCoinAmount(entry.holdings)}
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-[10px] text-slate-400">Mark</div>
-                            <div className="text-xs font-semibold tabular-nums text-slate-800">
-                              {entry.currentValue !== null ? formatPhp(entry.currentValue) : "—"}
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-[10px] text-slate-400">G/L</div>
-                            <div
-                              className={`text-sm font-bold tabular-nums ${
-                                gl == null ? "text-slate-300" : gl >= 0 ? "text-emerald-600" : "text-rose-600"
-                              }`}
-                            >
-                              {gl != null ? `${gl >= 0 ? "+" : ""}${formatPhp(gl)}` : "—"}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+            <div className="rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50 to-white px-3 py-2.5 shadow-sm">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Crypto</div>
+              <div className="mt-0.5 text-base font-bold tabular-nums text-violet-800 leading-tight">
+                {formatPhp(portfolioSnapshot.cryptoValue)}
               </div>
-            )}
-          </>
+              <p className="mt-0.5 text-[10px] text-slate-400 truncate">
+                In {formatPhp(portfolioSnapshot.spentOpen)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white px-3 py-2.5 shadow-sm">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Open G/L</div>
+              <div
+                className={`mt-0.5 text-base font-bold tabular-nums leading-tight ${
+                  portfolioSnapshot.openGl == null
+                    ? "text-slate-300"
+                    : portfolioSnapshot.openGl >= 0
+                      ? "text-emerald-600"
+                      : "text-rose-600"
+                }`}
+              >
+                {portfolioSnapshot.openGl != null
+                  ? `${portfolioSnapshot.openGl >= 0 ? "+" : ""}${formatPhp(portfolioSnapshot.openGl)}`
+                  : "—"}
+              </div>
+              <p className="mt-0.5 text-[10px] text-slate-400">Vs open cost</p>
+            </div>
+          </div>
         )}
       </section>
 
@@ -585,7 +524,14 @@ export default function TradeView() {
                       <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/80 px-3 py-2">
                         <div className="min-w-0">
                           <span className="text-sm font-bold text-slate-900 truncate block">{c.name}</span>
-                          <span className="text-[10px] font-medium text-slate-400">{c.symbol}</span>
+                          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-slate-400">
+                            <span className="font-medium">{c.symbol}</span>
+                            {c.holdings > 0 && (
+                              <span className="font-bold tabular-nums text-slate-700" title={`${c.holdings} coins`}>
+                                · {formatCoinAmount(c.holdings)} coins
+                              </span>
+                            )}
+                          </div>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
                           <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${badge.c}`}>
@@ -622,16 +568,19 @@ export default function TradeView() {
                               : "—"}
                           </div>
                         </div>
-                        <div className="bg-white px-1.5 py-2">
+                        <div className="bg-white px-1 py-2 min-w-0">
                           <div className="text-[9px] font-bold uppercase tracking-wide text-slate-400">Avg</div>
-                          <div className="mt-0.5 text-[11px] font-bold tabular-nums text-slate-800 truncate">
+                          <div
+                            className="mt-0.5 text-[10px] sm:text-[11px] font-bold tabular-nums text-slate-800 break-all leading-tight"
+                            title={c.holdings > 0 && c.avgCost != null ? String(c.avgCost) : undefined}
+                          >
                             {c.holdings > 0 && c.avgCost != null ? formatPhp(c.avgCost) : "—"}
                           </div>
                         </div>
-                        <div className="bg-white px-1.5 py-2">
+                        <div className="bg-white px-1 py-2 min-w-0">
                           <div className="text-[9px] font-bold uppercase tracking-wide text-slate-400">Open</div>
                           <div
-                            className={`mt-0.5 text-[11px] font-bold tabular-nums truncate ${
+                            className={`mt-0.5 text-[10px] sm:text-[11px] font-bold tabular-nums break-all leading-tight ${
                               c.unrealizedPnl == null
                                 ? "text-slate-300"
                                 : c.unrealizedPnl >= 0
