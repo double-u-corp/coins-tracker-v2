@@ -208,14 +208,6 @@ export default function HomeNearSupportCharts({
               Spot → {active.name}
             </Link>
           )}
-          <button
-            type="button"
-            onClick={() => void scan(true)}
-            disabled={loading}
-            className="rounded-md border border-rose-300 bg-white px-2.5 py-1 text-[11px] font-bold text-rose-900 hover:bg-rose-50 disabled:opacity-50"
-          >
-            {loading ? "Scanning…" : "↻ Refresh"}
-          </button>
         </div>
       </div>
 
@@ -226,7 +218,23 @@ export default function HomeNearSupportCharts({
         <p className="text-xs text-gray-500">No range data yet.</p>
       ) : (
         <>
-          <div className="mb-3 flex flex-wrap gap-1.5">
+          <div className="mb-3 sm:hidden">
+            <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-rose-900">
+              Coin
+            </label>
+            <select
+              value={selected}
+              onChange={(e) => setSelected(e.target.value)}
+              className="w-full rounded-lg border border-rose-300 bg-white px-3 py-2.5 text-sm font-semibold text-rose-950 shadow-sm"
+            >
+              {hits.map((h, i) => (
+                <option key={h.symbol} value={h.symbol}>
+                  #{i + 1} {h.name} · {h.positionPct.toFixed(0)}% of range
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="mb-3 hidden flex-wrap gap-1.5 sm:flex">
             {hits.map((h, i) => {
               const on = h.symbol === selected;
               const near = h.positionPct <= 25;
