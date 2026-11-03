@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { readChartCache, writeChartCache } from "./homeChartCache";
 import {
   attachManilaFields,
   extractJsonArray,
@@ -269,15 +270,8 @@ export default function HomeMacroWatch() {
     }
   };
 
-  const loadCache = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/catalyst-ai");
-      if (!res.ok) throw new Error(`Failed to load (${res.status})`);
-      const data = (await res.json()) as {
-        logs?: Record<string, { timestamp: number; response: string }>;
-      };
+  const applyLogsPayload = useCallback(
+    (data: { logs?: Record<string, { timestamp: number; response: string }> }) => {
       const log = data.logs?.[PROMPT_ID];
       const metaLog = data.logs?.[META_ID];
       const m = parseMeta(metaLog?.response);
@@ -291,12 +285,38 @@ export default function HomeMacroWatch() {
         setEvents([]);
         setUpdatedAt(null);
       }
+    },
+    []
+  );
+
+  const loadCache = useCallback(async (force = false) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const cacheKey = "macro:catalyst-ai-logs";
+      if (!force) {
+        const cached = readChartCache<{ logs?: Record<string, { timestamp: number; response: string }> }>(
+          cacheKey
+        );
+        if (cached?.logs) {
+          applyLogsPayload(cached);
+          setLoading(false);
+          return;
+        }
+      }
+      const res = await fetch("/api/catalyst-ai");
+      if (!res.ok) throw new Error(`Failed to load (${res.status})`);
+      const data = (await res.json()) as {
+        logs?: Record<string, { timestamp: number; response: string }>;
+      };
+      applyLogsPayload(data);
+      if (data.logs) writeChartCache(cacheKey, { logs: data.logs });
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [applyLogsPayload]);
 
   useEffect(() => {
     void loadCache();
@@ -456,7 +476,7 @@ export default function HomeMacroWatch() {
   }, [events]);
 
   return (
-    <div className="mb-6 rounded-lg border border-indigo-100 bg-white p-4 shadow-sm mt-4">
+    <div className="mb-6 rounded-lg border border-indigo-100 bg-white p-4 shadow-sm">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 className="text-sm font-bold uppercase tracking-wider text-indigo-900 flex items-center gap-2">

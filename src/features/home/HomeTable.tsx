@@ -13,7 +13,6 @@ import HomeExtendedAboveSma from "./HomeExtendedAboveSma";
 import JournalSidebar from "@/features/chart/JournalSidebar";
 import PriceUpdateModal from "./PriceUpdateModal";
 import type { CoinSummary } from "@/validators/recordSchema";
-import { parsePriceMovePercents } from "./priceMoveSignals";
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return "No cron runs recorded yet";
@@ -436,47 +435,59 @@ export default function HomeTable() {
     deleteJournalEntry,
 } = useHomeLogic();
 
-  const { heldMonitorCards, planMonitorCards } = useMemo(() => {
+  /** Open bag symbols (trade replay preferred). */
+  const heldSyms = useMemo(() => {
     const EPS = 1e-8;
-    const heldSyms = new Set<string>();
-
-    // Prefer trade-replay units (dust → 0). Portfolio alone can leave tiny residual "holdings".
+    const set = new Set<string>();
     const open = openHoldingsBySymbol || {};
     for (const [sym, u] of Object.entries(open)) {
-      if ((u ?? 0) > EPS) heldSyms.add(sym.toUpperCase());
+      if ((u ?? 0) > EPS) set.add(sym.toUpperCase());
     }
-    // Fallback if txs not loaded yet
     if (Object.keys(open).length === 0) {
       for (const p of portfolio || []) {
         const sym = (p.symbol || "").toUpperCase();
-        if (!sym) continue;
-        if ((p.holdings ?? 0) > EPS) heldSyms.add(sym);
+        if (sym && (p.holdings ?? 0) > EPS) set.add(sym);
       }
     }
+    return set;
+  }, [openHoldingsBySymbol, portfolio]);
 
-    const held: typeof monitorCards = [];
-    const plan: typeof monitorCards = [];
-    for (const card of monitorCards || []) {
-      const sym = card.symbol.toUpperCase();
-      if (heldSyms.has(sym)) held.push(card);
-      else plan.push(card);
-    }
-    return { heldMonitorCards: held, planMonitorCards: plan };
-  }, [monitorCards, portfolio, openHoldingsBySymbol]);
+  // Plan chart: onMonitor (or review targets) and NOT currently held
+  const planMonitorCards = useMemo(() => {
+    return (monitorCards || []).filter((card) => !heldSyms.has(card.symbol.toUpperCase()));
+  }, [monitorCards, heldSyms]);
 
+  /**
+   * Held charts must use ALL open bags (not only onMonitor).
+   * Before, only monitorCards appeared — so on phone you often only saw
+   * "Watch / plan · not held" while BCH/ADA/etc. were missing from held/free.
+   */
   const { heldCostCards, heldFreeCards } = useMemo(() => {
-    const cost: typeof heldMonitorCards = [];
-    const free: typeof heldMonitorCards = [];
-    for (const card of heldMonitorCards) {
-      const pos = portfolio?.find((p) => p.symbol?.toUpperCase() === card.symbol.toUpperCase());
-      const holdings = pos?.holdings ?? 0;
+    type Mini = { symbol: string; name: string; currentPrice: number | null };
+    const cost: Mini[] = [];
+    const free: Mini[] = [];
+    const seen = new Set<string>();
+
+    for (const sym of heldSyms) {
+      if (seen.has(sym)) continue;
+      seen.add(sym);
+      const coin =
+        allCoins.find((c) => c.symbol.toUpperCase() === sym) ||
+        coins.find((c) => c.symbol.toUpperCase() === sym);
+      const pos = portfolio?.find((p) => p.symbol?.toUpperCase() === sym);
+      const holdings = pos?.holdings ?? openHoldingsBySymbol?.[sym] ?? 0;
       const spent = pos?.spent ?? 0;
-      // Net spent <= 0 with coins left ≈ free / recovered house-money bag
-      if (holdings > 0 && spent <= 0) free.push(card);
-      else cost.push(card);
+      const row: Mini = {
+        symbol: sym,
+        name: coin?.name || sym.replace(/PHP$/i, ""),
+        currentPrice: coin?.currentPrice ?? null,
+      };
+      // House money: coins left but net spent already recovered
+      if (holdings > 0 && spent <= 0) free.push(row);
+      else cost.push(row);
     }
     return { heldCostCards: cost, heldFreeCards: free };
-  }, [heldMonitorCards, portfolio]);
+  }, [heldSyms, allCoins, coins, portfolio, openHoldingsBySymbol]);
 
   const [movePctBySymbol, setMovePctBySymbol] = useState<Record<string, number>>({});
   const [directionCopied, setDirectionCopied] = useState(false);
@@ -636,20 +647,20 @@ export default function HomeTable() {
     }
   };
 
+  // Price % from coin summary (cron polls) — no /api/news fetch
   useEffect(() => {
-    let cancelled = false;
-    fetch("/api/news?limit=40")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { items?: { headline?: string }[] } | null) => {
-        if (cancelled || !data?.items) return;
-        const headlines = data.items.map((i) => i.headline || "").filter(Boolean);
-        setMovePctBySymbol(parsePriceMovePercents(headlines));
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [lastCronRun]);
+    const map: Record<string, number> = {};
+    for (const c of allCoins || []) {
+      const sym = (c.symbol || "").toUpperCase();
+      if (!sym) continue;
+      const pct = c.priceChangePct;
+      if (pct != null && Number.isFinite(Number(pct))) {
+        map[sym] = Number(pct);
+        map[sym.replace(/PHP$/i, "")] = Number(pct);
+      }
+    }
+    setMovePctBySymbol(map);
+  }, [allCoins, lastCronRun]);
 
   const openHoldings = useMemo(() => {
     return (portfolio || []).filter(
@@ -846,12 +857,12 @@ export default function HomeTable() {
         </div>
       )}
 
-      {/* Line charts: 1 held+cost · 2 plan/not held · 3 free/recovered */}
+      {/* Line charts: always show 1–3 shells (empty state if no coins) */}
       {!loading && (
         <div className="mb-6 space-y-4">
-          {heldCostCards.length > 0 && (
-            <HomeWatchPlanCharts
-              variant="held"
+          <HomeWatchPlanCharts
+            variant="held"
+            emptyHint="No open bags with remaining cost (or trades still loading)."
             coins={heldCostCards.map((card) => {
               const coin =
                 allCoins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase()) ||
@@ -869,11 +880,10 @@ export default function HomeTable() {
                 kind: "held" as const,
               };
             })}
-            />
-          )}
-          {planMonitorCards.length > 0 && (
-            <HomeWatchPlanCharts
-              variant="plan"
+          />
+          <HomeWatchPlanCharts
+            variant="plan"
+            emptyHint="No monitored coins without an open holding."
             coins={planMonitorCards.map((card) => {
               const coin =
                 allCoins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase()) ||
@@ -891,11 +901,10 @@ export default function HomeTable() {
                 kind: "plan" as const,
               };
             })}
-            />
-          )}
-          {heldFreeCards.length > 0 && (
-            <HomeWatchPlanCharts
-              variant="free"
+          />
+          <HomeWatchPlanCharts
+            variant="free"
+            emptyHint="No free / recovered leftovers right now."
             coins={heldFreeCards.map((card) => {
               const coin =
                 allCoins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase()) ||
@@ -913,8 +922,7 @@ export default function HomeTable() {
                 kind: "free" as const,
               };
             })}
-            />
-          )}
+          />
         </div>
       )}
 

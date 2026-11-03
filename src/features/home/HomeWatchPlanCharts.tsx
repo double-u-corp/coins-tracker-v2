@@ -78,9 +78,11 @@ const VARIANT_UI: Record<
 export default function HomeWatchPlanCharts({
   coins,
   variant = "plan",
+  emptyHint,
 }: {
   coins: WatchPlanCoin[];
   variant?: WatchChartVariant;
+  emptyHint?: string;
 }) {
   const ui = VARIANT_UI[variant];
   const list = useMemo(() => {
@@ -173,8 +175,6 @@ export default function HomeWatchPlanCharts({
     an?.openCycleCostRecovered === true ||
     (holdings > 0 && (an?.avgCost == null || an.avgCost === 0));
 
-  if (list.length === 0) return null;
-
   return (
     <section
       id={`watch-charts-${variant}`}
@@ -182,8 +182,8 @@ export default function HomeWatchPlanCharts({
     >
       <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h2 className={`text-base font-extrabold ${ui.titleCls}`}>{ui.title}</h2>
-          <p className={`mt-0.5 text-[11px] ${ui.blurbCls}`}>{ui.blurb}</p>
+          <h2 className={`text-sm font-extrabold sm:text-base ${ui.titleCls}`}>{ui.title}</h2>
+          <p className={`mt-0.5 text-[10px] leading-snug sm:text-[11px] ${ui.blurbCls}`}>{ui.blurb}</p>
         </div>
         {active && (
           <Link
@@ -195,7 +195,13 @@ export default function HomeWatchPlanCharts({
         )}
       </div>
 
-      <div className="mb-3 flex flex-wrap gap-1.5">
+      {list.length === 0 ? (
+        <p className={`text-[11px] ${ui.blurbCls}`}>
+          {emptyHint || "No coins in this group right now."}
+        </p>
+      ) : (
+      <>
+      <div className="mb-3 -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1.5 [scrollbar-width:thin] snap-x">
         {list.map((c) => {
           const on = c.symbol === selected;
           const pct = c.priceChangePct;
@@ -204,7 +210,7 @@ export default function HomeWatchPlanCharts({
               key={c.symbol}
               type="button"
               onClick={() => setSelected(c.symbol)}
-              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold transition ${
+              className={`inline-flex shrink-0 snap-start items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition ${
                 on ? ui.chipOn : ui.chipOff
               }`}
             >
@@ -286,6 +292,8 @@ export default function HomeWatchPlanCharts({
         <p className="text-xs text-gray-500">Loading 3h path…</p>
       ) : (
         <MoverLineChart points={series} symbol={selected} dailyPoints={dailyPoints} />
+      )}
+      </>
       )}
     </section>
   );
