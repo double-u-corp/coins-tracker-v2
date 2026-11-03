@@ -8,6 +8,8 @@ import HomeMacroWatch from "./HomeMacroWatch";
 import NewsSection from "./NewsSection";
 import HomeTwoDayMovers from "./HomeTwoDayMovers";
 import HomeWatchPlanCharts from "./HomeWatchPlanCharts";
+import HomeNearSupportCharts from "./HomeNearSupportCharts";
+import HomeExtendedAboveSma from "./HomeExtendedAboveSma";
 import JournalSidebar from "@/features/chart/JournalSidebar";
 import PriceUpdateModal from "./PriceUpdateModal";
 import type { CoinSummary } from "@/validators/recordSchema";
@@ -328,33 +330,59 @@ function MonitorCard({
 
 
 export default function HomeTable() {
-  const [nextCronLabel, setNextCronLabel] = useState("Calculating...");
+  const [nextCronLabel, setNextCronLabel] = useState("Calculating…");
 
   useEffect(() => {
-    const now = new Date();
-    const h = now.getHours();
-    const m = now.getMinutes();
+    // Manila wall clock (UTC+8, no DST) — same basis as Timing / cron slots
+    const manila = new Date(Date.now() + 8 * 60 * 60 * 1000);
+    const h = manila.getUTCHours();
+    const m = manila.getUTCMinutes();
     const currentTotalMinutes = h * 60 + m;
 
     const slots = [
-      { h: 2, m: 5, label: "02:05 AM" },
-      { h: 5, m: 5, label: "05:05 AM" },
-      { h: 8, m: 5, label: "08:05 AM (Daily Candle Reset)" },
-      { h: 11, m: 5, label: "11:05 AM" },
-      { h: 14, m: 5, label: "02:05 PM" },
-      { h: 17, m: 5, label: "05:05 PM (London Open)" },
-      { h: 20, m: 5, label: "08:05 PM (US Pre-Market)" },
-      { h: 23, m: 5, label: "11:05 PM (US Peak)" },
+      { h: 2, m: 5, label: "02:05 AM Manila" },
+      { h: 5, m: 5, label: "05:05 AM Manila" },
+      { h: 8, m: 5, label: "08:05 AM Manila (daily reset)" },
+      { h: 11, m: 5, label: "11:05 AM Manila" },
+      { h: 14, m: 5, label: "02:05 PM Manila" },
+      { h: 17, m: 5, label: "05:05 PM Manila (London)" },
+      { h: 20, m: 5, label: "08:05 PM Manila (US pre-market)" },
+      { h: 23, m: 5, label: "11:05 PM Manila (US peak)" },
     ];
 
-    let nextLabel = "02:05 AM (Tomorrow)";
+    let nextHour = 2;
+    let nextLabel = "02:05 AM Manila (tomorrow)";
     for (const slot of slots) {
       if (currentTotalMinutes < slot.h * 60 + slot.m) {
+        nextHour = slot.h;
         nextLabel = slot.label;
         break;
       }
     }
     setNextCronLabel(nextLabel);
+
+    // Enrich from Timing activity (same /api/swing-timing slots as Timing page)
+    let cancelled = false;
+    fetch(`/api/swing-timing?days=14&_=${Date.now()}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { slots?: { hour: number; label: string; avgAbsPct: number; intensity: string }[] } | null) => {
+        if (cancelled || !data?.slots?.length) return;
+        const match = data.slots.find((s) => s.hour === nextHour);
+        if (!match) return;
+        const avg =
+          match.avgAbsPct != null && Number.isFinite(match.avgAbsPct)
+            ? `${Number(match.avgAbsPct).toFixed(3)}% avg`
+            : null;
+        const heat = match.intensity ? String(match.intensity) : null;
+        const parts = [match.label || nextLabel, avg, heat].filter(Boolean);
+        setNextCronLabel(parts.join(" · "));
+      })
+      .catch(() => {
+        /* keep static nextLabel */
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const {
@@ -436,6 +464,19 @@ export default function HomeTable() {
     return { heldMonitorCards: held, planMonitorCards: plan };
   }, [monitorCards, portfolio, openHoldingsBySymbol]);
 
+  const { heldCostCards, heldFreeCards } = useMemo(() => {
+    const cost: typeof heldMonitorCards = [];
+    const free: typeof heldMonitorCards = [];
+    for (const card of heldMonitorCards) {
+      const pos = portfolio?.find((p) => p.symbol?.toUpperCase() === card.symbol.toUpperCase());
+      const holdings = pos?.holdings ?? 0;
+      const spent = pos?.spent ?? 0;
+      // Net spent <= 0 with coins left ≈ free / recovered house-money bag
+      if (holdings > 0 && spent <= 0) free.push(card);
+      else cost.push(card);
+    }
+    return { heldCostCards: cost, heldFreeCards: free };
+  }, [heldMonitorCards, portfolio]);
 
   const [movePctBySymbol, setMovePctBySymbol] = useState<Record<string, number>>({});
   const [directionCopied, setDirectionCopied] = useState(false);
@@ -721,58 +762,6 @@ export default function HomeTable() {
         message={error ? `Failed to load data: ${error}` : `Last cron run: ${formatDateTime(lastCronRun)} | Next run: ${nextCronLabel}`}
       />
 
-      {/* Unified monitor: one card per coin (high + low + review date) */}
-      <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-        <div className="mb-3 flex items-center justify-between flex-wrap gap-2">
-          <h2 className="text-sm font-bold uppercase tracking-wider text-gray-700 flex items-center gap-2">
-            🎯 Target &amp; review monitor
-            {loading && (
-              <span className="h-3 w-16 animate-pulse rounded bg-violet-100" aria-hidden />
-            )}
-          </h2>
-        </div>
-
-        {loading ? (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="rounded-lg border border-gray-100 bg-gray-50/80 p-3 animate-pulse">
-                <div className="h-4 w-28 rounded bg-gray-200 mb-2" />
-                <div className="h-3 w-full rounded bg-gray-200 mb-1" />
-                <div className="h-3 w-2/3 rounded bg-gray-200" />
-              </div>
-            ))}
-          </div>
-        
-        ) : !monitorCards || monitorCards.length === 0 ? (
-          <p className="text-xs text-gray-500 py-1">
-            No target proximity alerts and no review dates (Manage or journal “Review by: YYYY-MM-DD”).
-          </p>
-        ) : (
-          <div className="space-y-5">
-            <div>
-              <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-emerald-800">
-                On hold · open positions
-              </h3>
-              {heldMonitorCards.length === 0 ? (
-                <p className="text-xs text-gray-500">No held coins in this monitor list.</p>
-              ) : (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {heldMonitorCards.map((card) => (
-                    <MonitorCard
-                      key={card.symbol}
-                      card={card}
-                      portfolio={portfolio}
-                      daysHeld={daysHeldBySymbol[card.symbol.toUpperCase()] ?? null}
-                      isRealized={false}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
       {/* Direction anchors — not trade ideas */}
       {!loading && (
         <div className="mb-6 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -857,53 +846,85 @@ export default function HomeTable() {
         </div>
       )}
 
-      {/* Watch / plan + free/recovered — 3h + 20 SMA */}
-      {!loading && (planMonitorCards.length > 0 || heldMonitorCards.length > 0) && (
-        <div className="mb-6">
-          <HomeWatchPlanCharts
-            coins={[
-              ...planMonitorCards.map((card) => {
-                const coin =
-                  allCoins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase()) ||
-                  coins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase());
-                const pct =
-                  movePctBySymbol[card.symbol] ??
-                  movePctBySymbol[card.symbol.replace(/PHP$/i, "")] ??
-                  coin?.priceChangePct ??
-                  null;
-                return {
-                  symbol: card.symbol,
-                  name: card.name,
-                  currentPrice: card.currentPrice ?? coin?.currentPrice ?? null,
-                  priceChangePct: pct != null && Number.isFinite(pct) ? Number(pct) : null,
-                  kind: "plan" as const,
-                };
-              }),
-              // Free / residual bags still on monitor (e.g. SOL recovered) — same line chart for rebuy watch
-              ...heldMonitorCards.map((card) => {
-                const pos = portfolio?.find(
-                  (p) => p.symbol?.toUpperCase() === card.symbol.toUpperCase()
-                );
-                const holdings = pos?.holdings ?? 0;
-                const spent = pos?.spent ?? 0;
-                const isFree = holdings > 0 && spent <= 0;
-                const coin =
-                  allCoins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase()) ||
-                  coins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase());
-                const pct =
-                  movePctBySymbol[card.symbol] ??
-                  movePctBySymbol[card.symbol.replace(/PHP$/i, "")] ??
-                  coin?.priceChangePct ??
-                  null;
-                return {
-                  symbol: card.symbol,
-                  name: card.name,
-                  currentPrice: card.currentPrice ?? coin?.currentPrice ?? null,
-                  priceChangePct: pct != null && Number.isFinite(pct) ? Number(pct) : null,
-                  kind: isFree ? ("free" as const) : ("held" as const),
-                };
-              }),
-            ]}
+      {/* Line charts: 1 held+cost · 2 plan/not held · 3 free/recovered */}
+      {!loading && (
+        <div className="mb-6 space-y-4">
+          {heldCostCards.length > 0 && (
+            <HomeWatchPlanCharts
+              variant="held"
+            coins={heldCostCards.map((card) => {
+              const coin =
+                allCoins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase()) ||
+                coins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase());
+              const pct =
+                movePctBySymbol[card.symbol] ??
+                movePctBySymbol[card.symbol.replace(/PHP$/i, "")] ??
+                coin?.priceChangePct ??
+                null;
+              return {
+                symbol: card.symbol,
+                name: card.name,
+                currentPrice: card.currentPrice ?? coin?.currentPrice ?? null,
+                priceChangePct: pct != null && Number.isFinite(pct) ? Number(pct) : null,
+                kind: "held" as const,
+              };
+            })}
+            />
+          )}
+          {planMonitorCards.length > 0 && (
+            <HomeWatchPlanCharts
+              variant="plan"
+            coins={planMonitorCards.map((card) => {
+              const coin =
+                allCoins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase()) ||
+                coins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase());
+              const pct =
+                movePctBySymbol[card.symbol] ??
+                movePctBySymbol[card.symbol.replace(/PHP$/i, "")] ??
+                coin?.priceChangePct ??
+                null;
+              return {
+                symbol: card.symbol,
+                name: card.name,
+                currentPrice: card.currentPrice ?? coin?.currentPrice ?? null,
+                priceChangePct: pct != null && Number.isFinite(pct) ? Number(pct) : null,
+                kind: "plan" as const,
+              };
+            })}
+            />
+          )}
+          {heldFreeCards.length > 0 && (
+            <HomeWatchPlanCharts
+              variant="free"
+            coins={heldFreeCards.map((card) => {
+              const coin =
+                allCoins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase()) ||
+                coins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase());
+              const pct =
+                movePctBySymbol[card.symbol] ??
+                movePctBySymbol[card.symbol.replace(/PHP$/i, "")] ??
+                coin?.priceChangePct ??
+                null;
+              return {
+                symbol: card.symbol,
+                name: card.name,
+                currentPrice: card.currentPrice ?? coin?.currentPrice ?? null,
+                priceChangePct: pct != null && Number.isFinite(pct) ? Number(pct) : null,
+                kind: "free" as const,
+              };
+            })}
+            />
+          )}
+        </div>
+      )}
+
+      {!loading && allCoins.length > 0 && (
+        <div className="mb-6 space-y-4">
+          <HomeNearSupportCharts
+            universe={allCoins.map((c) => ({ symbol: c.symbol, name: c.name }))}
+          />
+          <HomeExtendedAboveSma
+            universe={allCoins.map((c) => ({ symbol: c.symbol, name: c.name }))}
           />
         </div>
       )}

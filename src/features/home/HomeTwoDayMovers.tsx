@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { formatPhp } from "@/lib/format";
 import { calculateSMASeries } from "@/features/chart/Technicals";
+import { readChartCache, writeChartCache } from "./homeChartCache";
 
 
 type Mover = {
@@ -36,7 +37,12 @@ async function fetchTopMovers2d(): Promise<Mover[]> {
   }));
 }
 
-export async function fetchPollSeries(symbol: string): Promise<PollPoint[]> {
+export async function fetchPollSeries(symbol: string, force = false): Promise<PollPoint[]> {
+  const cacheKey = `3h:${symbol.toUpperCase()}`;
+  if (!force) {
+    const cached = readChartCache<PollPoint[]>(cacheKey);
+    if (cached && cached.length > 0) return cached;
+  }
   const res = await fetch(
     `/api/coins?type=chart&symbol=${encodeURIComponent(symbol)}&granularity=3h&hours=48`
   );
@@ -71,19 +77,27 @@ export async function fetchPollSeries(symbol: string): Promise<PollPoint[]> {
       isDayStart: slot === 2,
     });
   }
+  if (out.length > 0) writeChartCache(cacheKey, out);
   return out;
 }
 
 export type DailyPt = { period: string; high: number; low: number; close?: number };
 
-export async function fetchDailyForSma(symbol: string): Promise<DailyPt[]> {
+export async function fetchDailyForSma(symbol: string, force = false): Promise<DailyPt[]> {
+  const cacheKey = `daily:${symbol.toUpperCase()}`;
+  if (!force) {
+    const cached = readChartCache<DailyPt[]>(cacheKey);
+    if (cached && cached.length > 0) return cached;
+  }
   const res = await fetch(
-    `/api/coins?type=chart&symbol=${encodeURIComponent(symbol)}&years=1.00&granularity=daily&_=${Date.now()}`,
+    `/api/coins?type=chart&symbol=${encodeURIComponent(symbol)}&years=1.00&granularity=daily`,
     { cache: "no-store" }
   );
   if (!res.ok) return [];
   const data = await res.json();
-  return (data.points || []) as DailyPt[];
+  const pts = (data.points || []) as DailyPt[];
+  if (pts.length > 0) writeChartCache(cacheKey, pts);
+  return pts;
 }
 
 export function MoverLineChart({
