@@ -20,7 +20,7 @@ type Hit = {
   extensionPct: number;
   /** Was below SMA within last 3 daily bars → “fresh” pop above */
   freshCross: boolean;
-  /** Rough 3-session lift in close % (quick run) */
+  /** ~3-session lift % — primary “instant up” signal */
   quickLiftPct: number;
   score: number;
   detail: string;
@@ -56,19 +56,21 @@ function closeOf(p: DailyBar): number | null {
 
 function scoreExtended(points: DailyBar[]): Omit<Hit, "symbol" | "name"> | null {
   if (!points || points.length < 22) return null;
-  const chartPts = points.map((p) => {
-    const c = closeOf(p);
-    const h = Number(p.high);
-    const l = Number(p.low);
-    const close = c ?? (Number.isFinite(h) ? h : 0);
-    return {
-      period: p.period,
-      label: p.period,
-      high: Number.isFinite(h) && h > 0 ? h : close,
-      low: Number.isFinite(l) && l > 0 ? l : close,
-      close,
-    };
-  }).filter((p) => p.close > 0);
+  const chartPts = points
+    .map((p) => {
+      const c = closeOf(p);
+      const h = Number(p.high);
+      const l = Number(p.low);
+      const close = c ?? (Number.isFinite(h) ? h : 0);
+      return {
+        period: p.period,
+        label: p.period,
+        high: Number.isFinite(h) && h > 0 ? h : close,
+        low: Number.isFinite(l) && l > 0 ? l : close,
+        close,
+      };
+    })
+    .filter((p) => p.close > 0);
 
   if (chartPts.length < 22) return null;
 
@@ -77,11 +79,18 @@ function scoreExtended(points: DailyBar[]): Omit<Hit, "symbol" | "name"> | null 
   const price = chartPts[i].close;
   const sma20 = smaSeries[i];
   if (sma20 == null || !(sma20 > 0) || !(price > 0)) return null;
-  if (price <= sma20) return null; // only above SMA
+  // Must be above 20 SMA — pump already printed above the average
+  if (price <= sma20) return null;
 
   const extensionPct = ((price - sma20) / sma20) * 100;
 
-  // Fresh cross: any of last 3 prior closes was at/below SMA
+  // 1-day and ~3-day lifts (instant / quick run)
+  const prev1 = chartPts[Math.max(0, i - 1)].close;
+  const prev3 = chartPts[Math.max(0, i - 3)].close;
+  const oneDayLiftPct = prev1 > 0 ? ((price - prev1) / prev1) * 100 : 0;
+  const quickLiftPct = prev3 > 0 ? ((price - prev3) / prev3) * 100 : 0;
+
+  // Fresh cross: was at/below SMA in last 3 prior closes
   let freshCross = false;
   for (let k = 1; k <= 3; k++) {
     const j = i - k;
@@ -93,33 +102,34 @@ function scoreExtended(points: DailyBar[]): Omit<Hit, "symbol" | "name"> | null 
     }
   }
 
-  // Quick lift: close change over last ~3 daily bars
-  const prev = chartPts[Math.max(0, i - 3)].close;
-  const quickLiftPct = prev > 0 ? ((price - prev) / prev) * 100 : 0;
+  // Goal: coins that *just* ran up — monitor for when price cools / goes down.
+  // Skip slow grinds that are merely "above SMA" with no recent impulse.
+  const hasImpulse = oneDayLiftPct >= 1.2 || quickLiftPct >= 2.5 || freshCross;
+  if (!hasImpulse) return null;
 
-  // Prefer: meaningful extension + recent lift + bonus for fresh cross above SMA
-  // (take-profit / pullback watch for holders — not a short recommendation)
-  let score = extensionPct;
-  if (quickLiftPct > 0) score += Math.min(quickLiftPct, 15) * 0.5;
-  if (freshCross) score += 2;
+  // Rank by speed of the pump first, then modest extension (not max stretch)
+  let score = oneDayLiftPct * 4 + Math.max(0, quickLiftPct) * 1.5;
+  if (freshCross) score += 6;
+  // Cap extension contribution so a 30% stretch doesn't beat a sharp 1-day pop
+  score += Math.min(Math.max(extensionPct, 0), 8) * 0.4;
 
   let detail: string;
-  if (freshCross && quickLiftPct >= 2) {
-    detail = `Fresh pop above 20 SMA (+${extensionPct.toFixed(1)}%) · quick lift ${quickLiftPct.toFixed(1)}% — pullback / TP watch`;
+  if (oneDayLiftPct >= 2 && freshCross) {
+    detail = `Sharp +${oneDayLiftPct.toFixed(1)}% day · just above 20 SMA — watch for pullback`;
+  } else if (oneDayLiftPct >= 2) {
+    detail = `Fast +${oneDayLiftPct.toFixed(1)}% day above 20 SMA — monitor for cool-down`;
   } else if (freshCross) {
-    detail = `Recently crossed above 20 SMA · +${extensionPct.toFixed(1)}% extended`;
-  } else if (extensionPct >= 8) {
-    detail = `Stretched +${extensionPct.toFixed(1)}% over 20 SMA — elevated take-profit risk`;
+    detail = `Fresh cross above 20 SMA · 3d ${quickLiftPct >= 0 ? "+" : ""}${quickLiftPct.toFixed(1)}% — pullback watch`;
   } else {
-    detail = `Above 20 SMA by ${extensionPct.toFixed(1)}%`;
+    detail = `Quick lift ${quickLiftPct >= 0 ? "+" : ""}${quickLiftPct.toFixed(1)}% (3d) · +${extensionPct.toFixed(1)}% vs SMA`;
   }
 
   return { price, sma20, extensionPct, freshCross, quickLiftPct, score, detail };
 }
 
 /**
- * Top 3 coins trading above 20 SMA with a quick lift / fresh cross —
- * framed as pullback / take-profit watch for spot holders (app is LONG-only).
+ * Top 3 coins that just pumped above 20 SMA — watch for cool-down / pullback.
+ * Spot only (not a short signal).
  */
 export default function HomeExtendedAboveSma({
   universe,
@@ -143,7 +153,7 @@ export default function HomeExtendedAboveSma({
     setLoading(true);
     setError(null);
     if (!force) {
-      const cachedHits = readChartCache<any[]>("scan:extendedSma");
+      const cachedHits = readChartCache<any[]>("scan:fastPumpSma:v2");
       if (cachedHits && cachedHits.length > 0) {
         setHits(cachedHits as any);
         setSelected((prev) =>
@@ -171,7 +181,7 @@ export default function HomeExtendedAboveSma({
         .sort((a, b) => b.score - a.score)
         .slice(0, 3);
       setHits(ranked);
-      if (ranked.length > 0) writeChartCache("scan:extendedSma", ranked);
+      if (ranked.length > 0) writeChartCache("scan:fastPumpSma:v2", ranked);
       setSelected((prev) =>
         prev && ranked.some((h) => h.symbol === prev) ? prev : ranked[0]?.symbol || ""
       );
@@ -219,12 +229,12 @@ export default function HomeExtendedAboveSma({
       <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 className="text-base font-extrabold text-orange-950">
-            Extended above 20 SMA · top 3
+            Fast pump above 20 SMA · top 3
           </h2>
           <p className="mt-0.5 text-[11px] text-orange-900/80">
-            Price above 20 SMA after a quick lift / fresh cross — possible{" "}
-            <span className="font-semibold">take-profit / pullback</span> zone for holders.
-            Spot only: not a short signal. Confirm on Spot.
+            Coins that <span className="font-semibold">just ran up</span> through / above the daily
+            20 SMA — so you can watch for a cool-down or pullback. Spot only: not a short.
+            Confirm on Spot before selling.
           </p>
         </div>
         <div className="flex flex-wrap gap-1.5">
@@ -251,7 +261,7 @@ export default function HomeExtendedAboveSma({
       {loading && hits.length === 0 ? (
         <p className="text-xs text-gray-500">Scanning vs 20 SMA…</p>
       ) : hits.length === 0 ? (
-        <p className="text-xs text-gray-500">No coins clearly extended above 20 SMA right now.</p>
+        <p className="text-xs text-gray-500">No sharp pumps above 20 SMA right now.</p>
       ) : (
         <>
           <div className="mb-3 flex flex-wrap gap-1.5">
@@ -271,7 +281,8 @@ export default function HomeExtendedAboveSma({
                   <span className="opacity-70">#{i + 1}</span>
                   <span>{h.name}</span>
                   <span className={on ? "text-orange-100" : "text-orange-800"}>
-                    +{h.extensionPct.toFixed(1)}%
+                    {h.quickLiftPct >= 0 ? "+" : ""}
+                    {h.quickLiftPct.toFixed(1)}% 3d
                   </span>
                   {h.freshCross && (
                     <span className={on ? "text-amber-100" : "text-amber-700"}>cross</span>
@@ -287,7 +298,9 @@ export default function HomeExtendedAboveSma({
               <span className="font-mono text-[10px] opacity-70">{active.symbol}</span>
               <span className="font-semibold text-slate-700">{active.detail}</span>
               <span className="tabular-nums text-slate-600">
-                now {formatPhp(active.price)} · 20 SMA {formatPhp(active.sma20)}
+                now {formatPhp(active.price)} · 20 SMA {formatPhp(active.sma20)} · 3d{" "}
+                {active.quickLiftPct >= 0 ? "+" : ""}
+                {active.quickLiftPct.toFixed(1)}% · vs SMA +{active.extensionPct.toFixed(1)}%
               </span>
             </div>
           )}
