@@ -12,7 +12,7 @@ type Mover = {
   samples?: number;
 };
 
-type PollPoint = {
+export type PollPoint = {
   day: string;
   hour: number;
   label: string;
@@ -36,7 +36,7 @@ async function fetchTopMovers2d(): Promise<Mover[]> {
   }));
 }
 
-async function fetchPollSeries(symbol: string): Promise<PollPoint[]> {
+export async function fetchPollSeries(symbol: string): Promise<PollPoint[]> {
   const res = await fetch(
     `/api/coins?type=chart&symbol=${encodeURIComponent(symbol)}&granularity=3h&hours=48`
   );
@@ -74,9 +74,9 @@ async function fetchPollSeries(symbol: string): Promise<PollPoint[]> {
   return out;
 }
 
-type DailyPt = { period: string; high: number; low: number; close?: number };
+export type DailyPt = { period: string; high: number; low: number; close?: number };
 
-async function fetchDailyForSma(symbol: string): Promise<DailyPt[]> {
+export async function fetchDailyForSma(symbol: string): Promise<DailyPt[]> {
   const res = await fetch(
     `/api/coins?type=chart&symbol=${encodeURIComponent(symbol)}&years=1.00&granularity=daily&_=${Date.now()}`,
     { cache: "no-store" }
@@ -86,7 +86,7 @@ async function fetchDailyForSma(symbol: string): Promise<DailyPt[]> {
   return (data.points || []) as DailyPt[];
 }
 
-function MoverLineChart({
+export function MoverLineChart({
   points,
   symbol,
   dailyPoints = [],
@@ -101,6 +101,7 @@ function MoverLineChart({
     y: number;
     label: string;
     price: number;
+    kind?: "price" | "sma";
   } | null>(null);
   const [isMobileChart, setIsMobileChart] = useState(false);
   useEffect(() => {
@@ -235,25 +236,36 @@ function MoverLineChart({
           )}
           <path d={path} fill="none" stroke="#0d9488" strokeWidth={strokeMain} />
           {smaPath ? <path d={smaPath} fill="none" stroke="#f59e0b" strokeWidth={strokeSma} /> : null}
-          {smaPts.map((p, i) => {
-            const isLast = i === smaPts.length - 1;
-            const labelX = isLast ? Math.max(left + 4, p.x - 8) : p.x;
-            const anchor = isLast ? "end" : i === 0 ? "start" : "middle";
-            return (
-              <g key={`sma-${p.dayKey}-${i}`}>
-                <circle cx={p.x} cy={p.y} r={7} fill="#f59e0b" stroke="#fff" strokeWidth={1.5} />
-                <text
-                  x={labelX}
-                  y={Math.min(h - bottom - 4, p.y + 14)}
-                  textAnchor={anchor}
-                  className="fill-amber-800"
-                  style={{ fontSize: fontSma, fontWeight: 800 }}
-                >
-                  SMA {fmt(p.v)}
-                </text>
-              </g>
-            );
-          })}
+          {smaPts.map((p, i) => (
+            <g key={`sma-${p.dayKey}-${i}`}>
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r={18}
+                fill="transparent"
+                className="cursor-pointer"
+                onMouseEnter={() =>
+                  setHover({ x: p.x, y: p.y, label: "", price: p.v, kind: "sma" })
+                }
+                onMouseMove={() =>
+                  setHover({ x: p.x, y: p.y, label: "", price: p.v, kind: "sma" })
+                }
+                onClick={() =>
+                  setHover({ x: p.x, y: p.y, label: "", price: p.v, kind: "sma" })
+                }
+              />
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r={isMobileChart ? 7 : 4.5}
+                fill="#f59e0b"
+                stroke="#fff"
+                strokeWidth={1.5}
+                className="pointer-events-none"
+              />
+            </g>
+          ))}
+
           {pts.map((p, i) => {
             const isLast = i === pts.length - 1;
             return (

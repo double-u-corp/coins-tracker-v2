@@ -7,6 +7,7 @@ import NewRecordModal from "./NewRecordModal";
 import HomeMacroWatch from "./HomeMacroWatch";
 import NewsSection from "./NewsSection";
 import HomeTwoDayMovers from "./HomeTwoDayMovers";
+import HomeWatchPlanCharts from "./HomeWatchPlanCharts";
 import JournalSidebar from "@/features/chart/JournalSidebar";
 import PriceUpdateModal from "./PriceUpdateModal";
 import type { CoinSummary } from "@/validators/recordSchema";
@@ -768,29 +769,6 @@ export default function HomeTable() {
                 </div>
               )}
             </div>
-            <div>
-              <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-sky-800">
-                Watch / plan to buy · not held
-                <span className="ml-1 font-normal normal-case text-gray-500">
-                  (includes realized / rebuy if monitored)
-                </span>
-              </h3>
-              {planMonitorCards.length === 0 ? (
-                <p className="text-xs text-gray-500">No watchlist / plan-to-buy cards right now.</p>
-              ) : (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {planMonitorCards.map((card) => (
-                    <MonitorCard
-                      key={card.symbol}
-                      card={card}
-                      portfolio={portfolio}
-                      daysHeld={null}
-                      isRealized={!!realizedSymbols?.[card.symbol.toUpperCase()]}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
           </div>
         )}
       </div>
@@ -876,6 +854,57 @@ export default function HomeTable() {
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* Watch / plan + free/recovered — 3h + 20 SMA */}
+      {!loading && (planMonitorCards.length > 0 || heldMonitorCards.length > 0) && (
+        <div className="mb-6">
+          <HomeWatchPlanCharts
+            coins={[
+              ...planMonitorCards.map((card) => {
+                const coin =
+                  allCoins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase()) ||
+                  coins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase());
+                const pct =
+                  movePctBySymbol[card.symbol] ??
+                  movePctBySymbol[card.symbol.replace(/PHP$/i, "")] ??
+                  coin?.priceChangePct ??
+                  null;
+                return {
+                  symbol: card.symbol,
+                  name: card.name,
+                  currentPrice: card.currentPrice ?? coin?.currentPrice ?? null,
+                  priceChangePct: pct != null && Number.isFinite(pct) ? Number(pct) : null,
+                  kind: "plan" as const,
+                };
+              }),
+              // Free / residual bags still on monitor (e.g. SOL recovered) — same line chart for rebuy watch
+              ...heldMonitorCards.map((card) => {
+                const pos = portfolio?.find(
+                  (p) => p.symbol?.toUpperCase() === card.symbol.toUpperCase()
+                );
+                const holdings = pos?.holdings ?? 0;
+                const spent = pos?.spent ?? 0;
+                const isFree = holdings > 0 && spent <= 0;
+                const coin =
+                  allCoins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase()) ||
+                  coins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase());
+                const pct =
+                  movePctBySymbol[card.symbol] ??
+                  movePctBySymbol[card.symbol.replace(/PHP$/i, "")] ??
+                  coin?.priceChangePct ??
+                  null;
+                return {
+                  symbol: card.symbol,
+                  name: card.name,
+                  currentPrice: card.currentPrice ?? coin?.currentPrice ?? null,
+                  priceChangePct: pct != null && Number.isFinite(pct) ? Number(pct) : null,
+                  kind: isFree ? ("free" as const) : ("held" as const),
+                };
+              }),
+            ]}
+          />
         </div>
       )}
 

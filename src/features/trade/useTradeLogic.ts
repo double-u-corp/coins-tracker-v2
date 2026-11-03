@@ -837,7 +837,13 @@ export function useTradeLogic() {
           phpAmount: amount,
           coinAmount: isCashFlow ? 0 : coins,
           customPrice: customPrice ? Number(customPrice) : undefined,
-          transactedAt: new Date(date).toISOString(),
+          // Date-only is midnight UTC and skews hold days. If user picks today, use now.
+          transactedAt: (() => {
+            const today = new Date().toISOString().slice(0, 10);
+            if (date === today) return new Date().toISOString();
+            // Historical calendar day → noon Manila (UTC+8) so the local date matches the picker
+            return new Date(`${date}T04:00:00.000Z`).toISOString();
+          })(),
         }),
       });
       const data = (await res.json()) as { transaction?: TransactionView; error?: string };

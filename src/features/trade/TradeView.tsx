@@ -705,8 +705,19 @@ export default function TradeView() {
                           <div className="mt-0.5 text-xs font-bold tabular-nums text-slate-900">
                             {c.holdings > 0 && c.openCycleCostRecovered
                               ? "Free"
-                              : c.holdings > 0 && c.daysSinceFirstBuy != null
-                              ? `${c.daysSinceFirstBuy}d`
+                              : c.holdings > 0 && c.openCycleStartAt
+                              ? c.daysSinceFirstBuy === 0
+                                ? (() => {
+                                    const hrs = Math.max(
+                                      0,
+                                      Math.round(
+                                        (Date.now() - new Date(c.openCycleStartAt!).getTime()) /
+                                          (1000 * 60 * 60)
+                                      )
+                                    );
+                                    return hrs < 24 ? `${hrs}h` : `${c.daysSinceFirstBuy}d`;
+                                  })()
+                                : `${c.daysSinceFirstBuy}d`
                               : "—"}
                           </div>
                         </div>
@@ -753,11 +764,26 @@ export default function TradeView() {
                           )}
                         </div>
                       </div>
-                      {(c.closedCycles?.length ?? 0) > 0 && (
-                        <div className="px-3 py-1.5 text-right text-[10px] font-medium text-slate-400">
-                          {c.closedCycles.length}× closed
-                        </div>
-                      )}
+                      <div className="flex items-center justify-between px-3 py-1.5 text-[10px]">
+                        <span className="text-slate-400">
+                          Locked{" "}
+                          <span
+                            className={`font-bold ${
+                              c.realizedPnl >= 0 ? "text-emerald-600" : "text-rose-600"
+                            }`}
+                          >
+                            {c.realizedPnl >= 0 ? "+" : ""}
+                            {formatPhp(c.realizedPnl)}
+                          </span>
+                        </span>
+                        {(c.closedCycles?.length ?? 0) > 0 ? (
+                          <span className="font-medium text-slate-400">
+                            {c.closedCycles.length}× closed
+                          </span>
+                        ) : (
+                          <span />
+                        )}
+                      </div>
                     </div>
                   );
                 })}
