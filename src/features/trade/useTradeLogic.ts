@@ -801,16 +801,18 @@ export function useTradeLogic() {
     }
     const coins = Number(coinAmount);
     const override = Number(customPrice);
-    // Manual price wins over whatever PHP was typed (PHP becomes price × coins)
-    // Buy/sell: price per unit is required and PHP is always price × coins
+    // Buy/sell: price per unit required. Total PHP is editable — use typed total when set.
     if (!isCashFlow && (!customPrice || Number.isNaN(override) || override <= 0)) {
       setSubmitError("Enter the price per unit (PHP per coin)");
       return;
     }
-    const useOverride = !isCashFlow && override > 0 && coins > 0;
-    const amount = useOverride ? phpFromPrice(override, coins) : Number(phpAmount);
-    if (!useOverride && (!phpAmount || Number.isNaN(amount) || amount <= 0)) {
-      setSubmitError("Enter a valid PHP amount greater than 0");
+    const typedPhp = Number(phpAmount);
+    const product = override > 0 && coins > 0 ? phpFromPrice(override, coins) : 0;
+    // Prefer explicit total if user entered one; otherwise price × coins
+    const amount =
+      phpAmount && !Number.isNaN(typedPhp) && typedPhp > 0 ? typedPhp : product;
+    if (!amount || Number.isNaN(amount) || amount <= 0) {
+      setSubmitError("Enter total PHP (or price × coins so total can be calculated)");
       return;
     }
 
@@ -862,7 +864,13 @@ export function useTradeLogic() {
     }
   }
 
-  async function deleteTransaction(id: number) {
+  async function deleteTransaction(id: number, opts?: { skipConfirm?: boolean }) {
+    if (!opts?.skipConfirm) {
+      const ok =
+        typeof window !== "undefined" &&
+        window.confirm("Delete this transaction permanently? This cannot be undone.");
+      if (!ok) return;
+    }
     setDeletingId(id);
     try {
       const res = await fetch("/api/transactions", {

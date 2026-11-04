@@ -152,7 +152,7 @@ export function MoverLineChart({
   const pad = (max - min) * (isMobileChart ? 0.14 : 0.08) || max * 0.01 || 1;
   const y0 = min - pad;
   const y1 = max + pad;
-  const left = isMobileChart ? 58 : 52;
+  const left = isMobileChart ? 82 : 68;
   const right = 8;
   const top = isMobileChart ? 16 : 10;
   const bottom = isMobileChart ? 26 : 16;
@@ -170,7 +170,7 @@ export function MoverLineChart({
   const path = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
   const strokeMain = isMobileChart ? 3.25 : 2;
   const strokeSma = isMobileChart ? 3 : 2;
-  const fontAxis = isMobileChart ? 15 : 11;
+  const fontAxis = isMobileChart ? 12 : 11;
   const fontSma = isMobileChart ? 13 : 10;
 
 
@@ -201,10 +201,16 @@ export function MoverLineChart({
       : "";
 
   const ticks = [y1, (y0 + y1) / 2, y0];
-  const fmt = (v: number) =>
-    v >= 1000
-      ? v.toLocaleString("en-PH", { maximumFractionDigits: 0 })
-      : v.toLocaleString("en-PH", { maximumFractionDigits: 4 });
+  const fmt = (v: number) => {
+    const abs = Math.abs(v);
+    // Keep side labels short enough to fit the left gutter
+    if (abs >= 10000) return v.toLocaleString("en-PH", { maximumFractionDigits: 0 });
+    if (abs >= 1000) return v.toLocaleString("en-PH", { maximumFractionDigits: 1 });
+    if (abs >= 100) return v.toLocaleString("en-PH", { maximumFractionDigits: 2 });
+    if (abs >= 10) return v.toLocaleString("en-PH", { maximumFractionDigits: 3 });
+    // e.g. 48.834 → 48.83 (still readable, less clip)
+    return v.toLocaleString("en-PH", { maximumFractionDigits: 2, minimumFractionDigits: 0 });
+  };
   const last = points[points.length - 1];
 
   return (
@@ -516,24 +522,7 @@ export default function HomeTwoDayMovers() {
         <p className="text-xs text-gray-500">No 2d movers yet.</p>
       ) : (
         <>
-          <div className="mb-3 sm:hidden">
-            <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-teal-800">
-              Coin
-            </label>
-            <select
-              value={selected}
-              onChange={(e) => setSelected(e.target.value)}
-              className="w-full rounded-lg border border-teal-300 bg-white px-3 py-2.5 text-sm font-semibold text-teal-950 shadow-sm"
-            >
-              {movers.map((m, i) => (
-                <option key={m.symbol} value={m.symbol}>
-                  #{i + 1} {m.name || m.symbol.replace(/PHP$/i, "")} ({m.netPct >= 0 ? "+" : ""}
-                  {m.netPct.toFixed(1)}%)
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="mb-3 hidden flex-wrap gap-1.5 sm:flex">
+<div className="mb-3 flex flex-wrap gap-1.5">
             {movers.map((m, i) => {
               const active = m.symbol === selected;
               return (

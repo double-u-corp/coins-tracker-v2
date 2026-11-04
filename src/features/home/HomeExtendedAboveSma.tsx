@@ -256,25 +256,7 @@ export default function HomeExtendedAboveSma({
         <p className="text-xs text-gray-500">No sharp pumps above 20 SMA right now.</p>
       ) : (
         <>
-          <div className="mb-3 sm:hidden">
-            <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-orange-900">
-              Coin
-            </label>
-            <select
-              value={selected}
-              onChange={(e) => setSelected(e.target.value)}
-              className="w-full rounded-lg border border-orange-300 bg-white px-3 py-2.5 text-sm font-semibold text-orange-950 shadow-sm"
-            >
-              {hits.map((h, i) => (
-                <option key={h.symbol} value={h.symbol}>
-                  #{i + 1} {h.name} · {h.quickLiftPct >= 0 ? "+" : ""}
-                  {h.quickLiftPct.toFixed(1)}% 3d
-                  {h.freshCross ? " · cross" : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="mb-3 hidden flex-wrap gap-1.5 sm:flex">
+<div className="mb-3 flex flex-wrap gap-1.5">
             {hits.map((h, i) => {
               const on = h.symbol === selected;
               return (

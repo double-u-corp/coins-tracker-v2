@@ -168,7 +168,7 @@ export default function LongScanPollChart({ symbol, livePrice }: Props) {
     const pad = (max - min) * 0.1 || max * 0.01 || 1;
     const y0 = min - pad;
     const y1 = max + pad;
-    const left = 52;
+    const left = 72;
     const right = 6;
     const top = 10;
     const bottom = 18;
@@ -210,10 +210,14 @@ export default function LongScanPollChart({ symbol, livePrice }: Props) {
         ? smaPathPts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")
         : "";
     const ticks = [y1, (y0 + y1) / 2, y0];
-    const fmt = (v: number) =>
-      v >= 1000
-        ? v.toLocaleString("en-PH", { maximumFractionDigits: 0 })
-        : v.toLocaleString("en-PH", { maximumFractionDigits: 4 });
+    const fmt = (v: number) => {
+      const abs = Math.abs(v);
+      if (abs >= 10000) return v.toLocaleString("en-PH", { maximumFractionDigits: 0 });
+      if (abs >= 1000) return v.toLocaleString("en-PH", { maximumFractionDigits: 1 });
+      if (abs >= 100) return v.toLocaleString("en-PH", { maximumFractionDigits: 2 });
+      if (abs >= 10) return v.toLocaleString("en-PH", { maximumFractionDigits: 3 });
+      return v.toLocaleString("en-PH", { maximumFractionDigits: 2, minimumFractionDigits: 0 });
+    };
     const last = series[series.length - 1];
 
     chart = (

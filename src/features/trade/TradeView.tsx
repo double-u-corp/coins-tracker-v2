@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Dropdown from "@/components/Dropdown";
 import AlertBanner from "@/components/AlertBanner";
@@ -75,6 +75,17 @@ export default function TradeView() {
     coinAnalytics,
     analyticsSummary,
   } = useTradeLogic();
+
+  // Keep total in sync when price or coins change (user can still edit total after)
+  useEffect(() => {
+    if (type === "deposit" || type === "withdraw") return;
+    const coins = Number(coinAmount);
+    const price = Number(customPrice);
+    if (coins > 0 && price > 0) {
+      setPhpAmount(String(phpFromPrice(price, coins)));
+    }
+  }, [coinAmount, customPrice, type, setPhpAmount]);
+
 
   const isCashFlow = type === "deposit" || type === "withdraw";
   const [txFilter, setTxFilter] = useState<"all" | "buy" | "sell" | "deposit" | "withdraw">("all");
@@ -325,19 +336,25 @@ export default function TradeView() {
               </label>
 
               <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
-                <span>{type === "buy" ? "Total spent (PHP)" : "Total received (PHP)"}</span>
+                <span>
+                  {type === "buy" ? "Total spent (PHP)" : "Total received (PHP)"}{" "}
+                  <span className="text-xs font-normal text-gray-500">(editable)</span>
+                </span>
                 <input
-                  type="text"
-                  readOnly
-                  tabIndex={-1}
-                  value={
-                    Number(coinAmount) > 0 && Number(customPrice) > 0
-                      ? formatPhp(phpFromPrice(Number(customPrice), Number(coinAmount)))
-                      : ""
-                  }
-                  placeholder="price × coins"
-                  className="w-full max-w-xs cursor-default rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold tabular-nums text-gray-700 shadow-sm"
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="any"
+                  value={phpAmount}
+                  onChange={(e) => setPhpAmount(e.target.value)}
+                  placeholder="Auto from price × coins — or type total"
+                  className="w-full max-w-xs rounded-md border border-gray-300 px-3 py-2 text-sm font-semibold tabular-nums text-gray-900 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
                 />
+                {Number(coinAmount) > 0 && Number(customPrice) > 0 && (
+                  <span className="text-[11px] text-gray-500">
+                    price × coins = {formatPhp(phpFromPrice(Number(customPrice), Number(coinAmount)))}
+                  </span>
+                )}
               </label>
             </>
           )}

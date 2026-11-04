@@ -201,35 +201,7 @@ export default function HomeWatchPlanCharts({
         </p>
       ) : (
       <>
-      <div className="mb-3 sm:hidden">
-        <label className={`mb-1 block text-[10px] font-bold uppercase tracking-wide ${ui.titleCls}`}>
-          Coin
-        </label>
-        <select
-          value={selected}
-          onChange={(e) => setSelected(e.target.value)}
-          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 shadow-sm"
-        >
-          {list.map((c) => {
-            const row = analyticsBySym[c.symbol];
-            const upnlPct = row?.unrealizedPct;
-            const pct = c.priceChangePct;
-            let extra = "";
-            if ((variant === "held" || variant === "free") && upnlPct != null && Number.isFinite(upnlPct)) {
-              extra = ` (${upnlPct >= 0 ? "+" : ""}${upnlPct.toFixed(1)}%)`;
-            } else if (pct != null && Number.isFinite(pct)) {
-              extra = ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)`;
-            }
-            return (
-              <option key={c.symbol} value={c.symbol}>
-                {c.name}
-                {extra}
-              </option>
-            );
-          })}
-        </select>
-      </div>
-      <div className="mb-3 -mx-1 hidden gap-1.5 overflow-x-auto px-1 pb-1.5 [scrollbar-width:thin] snap-x sm:flex">
+<div className="mb-3 flex flex-wrap gap-1.5">
         {list.map((c) => {
           const on = c.symbol === selected;
           const pct = c.priceChangePct;
@@ -238,7 +210,7 @@ export default function HomeWatchPlanCharts({
               key={c.symbol}
               type="button"
               onClick={() => setSelected(c.symbol)}
-              className={`inline-flex shrink-0 snap-start items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition ${
+              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition ${
                 on ? ui.chipOn : ui.chipOff
               }`}
             >

@@ -9,6 +9,7 @@ const PUBLIC_NAV_LINKS = [
 ];
 
 const PROTECTED_NAV_LINKS = [
+  { href: "/long-scan", label: "LONG scan" },
   { href: "/trade", label: "Buy / Sell" },
   { href: "/manage", label: "Manage Coins" },
 ];
