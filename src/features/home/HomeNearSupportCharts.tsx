@@ -22,6 +22,65 @@ type RangeHit = {
 
 type DailyPtFull = DailyPt & { high?: number; low?: number };
 
+/** Agent prompt: rank top near-support coins for spot entry monitoring. */
+function buildNearSupportEntryPrompt(hits: RangeHit[]): string {
+  const lines: string[] = [];
+  lines.push(
+    `You are a neutral research assistant for a Philippines **spot LONG-only** PHP crypto trader (buy/sell coins only — no shorting, no leverage, no margin).`
+  );
+  lines.push(``);
+  lines.push(`## Task`);
+  lines.push(
+    `These coins are the app's **Near 30-day support · top 8** list (lowest % of 30-day range first). Help the trader **monitor** them and say which are **more reasonable to stage limit buys** vs **wait / skip**. Do not force a bullish bias.`
+  );
+  lines.push(``);
+  lines.push(`## Snapshot (app data — technical filter only)`);
+  hits.forEach((h, i) => {
+    const base = h.name || h.symbol.replace(/PHP$/i, "");
+    lines.push(
+      `${i + 1}. **${base}** (\`${h.symbol}\`) — price ${h.price} · support ~${h.support} · resistance ~${h.resistance} · **${h.positionPct.toFixed(1)}%** of 30d range · ${h.detail}`
+    );
+  });
+  lines.push(``);
+  lines.push(`## Mandatory research (before any ranking)`);
+  lines.push(
+    `For **each** coin above, search **verified** sources only (no training-memory headlines; do not invent events):`
+  );
+  lines.push(
+    `1. **Past ~30 calendar days** — news, listings/delistings, unlocks, exploits, hacks, governance, partnerships, regulatory hits tied to the **project ticker/name** (not the local PHP pair suffix).`
+  );
+  lines.push(
+    `2. **Next ~30 calendar days** — scheduled unlocks, launches, conferences, token events, known court/regulatory dates if dated and sourced.`
+  );
+  lines.push(
+    `3. **Security** — any exploit / bridge / protocol incident in the last ~90 days for that project.`
+  );
+  lines.push(
+    `If a category has nothing verifiable after search, write **none verified** for that coin/category — never silent omission.`
+  );
+  lines.push(``);
+  lines.push(`## X (Twitter) follows`);
+  lines.push(
+    `For each coin, suggest **1–3 official or high-signal X accounts** to follow (project official, lead/dev if known, or one reputable research/on-chain desk). Label **official vs community**. Prefer handles you can verify; if unsure, say **none verified** rather than guessing.`
+  );
+  lines.push(``);
+  lines.push(`## Rules`);
+  lines.push(`- Neutral. Weak or unclear → **WAIT / SKIP** and hold cash — never recommend shorting.`);
+  lines.push(`- Prefer pullbacks / staged limit buys over chasing.`);
+  lines.push(`- Near support is **not** an automatic buy; catalysts and risk can override.`);
+  lines.push(`- Use project names for search (e.g. SUI not SUIPHP; TRUMP the token not politics noise unless token-linked).`);
+  lines.push(``);
+  lines.push(`## Answer format`);
+  lines.push(`1. **Table** (one row per coin): Rank | Coin | Monitor posture (PRIORITY WATCH / WATCH / WAIT / SKIP) | 1-line why | Key verified catalyst or "none verified" | X accounts to follow`);
+  lines.push(`2. **Best relative entry candidates** (max 3) among the eight — only if research supports staging; else say none.`);
+  lines.push(`3. **Avoid / deprioritize** (if any) with reason.`);
+  lines.push(`4. **Recheck by** (Manila date, within ~7 days).`);
+  lines.push(``);
+  lines.push(`Keep it practical and scannable. No price prediction guarantees.`);
+  return lines.join("\n");
+}
+
+
 async function fetchDailyPoints(symbol: string, force = false): Promise<DailyPtFull[]> {
   const cacheKey = `daily:${symbol.toUpperCase()}`;
   if (!force) {
@@ -106,6 +165,7 @@ export default function HomeNearSupportCharts({
   const [series, setSeries] = useState<PollPoint[]>([]);
   const [dailyPoints, setDailyPoints] = useState<DailyPt[]>([]);
   const [seriesLoading, setSeriesLoading] = useState(false);
+  const [promptCopied, setPromptCopied] = useState(false);
 
   const scan = useCallback(async (force = false) => {
     const list = universe.filter((u) => u.symbol && !/^(BTC|ETH|XAUT)PHP$/i.test(u.symbol));
@@ -196,7 +256,8 @@ export default function HomeNearSupportCharts({
           </h2>
           <p className="mt-0.5 text-[11px] text-rose-900/80">
             Lowest % of the 30-day range first (near support / discount zone). Same 3h + 20 SMA
-            chart. Confirm on Spot — not a buy signal by itself.
+            chart. Use <span className="font-semibold">Entry monitor prompt</span> for agent research
+            (±30d news/events + X accounts). Confirm on Spot — not a buy signal by itself.
           </p>
         </div>
         <div className="flex flex-wrap gap-1.5">
@@ -208,6 +269,23 @@ export default function HomeNearSupportCharts({
               Spot → {active.name}
             </Link>
           )}
+          <button
+            type="button"
+            disabled={hits.length === 0}
+            onClick={async () => {
+              const text = buildNearSupportEntryPrompt(hits);
+              try {
+                await navigator.clipboard.writeText(text);
+                setPromptCopied(true);
+                window.setTimeout(() => setPromptCopied(false), 2000);
+              } catch {
+                /* ignore */
+              }
+            }}
+            className="rounded-md border border-rose-400 bg-rose-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-rose-700 disabled:opacity-50"
+          >
+            {promptCopied ? "✅ Copied" : "📋 Entry monitor prompt"}
+          </button>
         </div>
       </div>
 

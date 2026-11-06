@@ -2,6 +2,7 @@ import Link from "next/link";
 import { useState, useEffect, useMemo, type ReactNode } from "react";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
+import { buildCoinAnalytics, type CoinAnalytics } from "@/features/trade/useTradeLogic";
 
 import { useHomeLogic } from "./useHomeLogic";
 import NewRecordModal from "./NewRecordModal";
@@ -15,37 +16,92 @@ import JournalSidebar from "@/features/chart/JournalSidebar";
 import PriceUpdateModal from "./PriceUpdateModal";
 import type { CoinSummary } from "@/validators/recordSchema";
 
-/** Ladder of profit targets vs avg cost; extends past +15% when price already cleared higher rungs. */
-function buildProfitTargets(avg: number, price: number) {
-  if (!(avg > 0)) return [] as { label: string; price: number; pct: number }[];
-  const base = [0.03, 0.06, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.75, 1.0];
-  const steps = [...base];
+type LadderLevel = { label: string; price: number; pct: number };
+
+/**
+ * Upside tiers vs avg cost:
+ *  L1: +3/+6/+10/+15  ·  L2: +15/+20/+25/+30  ·  L3: +30/+40/+50/+60 (trim zone)
+ * Downside: stress path vs avg (−3/−6/−10/−15, deeper if already underwater).
+ */
+function buildProfitTargets(avg: number, price: number): {
+  upside: LadderLevel[];
+  downside: LadderLevel[];
+  tier: 1 | 2 | 3;
+  tierLabel: string;
+  mode: "upside" | "downside";
+} {
+  if (!(avg > 0)) {
+    return { upside: [], downside: [], tier: 1, tierLabel: "L1 · recovery", mode: "upside" as const };
+  }
   const gain = price > 0 ? (price - avg) / avg : 0;
-  // Keep adding +5% steps until at least 2 levels remain above current price
-  while (gain >= steps[steps.length - 1] - 1e-12 || steps.filter((s) => s > gain + 1e-12).length < 2) {
-    const last = steps[steps.length - 1];
-    const next = Math.round((last + 0.05) * 1000) / 1000;
-    if (next > 5) break; // cap +500%
-    steps.push(next);
-    if (steps.length > 40) break;
+
+  const T1 = [0.03, 0.06, 0.1, 0.15];
+  const T2 = [0.15, 0.2, 0.25, 0.3];
+  const T3 = [0.3, 0.4, 0.5, 0.6];
+
+  let tier: 1 | 2 | 3 = 1;
+  let tierLabel = "L1 · +3→15%";
+  let steps = T1;
+  if (gain >= 0.3 - 1e-9) {
+    tier = 3;
+    tierLabel = "L3 · +30→60% (trim zone)";
+    steps = T3;
+  } else if (gain >= 0.15 - 1e-9) {
+    tier = 2;
+    tierLabel = "L2 · +15→30%";
+    steps = T2;
   }
-  const firstPending = steps.findIndex((s) => gain < s - 1e-12);
-  let start = 0;
-  if (firstPending <= 0) {
-    start = 0;
-  } else {
-    // Show last reached + next 3 pending (4 tiles)
-    start = Math.max(0, firstPending - 1);
+
+  const fmtPct = (pct: number) => {
+    const p = pct * 100;
+    const s =
+      Math.abs(p - Math.round(p)) < 1e-6 ? String(Math.round(p)) : p.toFixed(1);
+    return pct >= 0 ? `+${s}%` : `${s}%`;
+  };
+
+  const upside: LadderLevel[] = steps.map((pct) => ({
+    label: fmtPct(pct),
+    price: avg * (1 + pct),
+    pct,
+  }));
+
+  // Downside mirrors upside tiers (fixed steps — not relative to current deep loss)
+  // L1: −3/−6/−10/−15 · L2: −15/−20/−25/−30 · L3: −30/−40/−50/−60
+  const D1 = [-0.03, -0.06, -0.1, -0.15];
+  const D2 = [-0.15, -0.2, -0.25, -0.3];
+  const D3 = [-0.3, -0.4, -0.5, -0.6];
+  const loss = -gain; // positive when underwater
+
+  let downTier: 1 | 2 | 3 = 1;
+  let downTierLabel = "L1 · −3→15%";
+  let downSteps = D1;
+  if (loss >= 0.3 - 1e-9) {
+    downTier = 3;
+    downTierLabel = "L3 · −30→60%";
+    downSteps = D3;
+  } else if (loss >= 0.15 - 1e-9) {
+    downTier = 2;
+    downTierLabel = "L2 · −15→30%";
+    downSteps = D2;
   }
-  if (start + 4 > steps.length) start = Math.max(0, steps.length - 4);
-  return steps.slice(start, start + 4).map((pct) => {
-    const pctLabel = pct * 100;
-    const label =
-      Math.abs(pctLabel - Math.round(pctLabel)) < 1e-6
-        ? `+${Math.round(pctLabel)}%`
-        : `+${pctLabel.toFixed(1)}%`;
-    return { label, price: avg * (1 + pct), pct };
-  });
+
+  const downside: LadderLevel[] = downSteps.map((pct) => ({
+    label: fmtPct(pct),
+    price: avg * (1 + pct),
+    pct,
+  }));
+
+  // Only one side: profit → upside; underwater → downside only
+  if (gain >= 0) {
+    return { upside, downside: [], tier, tierLabel, mode: "upside" as const };
+  }
+  return {
+    upside: [],
+    downside,
+    tier: downTier,
+    tierLabel: downTierLabel,
+    mode: "downside" as const,
+  };
 }
 
 
@@ -526,6 +582,8 @@ export default function HomeTable() {
   }, [heldSyms, allCoins, coins, portfolio, openHoldingsBySymbol]);
 
   const [movePctBySymbol, setMovePctBySymbol] = useState<Record<string, number>>({});
+  const [homeAnalyticsBySym, setHomeAnalyticsBySym] = useState<Record<string, CoinAnalytics>>({});
+
   const [directionCopied, setDirectionCopied] = useState(false);
 
   const copyDirectionAgent = async () => {
@@ -698,7 +756,24 @@ export default function HomeTable() {
     setMovePctBySymbol(map);
   }, [allCoins, lastCronRun]);
 
-  const openHoldings = useMemo(() => {
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/transactions", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        const rows = buildCoinAnalytics(data.portfolio || [], data.transactions || []);
+        const map: Record<string, CoinAnalytics> = {};
+        for (const r of rows) map[r.symbol.toUpperCase()] = r;
+        setHomeAnalyticsBySym(map);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [lastCronRun]);
+
+    const openHoldings = useMemo(() => {
     return (portfolio || []).filter(
       (row: { symbol?: string; holdings?: number }) =>
         row.symbol && row.symbol !== "PHP" && (row.holdings ?? 0) > 0
@@ -900,8 +975,8 @@ export default function HomeTable() {
             <div className="mb-3">
               <h2 className="text-base font-extrabold text-indigo-950">1 · On hold · with cost</h2>
               <p className="mt-0.5 text-[11px] text-indigo-900/80">
-                Open bags with remaining cost basis — unrealized vs average, days held, and a dynamic
-                profit ladder (extends past +15% when you already cleared lower rungs). Confirm on Spot.
+                Open bags with remaining cost basis — unrealized vs average, days held, and either upside
+                tiers (if in profit) or downside levels (if underwater) — never both. Confirm on Spot.
               </p>
             </div>
             {heldCostCards.length === 0 ? (
@@ -942,8 +1017,12 @@ export default function HomeTable() {
                         year: "numeric",
                       })
                     : null;
-                  const targets =
-                    avg != null && avg > 0 ? buildProfitTargets(avg, price) : [];
+                  const ladder =
+                    avg != null && avg > 0
+                      ? buildProfitTargets(avg, price)
+                      : { upside: [], downside: [], tier: 1 as const, tierLabel: "", mode: "upside" as const };
+                  const targets = ladder.upside;
+                  const downTargets = ladder.downside;
                   return (
                     <div
                       key={sym}
@@ -1009,56 +1088,103 @@ export default function HomeTable() {
                         )}
                       </div>
 
-                      {targets.length > 0 && (
+                      {(targets.length > 0 || downTargets.length > 0) && (
                         <div>
-                          <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-                            Price to be profitable vs avg
+                          <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1">
+                            <div
+                              className={`text-[10px] font-bold uppercase tracking-wide ${
+                                ladder.mode === "downside" ? "text-rose-700" : "text-slate-500"
+                              }`}
+                            >
+                              {ladder.mode === "downside"
+                                ? `Downside vs avg · ${ladder.tierLabel}`
+                                : `Upside vs avg · ${ladder.tierLabel}`}
+                            </div>
+                            {ladder.mode === "upside" && ladder.tier === 3 && (
+                              <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900">
+                                Near +60% · consider trim
+                              </span>
+                            )}
                           </div>
                           <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-                            {targets.map((tg) => {
+                            {(ladder.mode === "downside" ? downTargets : targets).map((tg) => {
                               const bagValue = holdings * tg.price;
                               const profitPhp = bagValue - spent;
-                              const already = price >= tg.price;
+                              const isDown = ladder.mode === "downside";
+                              const levels = isDown ? downTargets : targets;
+                              const already = isDown
+                                ? price > 0 && price <= tg.price
+                                : price >= tg.price;
+                              // Current stage = last reached level (deepest for down, highest for up)
+                              const reached = levels.filter((l) =>
+                                isDown
+                                  ? price > 0 && price <= l.price
+                                  : price >= l.price
+                              );
+                              const currentStagePct =
+                                reached.length > 0 ? reached[reached.length - 1].pct : null;
+                              const isCurrentStage =
+                                currentStagePct != null && tg.pct === currentStagePct;
                               const need =
                                 price > 0 ? ((tg.price - price) / price) * 100 : null;
                               return (
                                 <div
-                                  key={tg.label}
+                                  key={`${isDown ? "dn" : "up"}-${tg.label}`}
                                   className={`rounded-lg border-2 px-2 py-2 text-center transition ${
-                                    already
-                                      ? "border-emerald-500 bg-emerald-100 shadow-sm ring-2 ring-emerald-300/80"
-                                      : "border-slate-200 bg-white"
+                                    isCurrentStage
+                                      ? isDown
+                                        ? "border-rose-600 bg-rose-100 shadow-md ring-2 ring-rose-400"
+                                        : "border-emerald-600 bg-emerald-100 shadow-md ring-2 ring-emerald-400"
+                                      : already
+                                        ? isDown
+                                          ? "border-rose-400 bg-rose-50"
+                                          : "border-emerald-400 bg-emerald-50"
+                                        : isDown
+                                          ? "border-rose-200 bg-white"
+                                          : "border-slate-200 bg-white"
                                   }`}
                                 >
                                   <div
                                     className={`text-[10px] font-bold ${
-                                      already ? "text-emerald-800" : "text-slate-500"
+                                      already
+                                        ? isDown
+                                          ? "text-rose-900"
+                                          : "text-emerald-800"
+                                        : isDown
+                                          ? "text-rose-600"
+                                          : "text-slate-500"
                                     }`}
                                   >
-                                    {already ? "✓ " : ""}
+                                    {already ? (isDown ? "▼ " : "✓ ") : ""}
                                     {tg.label}
                                   </div>
                                   <div
                                     className={`font-mono text-xs font-bold ${
-                                      already ? "text-emerald-950" : "text-slate-900"
+                                      already
+                                        ? isDown
+                                          ? "text-rose-950"
+                                          : "text-emerald-950"
+                                        : "text-slate-900"
                                     }`}
                                   >
                                     {formatPhp(tg.price)}
                                   </div>
                                   <div
                                     className={`mt-0.5 text-[10px] font-semibold ${
-                                      already ? "text-emerald-800" : "text-indigo-800"
+                                      already
+                                        ? isDown
+                                          ? "text-rose-800"
+                                          : "text-emerald-800"
+                                        : isDown
+                                          ? "text-rose-800"
+                                          : "text-indigo-800"
                                     }`}
                                   >
                                     Bag {formatPhp(bagValue)}
                                   </div>
                                   <div
                                     className={`text-[10px] font-semibold ${
-                                      already
-                                        ? "text-emerald-900"
-                                        : profitPhp >= 0
-                                          ? "text-emerald-700"
-                                          : "text-rose-600"
+                                      profitPhp >= 0 ? "text-emerald-700" : "text-rose-700"
                                     }`}
                                   >
                                     {profitPhp >= 0 ? "+" : ""}
@@ -1067,15 +1193,23 @@ export default function HomeTable() {
                                   <div
                                     className={`mt-0.5 text-[10px] font-extrabold ${
                                       already
-                                        ? "rounded bg-emerald-600 px-1 py-0.5 text-white"
-                                        : "text-amber-700"
+                                        ? isDown
+                                          ? "rounded bg-rose-600 px-1 py-0.5 text-white"
+                                          : "rounded bg-emerald-600 px-1 py-0.5 text-white"
+                                        : isDown
+                                          ? "text-rose-600"
+                                          : "text-amber-700"
                                     }`}
                                   >
-                                    {already
-                                      ? "Reached"
-                                      : need != null
-                                        ? `+${need.toFixed(1)}% from now`
-                                        : "—"}
+                                    {isCurrentStage
+                                      ? "You are here"
+                                      : already
+                                        ? isDown
+                                          ? "Passed"
+                                          : "Reached"
+                                        : need != null
+                                          ? `${need >= 0 ? "+" : ""}${need.toFixed(1)}% from now`
+                                          : "—"}
                                   </div>
                                 </div>
                               );
@@ -1083,12 +1217,126 @@ export default function HomeTable() {
                           </div>
                         </div>
                       )}
+
+
                     </div>
                   );
                 })}
               </div>
             )}
           </section>
+
+          <section className="scroll-mt-20 rounded-xl border-2 border-emerald-200 bg-emerald-50/40 p-4 shadow-sm">
+            <div className="mb-3">
+              <h2 className="text-base font-extrabold text-emerald-950">2 · Free / recovered</h2>
+              <p className="mt-0.5 text-[11px] text-emerald-900/80">
+                Open leftovers after cost recovered (house money) — still track mark, avg reference, and
+                open P&L. Confirm on Spot.
+              </p>
+            </div>
+            {heldFreeCards.length === 0 ? (
+              <p className="text-[11px] text-emerald-800/70">No free / recovered leftovers right now.</p>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {heldFreeCards.map((card) => {
+                  const sym = card.symbol.toUpperCase();
+                  const coin =
+                    allCoins.find((c) => c.symbol.toUpperCase() === sym) ||
+                    coins.find((c) => c.symbol.toUpperCase() === sym);
+                  const an = homeAnalyticsBySym[sym];
+                  const holdings =
+                    an?.holdings ??
+                    Number(openHoldingsBySymbol?.[sym] ?? 0) ??
+                    0;
+                  const price =
+                    Number(an?.currentPrice ?? coin?.currentPrice ?? card.currentPrice ?? 0) || 0;
+                  const avg = an?.avgCost ?? null;
+                  const openPnl = an?.unrealizedPnl ?? null;
+                  const openPct = an?.unrealizedPct ?? null;
+                  const daysHeld = an?.daysSinceFirstBuy ?? daysHeldBySymbol?.[sym] ?? null;
+                  const nowPx = price > 0 ? price : null;
+                  return (
+                    <div
+                      key={sym}
+                      className="rounded-xl border border-emerald-200 bg-white p-3 shadow-sm"
+                    >
+                      <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-extrabold text-slate-900">
+                            {card.name}
+                            <span className="ml-1 font-mono text-[11px] font-semibold text-emerald-700">
+                              {sym}
+                            </span>
+                          </div>
+                          <div className="mt-0.5 text-[11px] font-semibold text-emerald-900">
+                            {holdings > 0
+                              ? `${holdings.toLocaleString(undefined, { maximumFractionDigits: 8 })} coins · Free`
+                              : "Free"}
+                          </div>
+                        </div>
+                        <Link
+                          href={`/chart?symbol=${encodeURIComponent(sym)}`}
+                          className="shrink-0 rounded-md bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-700"
+                        >
+                          Spot →
+                        </Link>
+                      </div>
+
+                      <div
+                        className={`mb-2 text-sm font-extrabold tabular-nums ${
+                          (openPct ?? openPnl ?? 0) >= 0 ? "text-emerald-700" : "text-rose-700"
+                        }`}
+                      >
+                        {openPct != null
+                          ? `${openPct >= 0 ? "+" : ""}${openPct.toFixed(2)}%`
+                          : "—"}
+                        {openPnl != null && (
+                          <span className="ml-1 text-xs font-bold">
+                            ({openPnl >= 0 ? "+" : ""}
+                            {formatPhp(openPnl)})
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px] text-slate-700 sm:grid-cols-3">
+                        <div>
+                          <span className="text-slate-500">Held</span>{" "}
+                          <span className="font-semibold text-slate-900">
+                            {daysHeld != null ? `${daysHeld}d` : "—"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500">Avg</span>{" "}
+                          <span className="font-semibold tabular-nums text-slate-900">
+                            {avg != null ? formatPhp(avg) : "—"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500">Open</span>{" "}
+                          <span
+                            className={`font-semibold tabular-nums ${
+                              (openPnl ?? 0) >= 0 ? "text-emerald-700" : "text-rose-700"
+                            }`}
+                          >
+                            {openPnl != null
+                              ? `${openPnl >= 0 ? "+" : ""}${formatPhp(openPnl)}`
+                              : "—"}
+                          </span>
+                        </div>
+                        <div className="col-span-2 sm:col-span-3">
+                          <span className="text-slate-500">now</span>{" "}
+                          <span className="font-semibold tabular-nums text-slate-900">
+                            {nowPx != null ? formatPhp(nowPx) : "—"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
           <HomeWatchPlanCharts
             variant="plan"
             emptyHint="No monitored coins without an open holding."
@@ -1110,28 +1358,7 @@ export default function HomeTable() {
               };
             })}
           />
-          <HomeWatchPlanCharts
-            variant="free"
-            emptyHint="No free / recovered leftovers right now."
-            coins={heldFreeCards.map((card) => {
-              const coin =
-                allCoins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase()) ||
-                coins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase());
-              const pct =
-                movePctBySymbol[card.symbol] ??
-                movePctBySymbol[card.symbol.replace(/PHP$/i, "")] ??
-                coin?.priceChangePct ??
-                null;
-              return {
-                symbol: card.symbol,
-                name: card.name,
-                currentPrice: card.currentPrice ?? coin?.currentPrice ?? null,
-                priceChangePct: pct != null && Number.isFinite(pct) ? Number(pct) : null,
-                kind: "free" as const,
-              };
-            })}
-          />
-        </div>
+</div>
       )}
 
       {!loading && allCoins.length > 0 && (

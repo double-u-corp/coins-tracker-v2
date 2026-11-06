@@ -37,7 +37,7 @@ const VARIANT_UI: Record<
   }
 > = {
   plan: {
-    title: "2 · Watch / plan · not held",
+    title: "3 · Watch / plan · not held",
     blurb: "Monitored coins with no open holding (plan / rebuy). 3h path + daily 20 SMA.",
     border: "border-indigo-200",
     bg: "bg-indigo-50/40",
@@ -59,7 +59,7 @@ const VARIANT_UI: Record<
     btn: "border-amber-300 bg-white text-amber-900 hover:bg-amber-50",
   },
   free: {
-    title: "3 · Free / recovered",
+    title: "2 · Free / recovered",
     blurb: "Leftover coins after cost recovered (house money). Same line chart — useful before a rebuy.",
     border: "border-emerald-200",
     bg: "bg-emerald-50/40",
