@@ -184,28 +184,50 @@ export function useChartLogic() {
       .then((data) => {
         setTransactions(data.transactions || []);
         
-        // Recalculate portfolio items for Cost Floor method
+        // Rebuild portfolio from transaction replay (source of truth for open bags).
+        // Avoids stale API holdings after a full sell (e.g. TRUMP still showing 75.815).
         const rawPortfolio: PortfolioItem[] = data.portfolio || [];
         const txs: Transaction[] = data.transactions || [];
+        const EPS = 1e-8;
 
-        const coinMap = new Map<string, { bought: number; sold: number }>();
-        for (const t of txs) {
-          if (!t.symbol || t.symbol === "PHP") continue;
-          if (!coinMap.has(t.symbol)) coinMap.set(t.symbol, { bought: 0, sold: 0 });
-          const stats = coinMap.get(t.symbol)!;
-          if (t.type === "buy") stats.bought += Number(t.phpAmount) || 0;
-          else if (t.type === "sell") stats.sold += Number(t.phpAmount) || 0;
+        const sorted = [...txs].sort(
+          (a, b) =>
+            new Date(a.transactedAt || 0).getTime() - new Date(b.transactedAt || 0).getTime()
+        );
+
+        const coinMap = new Map<string, { bought: number; sold: number; units: number }>();
+        for (const tx of sorted) {
+          if (!tx.symbol || tx.symbol === "PHP") continue;
+          if (!coinMap.has(tx.symbol)) coinMap.set(tx.symbol, { bought: 0, sold: 0, units: 0 });
+          const stats = coinMap.get(tx.symbol)!;
+          const php = Number(tx.phpAmount) || 0;
+          const coins = Number(tx.coinAmount) || 0;
+          if (tx.type === "buy") {
+            stats.bought += php;
+            stats.units += coins;
+          } else if (tx.type === "sell") {
+            stats.sold += php;
+            stats.units -= coins;
+          }
+          if (Math.abs(stats.units) < EPS) stats.units = 0;
+          if (stats.units < 0) stats.units = 0;
         }
 
         const adjustedPortfolio = rawPortfolio.map((p) => {
           const stats = coinMap.get(p.symbol);
           const bought = stats ? stats.bought : 0;
           const sold = stats ? stats.sold : 0;
-          const netSpent = Math.max(0, bought - sold);
-          const val = p.currentValue ?? 0;
+          const units = stats ? stats.units : Number(p.holdings) || 0;
+          // Open cost basis only while coins remain; fully sold → 0 open spent
+          const netSpent = units > EPS ? Math.max(0, bought - sold) : 0;
+          const price = Number(p.currentPrice) || 0;
+          const val = units > EPS && price > 0 ? units * price : 0;
           return {
             ...p,
+            holdings: units > EPS ? units : 0,
             spent: netSpent,
+            sold,
+            currentValue: val,
             gainLoss: val - netSpent,
           };
         });

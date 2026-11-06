@@ -62,6 +62,7 @@ function PollMiniLine({
     y: number;
     label: string;
     price: number;
+    kind?: "price" | "sma";
   } | null>(null);
   const [isMobileChart, setIsMobileChart] = useState(false);
   useEffect(() => {
@@ -236,26 +237,36 @@ function PollMiniLine({
         {smaPath ? (
           <path d={smaPath} fill="none" stroke="#f59e0b" strokeWidth={strokeSma} />
         ) : null}
-        {smaPts.map((p, i) => {
-          const isLast = i === smaPts.length - 1;
-          // Keep last SMA label inside chart (was clipped on the right edge)
-          const labelX = isLast ? Math.max(left + 4, p.x - 8) : p.x;
-          const anchor = isLast ? "end" : i === 0 ? "start" : "middle";
-          return (
-            <g key={`sma-${p.dayKey}-${i}`}>
-              <circle cx={p.x} cy={p.y} r={7} fill="#f59e0b" stroke="#fff" strokeWidth={1.5} />
-              <text
-                x={labelX}
-                y={Math.min(h - bottom - 4, p.y + 14)}
-                textAnchor={anchor}
-                className="fill-amber-800"
-                style={{ fontSize: fontSma, fontWeight: 800 }}
-              >
-                SMA {fmt(p.v)}
-              </text>
-            </g>
-          );
-        })}
+        {smaPts.map((p, i) => (
+          <g key={`sma-${p.dayKey}-${i}`}>
+            <circle
+              cx={p.x}
+              cy={p.y}
+              r={18}
+              fill="transparent"
+              className="cursor-pointer"
+              onMouseEnter={() =>
+                setHover({ x: p.x, y: p.y, label: "20 SMA", price: p.v, kind: "sma" })
+              }
+              onMouseMove={() =>
+                setHover({ x: p.x, y: p.y, label: "20 SMA", price: p.v, kind: "sma" })
+              }
+              onClick={() =>
+                setHover({ x: p.x, y: p.y, label: "20 SMA", price: p.v, kind: "sma" })
+              }
+            />
+            <circle
+              cx={p.x}
+              cy={p.y}
+              r={isMobileChart ? 7 : 4.5}
+              fill="#f59e0b"
+              stroke="#fff"
+              strokeWidth={1.5}
+              className="pointer-events-none"
+            />
+          </g>
+        ))}
+
         {pts.map((p, i) => (
           <g key={i}>
             {/* larger hit area for touch/hover */}
@@ -333,7 +344,7 @@ function PollMiniLine({
               fill="#e9d5ff"
               style={{ fontSize: 13, fontWeight: 700 }}
             >
-              {hover.label}
+              {hover.kind === "sma" ? "" : hover.label}
             </text>
             <text
               x={Math.min(Math.max(hover.x - 70, left), w - right - 140) + 8}
@@ -473,22 +484,68 @@ export default function ChartView() {
   const activePortfolio = useMemo(() => {
     if (!symbol || !portfolio) return null;
     const row = portfolio.find((p) => p.symbol === symbol);
-    if (!row || !(row.holdings > 0)) return row ? { ...row, firstBuyAt: null, daysHeld: null } : null;
+    const EPS = 1e-8;
 
-    // Position bridge: first buy date + days held from transaction history
-    const buys = (transactions || [])
-      .filter((tx) => tx.symbol === symbol && tx.type === "buy")
-      .map((tx) => new Date(tx.transactedAt).getTime())
-      .filter((t) => Number.isFinite(t))
-      .sort((a, b) => a - b);
-    const firstBuyMs = buys.length > 0 ? buys[0] : null;
-    const firstBuyAt = firstBuyMs != null ? new Date(firstBuyMs).toISOString() : null;
+    // Replay open units from Spot txs (same order as Trade) so a full sell clears the bag
+    let liveUnits = row?.holdings ?? 0;
+    if (transactions && transactions.length > 0) {
+      const sorted = [...transactions]
+        .filter((tx) => tx.symbol === symbol && (tx.type === "buy" || tx.type === "sell"))
+        .sort(
+          (a, b) =>
+            new Date(a.transactedAt).getTime() - new Date(b.transactedAt).getTime()
+        );
+      liveUnits = 0;
+      for (const tx of sorted) {
+        const amt = Number(tx.coinAmount) || 0;
+        if (tx.type === "buy") liveUnits += amt;
+        else liveUnits -= amt;
+        if (Math.abs(liveUnits) < EPS) liveUnits = 0;
+        if (liveUnits < 0) liveUnits = 0;
+      }
+    }
+
+    if (!row || !(liveUnits > EPS)) {
+      return row
+        ? { ...row, holdings: 0, spent: 0, firstBuyAt: null, daysHeld: null }
+        : null;
+    }
+
+    // Days held only while still open — from last cycle start (first buy after flat)
+    let cycleStartMs: number | null = null;
+    let units = 0;
+    const ordered = [...(transactions || [])]
+      .filter((tx) => tx.symbol === symbol && (tx.type === "buy" || tx.type === "sell"))
+      .sort(
+        (a, b) =>
+          new Date(a.transactedAt).getTime() - new Date(b.transactedAt).getTime()
+      );
+    for (const tx of ordered) {
+      const amt = Number(tx.coinAmount) || 0;
+      if (tx.type === "buy") {
+        if (units <= EPS) cycleStartMs = new Date(tx.transactedAt).getTime();
+        units += amt;
+      } else {
+        units -= amt;
+        if (units <= EPS) {
+          units = 0;
+          cycleStartMs = null;
+        }
+      }
+    }
+    const firstBuyAt = cycleStartMs != null ? new Date(cycleStartMs).toISOString() : null;
     const daysHeld =
-      firstBuyMs != null
-        ? Math.max(0, Math.floor((Date.now() - firstBuyMs) / (24 * 60 * 60 * 1000)))
+      cycleStartMs != null
+        ? Math.max(0, Math.floor((Date.now() - cycleStartMs) / (24 * 60 * 60 * 1000)))
         : null;
 
-    return { ...row, firstBuyAt, daysHeld };
+    return {
+      ...row,
+      holdings: liveUnits,
+      spent: Math.max(0, Number(row.spent) || 0),
+      firstBuyAt,
+      daysHeld,
+    };
   }, [symbol, portfolio, transactions]);
 
   const currentPrice = useMemo(() => {

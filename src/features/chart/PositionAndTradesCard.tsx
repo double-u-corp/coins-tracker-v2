@@ -339,7 +339,7 @@ export default function PositionAndTradesCard({
 
   const holdings = portfolio?.holdings ?? 0;
   const spent = portfolio?.spent ?? 0;
-  const holding = holdings > 0 && spent > 0;
+  const holding = holdings > 1e-8 && spent > 0;
   const priorBuys = (transactions || []).some((tx) => {
     if (String(tx.type || "").toLowerCase() !== "buy") return false;
     // If tx has no symbol, parent already scoped this list to the coin
