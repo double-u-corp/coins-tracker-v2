@@ -195,6 +195,7 @@ export function useHomeLogic() {
   const [portfolio, setPortfolio] = useState<any[]>([]);
   /** Open-position hold days by symbol (current cycle). */
   const [daysHeldBySymbol, setDaysHeldBySymbol] = useState<Record<string, number>>({});
+  const [cycleStartBySymbol, setCycleStartBySymbol] = useState<Record<string, string>>({});
   /** Symbols with prior buy/sell cycle fully closed (holdings ~0) — rebuy candidates on monitor. */
   const [realizedSymbols, setRealizedSymbols] = useState<Record<string, true>>({});
   /** Net coin units from trade history (dust ≤ 1e-8 treated as 0). */
@@ -327,6 +328,11 @@ export function useHomeLogic() {
           days[sym] = Math.max(0, Math.floor(ms / (24 * 60 * 60 * 1000)));
         }
         setDaysHeldBySymbol(days);
+        const starts: Record<string, string> = {};
+        for (const [sym, start] of Object.entries(cycleStart)) {
+          if (start && (units[sym] || 0) > 0) starts[sym] = start;
+        }
+        setCycleStartBySymbol(starts);
 
         const EPS = 1e-8;
         const openHold: Record<string, number> = {};
@@ -822,6 +828,7 @@ export function useHomeLogic() {
     setSelectedCoins,
     portfolio,
     daysHeldBySymbol,
+    cycleStartBySymbol,
     realizedSymbols,
     openHoldingsBySymbol,
     canUpdatePrice: authenticated,

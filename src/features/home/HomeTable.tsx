@@ -394,6 +394,7 @@ export default function HomeTable() {
     setSelectedCoins,
     portfolio,
     daysHeldBySymbol,
+    cycleStartBySymbol,
     realizedSymbols,
     openHoldingsBySymbol,
     lastCronRun,
@@ -860,27 +861,187 @@ export default function HomeTable() {
       {/* Line charts: always show 1–3 shells (empty state if no coins) */}
       {!loading && (
         <div className="mb-6 space-y-4">
-          <HomeWatchPlanCharts
-            variant="held"
-            emptyHint="No open bags with remaining cost (or trades still loading)."
-            coins={heldCostCards.map((card) => {
-              const coin =
-                allCoins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase()) ||
-                coins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase());
-              const pct =
-                movePctBySymbol[card.symbol] ??
-                movePctBySymbol[card.symbol.replace(/PHP$/i, "")] ??
-                coin?.priceChangePct ??
-                null;
-              return {
-                symbol: card.symbol,
-                name: card.name,
-                currentPrice: card.currentPrice ?? coin?.currentPrice ?? null,
-                priceChangePct: pct != null && Number.isFinite(pct) ? Number(pct) : null,
-                kind: "held" as const,
-              };
-            })}
-          />
+          <section className="scroll-mt-20 rounded-xl border-2 border-indigo-200 bg-indigo-50/40 p-4 shadow-sm">
+            <div className="mb-3">
+              <h2 className="text-base font-extrabold text-indigo-950">1 · On hold · with cost</h2>
+              <p className="mt-0.5 text-[11px] text-indigo-900/80">
+                Open bags with remaining cost basis — unrealized vs average, days held, and price
+                targets to recover / profit. Confirm on Spot.
+              </p>
+            </div>
+            {heldCostCards.length === 0 ? (
+              <p className="text-[11px] text-indigo-800/70">
+                No open bags with remaining cost (or trades still loading).
+              </p>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {heldCostCards.map((card) => {
+                  const sym = card.symbol.toUpperCase();
+                  const coin =
+                    allCoins.find((c) => c.symbol.toUpperCase() === sym) ||
+                    coins.find((c) => c.symbol.toUpperCase() === sym);
+                  const pos = (portfolio || []).find(
+                    (p: { symbol?: string }) => (p.symbol || "").toUpperCase() === sym
+                  ) as
+                    | {
+                        holdings?: number;
+                        spent?: number;
+                        currentPrice?: number | null;
+                      }
+                    | undefined;
+                  const holdings = Number(pos?.holdings ?? openHoldingsBySymbol?.[sym] ?? 0) || 0;
+                  const spent = Number(pos?.spent ?? 0) || 0;
+                  const price =
+                    Number(pos?.currentPrice ?? coin?.currentPrice ?? card.currentPrice ?? 0) || 0;
+                  const avg = holdings > 0 && spent > 0 ? spent / holdings : null;
+                  const mtm = holdings > 0 && price > 0 ? holdings * price : null;
+                  const pnlPhp = mtm != null && spent > 0 ? mtm - spent : null;
+                  const pnlPct =
+                    avg != null && avg > 0 && price > 0 ? ((price - avg) / avg) * 100 : null;
+                  const daysHeld = daysHeldBySymbol?.[sym] ?? null;
+                  const cycleStart = cycleStartBySymbol?.[sym] ?? null;
+                  const sinceLabel = cycleStart
+                    ? new Date(cycleStart).toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })
+                    : null;
+                  const targets =
+                    avg != null && avg > 0
+                      ? [
+                          { label: "+3%", price: avg * 1.03 },
+                          { label: "+6%", price: avg * 1.06 },
+                          { label: "+10%", price: avg * 1.1 },
+                          { label: "+15%", price: avg * 1.15 },
+                        ]
+                      : [];
+                  return (
+                    <div
+                      key={sym}
+                      className="rounded-xl border border-indigo-200 bg-white p-3 shadow-sm"
+                    >
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-extrabold text-slate-900">
+                            {card.name}{" "}
+                            <span className="font-mono text-[11px] font-semibold text-indigo-700">
+                              {sym}
+                            </span>
+                          </div>
+                          <div className="mt-0.5 text-[11px] text-slate-600">
+                            Now{" "}
+                            <span className="font-semibold tabular-nums text-slate-900">
+                              {price > 0 ? formatPhp(price) : "—"}
+                            </span>
+                            {avg != null && (
+                              <>
+                                {" "}
+                                · Avg{" "}
+                                <span className="font-semibold tabular-nums">{formatPhp(avg)}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <Link
+                          href={`/chart?symbol=${encodeURIComponent(sym)}`}
+                          className="shrink-0 rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-indigo-700"
+                        >
+                          Spot →
+                        </Link>
+                      </div>
+
+                      <div className="mb-2 rounded-lg border border-slate-100 bg-slate-50/80 px-2.5 py-2">
+                        <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                          Unrealized vs average
+                        </div>
+                        <div
+                          className={`text-sm font-extrabold tabular-nums ${
+                            (pnlPct ?? 0) >= 0 ? "text-emerald-700" : "text-rose-700"
+                          }`}
+                        >
+                          {pnlPct != null
+                            ? `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%`
+                            : "—"}
+                          {pnlPhp != null && (
+                            <span className="ml-1 text-xs font-bold">
+                              ({pnlPhp >= 0 ? "+" : ""}
+                              {formatPhp(pnlPhp)})
+                            </span>
+                          )}
+                        </div>
+                        {(daysHeld != null || sinceLabel) && (
+                          <div className="mt-1 text-[11px] text-slate-600">
+                            Days held:{" "}
+                            <span className="font-semibold text-slate-900">
+                              {daysHeld != null ? `${daysHeld}d` : "—"}
+                            </span>
+                            {sinceLabel ? ` since ${sinceLabel}` : ""}
+                          </div>
+                        )}
+                      </div>
+
+                      {targets.length > 0 && (
+                        <div>
+                          <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                            Price to be profitable vs avg
+                          </div>
+                          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                            {targets.map((tg) => {
+                              const bagValue = holdings * tg.price;
+                              const profitPhp = bagValue - spent;
+                              const already = price >= tg.price;
+                              const need =
+                                price > 0 ? ((tg.price - price) / price) * 100 : null;
+                              return (
+                                <div
+                                  key={tg.label}
+                                  className={`rounded-lg border px-2 py-2 text-center ${
+                                    already
+                                      ? "border-emerald-300 bg-emerald-50"
+                                      : "border-slate-200 bg-white"
+                                  }`}
+                                >
+                                  <div className="text-[10px] font-bold text-slate-500">
+                                    {tg.label}
+                                  </div>
+                                  <div className="font-mono text-xs font-bold text-slate-900">
+                                    {formatPhp(tg.price)}
+                                  </div>
+                                  <div className="mt-0.5 text-[10px] font-semibold text-indigo-800">
+                                    Bag {formatPhp(bagValue)}
+                                  </div>
+                                  <div
+                                    className={`text-[10px] font-semibold ${
+                                      profitPhp >= 0 ? "text-emerald-700" : "text-rose-600"
+                                    }`}
+                                  >
+                                    {profitPhp >= 0 ? "+" : ""}
+                                    {formatPhp(profitPhp)} P&L
+                                  </div>
+                                  <div
+                                    className={`text-[10px] font-semibold ${
+                                      already ? "text-emerald-700" : "text-amber-700"
+                                    }`}
+                                  >
+                                    {already
+                                      ? "At / above"
+                                      : need != null
+                                        ? `+${need.toFixed(1)}% from now`
+                                        : "—"}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
           <HomeWatchPlanCharts
             variant="plan"
             emptyHint="No monitored coins without an open holding."
