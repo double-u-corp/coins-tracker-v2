@@ -23,7 +23,10 @@ type RangeHit = {
 type DailyPtFull = DailyPt & { high?: number; low?: number };
 
 /** Agent prompt: rank top near-support coins for spot entry monitoring. */
-function buildNearSupportEntryPrompt(hits: RangeHit[]): string {
+function buildNearSupportEntryPrompt(
+  hits: RangeHit[],
+  watchPlan: { symbol: string; name: string; currentPrice?: number | null }[] = []
+): string {
   const lines: string[] = [];
   lines.push(
     `You are a neutral research assistant for a Philippines **spot LONG-only** PHP crypto trader (buy/sell coins only — no shorting, no leverage, no margin).`
@@ -31,20 +34,49 @@ function buildNearSupportEntryPrompt(hits: RangeHit[]): string {
   lines.push(``);
   lines.push(`## Task`);
   lines.push(
-    `These coins are the app's **Near 30-day support · top 8** list (lowest % of 30-day range first). Help the trader **monitor** them and say which are **more reasonable to stage limit buys** vs **wait / skip**. Do not force a bullish bias.`
+    `Help the trader **monitor** and rank coins for possible **staged limit buys** (not market-chase). Do not force a bullish bias. Weak/unclear → WAIT / SKIP and hold cash.`
   );
   lines.push(``);
-  lines.push(`## Snapshot (app data — technical filter only)`);
-  hits.forEach((h, i) => {
-    const base = h.name || h.symbol.replace(/PHP$/i, "");
-    lines.push(
-      `${i + 1}. **${base}** (\`${h.symbol}\`) — price ${h.price} · support ~${h.support} · resistance ~${h.resistance} · **${h.positionPct.toFixed(1)}%** of 30d range · ${h.detail}`
-    );
-  });
+  lines.push(`## List A — Near 30-day support · top 8 (app ranking)`);
+  lines.push(
+    `Lowest % of 30-day range first. Technical discount zone only — not an automatic buy.`
+  );
+  if (hits.length === 0) {
+    lines.push(`(none in list right now)`);
+  } else {
+    hits.forEach((h, i) => {
+      const base = h.name || h.symbol.replace(/PHP$/i, "");
+      lines.push(
+        `${i + 1}. **${base}** (\`${h.symbol}\`) — price ${h.price} · support ~${h.support} · resistance ~${h.resistance} · **${h.positionPct.toFixed(1)}%** of 30d range · ${h.detail}`
+      );
+    });
+  }
+  lines.push(``);
+  lines.push(`## List B — Watch / plan · not held (monitored, no open bag)`);
+  lines.push(
+    `Coins on the trader's watchlist that are **not currently held**. Include these in research even if they are not in List A.`
+  );
+  const hitSyms = new Set(hits.map((h) => h.symbol.toUpperCase()));
+  const planOnly = watchPlan.filter((c) => c.symbol && !hitSyms.has(c.symbol.toUpperCase()));
+  const planAll = watchPlan.filter((c) => c.symbol);
+  if (planAll.length === 0) {
+    lines.push(`(none on watch/plan right now)`);
+  } else {
+    planAll.forEach((c, i) => {
+      const sym = c.symbol.toUpperCase();
+      const base = c.name || sym.replace(/PHP$/i, "");
+      const px =
+        c.currentPrice != null && Number.isFinite(Number(c.currentPrice))
+          ? String(c.currentPrice)
+          : "n/a";
+      const alsoNear = hitSyms.has(sym) ? " · also on List A" : "";
+      lines.push(`${i + 1}. **${base}** (\`${sym}\`) — price ${px}${alsoNear}`);
+    });
+  }
   lines.push(``);
   lines.push(`## Mandatory research (before any ranking)`);
   lines.push(
-    `For **each** coin above, search **verified** sources only (no training-memory headlines; do not invent events):`
+    `For **each** coin in List A and List B, search **verified** sources only (no training-memory headlines; do not invent events):`
   );
   lines.push(
     `1. **Past ~30 calendar days** — news, listings/delistings, unlocks, exploits, hacks, governance, partnerships, regulatory hits tied to the **project ticker/name** (not the local PHP pair suffix).`
@@ -71,12 +103,33 @@ function buildNearSupportEntryPrompt(hits: RangeHit[]): string {
   lines.push(`- Use project names for search (e.g. SUI not SUIPHP; TRUMP the token not politics noise unless token-linked).`);
   lines.push(``);
   lines.push(`## Answer format`);
-  lines.push(`1. **Table** (one row per coin): Rank | Coin | Monitor posture (PRIORITY WATCH / WATCH / WAIT / SKIP) | 1-line why | Key verified catalyst or "none verified" | X accounts to follow`);
-  lines.push(`2. **Best relative entry candidates** (max 3) among the eight — only if research supports staging; else say none.`);
+  lines.push(
+    `1. **Table** (one row per coin from A∪B): Rank | Coin | Source (A / B / both) | Monitor posture (PRIORITY WATCH / WATCH / WAIT / SKIP) | 1-line why | Key verified catalyst or "none verified" | X accounts`
+  );
+  lines.push(
+    `2. **Best relative entry candidates** (max 3) across both lists — only if research supports staging; else say none.`
+  );
   lines.push(`3. **Avoid / deprioritize** (if any) with reason.`);
   lines.push(`4. **Recheck by** (Manila date, within ~7 days).`);
   lines.push(``);
-  lines.push(`Keep it practical and scannable. No price prediction guarantees.`);
+  lines.push(`## Final journal note (REQUIRED — pure markdown, copy-paste ready)`);
+  lines.push(
+    `End with ONLY a fenced markdown block the trader can copy into their journal. Use this shape:`
+  );
+  lines.push(``);
+  lines.push("```markdown");
+  lines.push(`## Entry monitor · YYYY-MM-DD (Manila)`);
+  lines.push(`- **Agent:** Spot Trading Desk AI (ChatGPT / Grok / Gemini — name model)`);
+  lines.push(`- **Prompt:** Home · Near support + Watch/plan entry monitor`);
+  lines.push(`- **Priority watch:** …`);
+  lines.push(`- **Candidates to stage (max 3):** … or none`);
+  lines.push(`- **Avoid:** … or none`);
+  lines.push(`- **X accounts to follow:** coin — @handles`);
+  lines.push(`- **Recheck by:** YYYY-MM-DD`);
+  lines.push(`- **Notes:** …`);
+  lines.push("```");
+  lines.push(``);
+  lines.push(`Keep the prose above the fence practical. No price prediction guarantees.`);
   return lines.join("\n");
 }
 
@@ -154,9 +207,12 @@ function positionIn30d(points: DailyPtFull[]): Omit<RangeHit, "symbol" | "name">
  */
 export default function HomeNearSupportCharts({
   universe,
+  watchPlanCoins = [],
 }: {
   /** Prefer full watchlist symbols from Home (symbol + name). */
   universe: { symbol: string; name?: string }[];
+  /** Watch/plan coins not currently held (List B in the agent prompt). */
+  watchPlanCoins?: { symbol: string; name: string; currentPrice?: number | null }[];
 }) {
   const [hits, setHits] = useState<RangeHit[]>([]);
   const [loading, setLoading] = useState(false);
@@ -256,8 +312,9 @@ export default function HomeNearSupportCharts({
           </h2>
           <p className="mt-0.5 text-[11px] text-rose-900/80">
             Lowest % of the 30-day range first (near support / discount zone). Same 3h + 20 SMA
-            chart. Use <span className="font-semibold">Entry monitor prompt</span> for agent research
-            (±30d news/events + X accounts). Confirm on Spot — not a buy signal by itself.
+            chart. Use <span className="font-semibold">Entry monitor prompt</span> for agent research on this
+            top 8 <span className="font-semibold">plus Watch / plan · not held</span> (±30d news/events,
+            X accounts, copy-ready markdown). Confirm on Spot — not a buy signal by itself.
           </p>
         </div>
         <div className="flex flex-wrap gap-1.5">
@@ -273,7 +330,7 @@ export default function HomeNearSupportCharts({
             type="button"
             disabled={hits.length === 0}
             onClick={async () => {
-              const text = buildNearSupportEntryPrompt(hits);
+              const text = buildNearSupportEntryPrompt(hits, watchPlanCoins);
               try {
                 await navigator.clipboard.writeText(text);
                 setPromptCopied(true);

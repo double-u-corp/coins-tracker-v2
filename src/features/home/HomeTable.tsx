@@ -1365,6 +1365,16 @@ export default function HomeTable() {
         <div className="mb-6 space-y-4">
           <HomeNearSupportCharts
             universe={allCoins.map((c) => ({ symbol: c.symbol, name: c.name }))}
+            watchPlanCoins={planMonitorCards.map((card) => {
+              const coin =
+                allCoins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase()) ||
+                coins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase());
+              return {
+                symbol: card.symbol,
+                name: card.name,
+                currentPrice: card.currentPrice ?? coin?.currentPrice ?? null,
+              };
+            })}
           />
           <HomeExtendedAboveSma
             universe={allCoins.map((c) => ({ symbol: c.symbol, name: c.name }))}
