@@ -2,6 +2,7 @@ import Link from "next/link";
 import { useState, useEffect, useMemo, type ReactNode } from "react";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
+
 import { useHomeLogic } from "./useHomeLogic";
 import NewRecordModal from "./NewRecordModal";
 import HomeMacroWatch from "./HomeMacroWatch";
@@ -13,6 +14,40 @@ import HomeExtendedAboveSma from "./HomeExtendedAboveSma";
 import JournalSidebar from "@/features/chart/JournalSidebar";
 import PriceUpdateModal from "./PriceUpdateModal";
 import type { CoinSummary } from "@/validators/recordSchema";
+
+/** Ladder of profit targets vs avg cost; extends past +15% when price already cleared higher rungs. */
+function buildProfitTargets(avg: number, price: number) {
+  if (!(avg > 0)) return [] as { label: string; price: number; pct: number }[];
+  const base = [0.03, 0.06, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.75, 1.0];
+  const steps = [...base];
+  const gain = price > 0 ? (price - avg) / avg : 0;
+  // Keep adding +5% steps until at least 2 levels remain above current price
+  while (gain >= steps[steps.length - 1] - 1e-12 || steps.filter((s) => s > gain + 1e-12).length < 2) {
+    const last = steps[steps.length - 1];
+    const next = Math.round((last + 0.05) * 1000) / 1000;
+    if (next > 5) break; // cap +500%
+    steps.push(next);
+    if (steps.length > 40) break;
+  }
+  const firstPending = steps.findIndex((s) => gain < s - 1e-12);
+  let start = 0;
+  if (firstPending <= 0) {
+    start = 0;
+  } else {
+    // Show last reached + next 3 pending (4 tiles)
+    start = Math.max(0, firstPending - 1);
+  }
+  if (start + 4 > steps.length) start = Math.max(0, steps.length - 4);
+  return steps.slice(start, start + 4).map((pct) => {
+    const pctLabel = pct * 100;
+    const label =
+      Math.abs(pctLabel - Math.round(pctLabel)) < 1e-6
+        ? `+${Math.round(pctLabel)}%`
+        : `+${pctLabel.toFixed(1)}%`;
+    return { label, price: avg * (1 + pct), pct };
+  });
+}
+
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return "No cron runs recorded yet";
@@ -865,8 +900,8 @@ export default function HomeTable() {
             <div className="mb-3">
               <h2 className="text-base font-extrabold text-indigo-950">1 · On hold · with cost</h2>
               <p className="mt-0.5 text-[11px] text-indigo-900/80">
-                Open bags with remaining cost basis — unrealized vs average, days held, and price
-                targets to recover / profit. Confirm on Spot.
+                Open bags with remaining cost basis — unrealized vs average, days held, and a dynamic
+                profit ladder (extends past +15% when you already cleared lower rungs). Confirm on Spot.
               </p>
             </div>
             {heldCostCards.length === 0 ? (
@@ -908,14 +943,7 @@ export default function HomeTable() {
                       })
                     : null;
                   const targets =
-                    avg != null && avg > 0
-                      ? [
-                          { label: "+3%", price: avg * 1.03 },
-                          { label: "+6%", price: avg * 1.06 },
-                          { label: "+10%", price: avg * 1.1 },
-                          { label: "+15%", price: avg * 1.15 },
-                        ]
-                      : [];
+                    avg != null && avg > 0 ? buildProfitTargets(avg, price) : [];
                   return (
                     <div
                       key={sym}
@@ -996,36 +1024,55 @@ export default function HomeTable() {
                               return (
                                 <div
                                   key={tg.label}
-                                  className={`rounded-lg border px-2 py-2 text-center ${
+                                  className={`rounded-lg border-2 px-2 py-2 text-center transition ${
                                     already
-                                      ? "border-emerald-300 bg-emerald-50"
+                                      ? "border-emerald-500 bg-emerald-100 shadow-sm ring-2 ring-emerald-300/80"
                                       : "border-slate-200 bg-white"
                                   }`}
                                 >
-                                  <div className="text-[10px] font-bold text-slate-500">
+                                  <div
+                                    className={`text-[10px] font-bold ${
+                                      already ? "text-emerald-800" : "text-slate-500"
+                                    }`}
+                                  >
+                                    {already ? "✓ " : ""}
                                     {tg.label}
                                   </div>
-                                  <div className="font-mono text-xs font-bold text-slate-900">
+                                  <div
+                                    className={`font-mono text-xs font-bold ${
+                                      already ? "text-emerald-950" : "text-slate-900"
+                                    }`}
+                                  >
                                     {formatPhp(tg.price)}
                                   </div>
-                                  <div className="mt-0.5 text-[10px] font-semibold text-indigo-800">
+                                  <div
+                                    className={`mt-0.5 text-[10px] font-semibold ${
+                                      already ? "text-emerald-800" : "text-indigo-800"
+                                    }`}
+                                  >
                                     Bag {formatPhp(bagValue)}
                                   </div>
                                   <div
                                     className={`text-[10px] font-semibold ${
-                                      profitPhp >= 0 ? "text-emerald-700" : "text-rose-600"
+                                      already
+                                        ? "text-emerald-900"
+                                        : profitPhp >= 0
+                                          ? "text-emerald-700"
+                                          : "text-rose-600"
                                     }`}
                                   >
                                     {profitPhp >= 0 ? "+" : ""}
                                     {formatPhp(profitPhp)} P&L
                                   </div>
                                   <div
-                                    className={`text-[10px] font-semibold ${
-                                      already ? "text-emerald-700" : "text-amber-700"
+                                    className={`mt-0.5 text-[10px] font-extrabold ${
+                                      already
+                                        ? "rounded bg-emerald-600 px-1 py-0.5 text-white"
+                                        : "text-amber-700"
                                     }`}
                                   >
                                     {already
-                                      ? "At / above"
+                                      ? "Reached"
                                       : need != null
                                         ? `+${need.toFixed(1)}% from now`
                                         : "—"}
