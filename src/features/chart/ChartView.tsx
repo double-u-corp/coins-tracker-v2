@@ -196,7 +196,7 @@ function PollMiniLine({
       <div className="w-full p-1 pb-0 sm:p-2 sm:pb-0">
       <svg
         viewBox={`0 0 ${w} ${h}`}
-        className="h-[min(92vw,520px)] w-full min-h-[380px] max-h-[65vh] sm:h-64 sm:min-h-0 sm:max-h-none md:h-72 lg:h-80"
+        className="h-[min(92vw,520px)] w-full min-h-[380px] max-h-[65vh] sm:h-48 sm:min-h-0 sm:max-h-none md:h-52 lg:h-56 xl:h-60"
         role="img"
         aria-label="3h poll prices"
         onMouseLeave={() => setHover(null)}

@@ -31,16 +31,6 @@ type Props = {
   points?: { period?: string; high?: number; low?: number; close?: number }[] | null;
 };
 
-function recoveryTargets(avg: number) {
-  // Price levels vs average cost
-  return [
-    { label: "+3%", pct: 0.03, price: avg * 1.03 },
-    { label: "+6%", pct: 0.06, price: avg * 1.06 },
-    { label: "+10%", pct: 0.1, price: avg * 1.1 },
-    { label: "+15%", pct: 0.15, price: avg * 1.15 },
-  ];
-}
-
 function buildAgentPrompt(args: {
   symbol: string;
   currentPrice: number;
@@ -326,6 +316,65 @@ If a **verified** incident exists → flag it and lean **WAIT / SKIP / DO NOT AD
   return lines.join("\n");
 }
 
+
+type LadderLevel = { label: string; price: number; pct: number };
+
+/** Same tiers as Home On-hold: L1 +3→15, L2 +15→30, L3 +30→60; downside mirror when underwater. */
+function buildProfitTargets(avg: number, price: number): {
+  upside: LadderLevel[];
+  downside: LadderLevel[];
+  tier: 1 | 2 | 3;
+  tierLabel: string;
+  mode: "upside" | "downside";
+} {
+  if (!(avg > 0)) {
+    return { upside: [], downside: [], tier: 1, tierLabel: "L1 · recovery", mode: "upside" };
+  }
+  const gain = price > 0 ? (price - avg) / avg : 0;
+  const T1 = [0.03, 0.06, 0.1, 0.15];
+  const T2 = [0.15, 0.2, 0.25, 0.3];
+  const T3 = [0.3, 0.4, 0.5, 0.6];
+  let tier: 1 | 2 | 3 = 1;
+  let tierLabel = "L1 · +3→15%";
+  let steps = T1;
+  if (gain >= 0.3 - 1e-9) {
+    tier = 3;
+    tierLabel = "L3 · +30→60% (trim zone)";
+    steps = T3;
+  } else if (gain >= 0.15 - 1e-9) {
+    tier = 2;
+    tierLabel = "L2 · +15→30%";
+    steps = T2;
+  }
+  const fmtPct = (pct: number) => {
+    const p = pct * 100;
+    const s = Math.abs(p - Math.round(p)) < 1e-6 ? String(Math.round(p)) : p.toFixed(1);
+    return pct >= 0 ? `+${s}%` : `${s}%`;
+  };
+  const upside = steps.map((pct) => ({ label: fmtPct(pct), price: avg * (1 + pct), pct }));
+  const D1 = [-0.03, -0.06, -0.1, -0.15];
+  const D2 = [-0.15, -0.2, -0.25, -0.3];
+  const D3 = [-0.3, -0.4, -0.5, -0.6];
+  const loss = -gain;
+  let downTier: 1 | 2 | 3 = 1;
+  let downTierLabel = "L1 · −3→15%";
+  let downSteps = D1;
+  if (loss >= 0.3 - 1e-9) {
+    downTier = 3;
+    downTierLabel = "L3 · −30→60%";
+    downSteps = D3;
+  } else if (loss >= 0.15 - 1e-9) {
+    downTier = 2;
+    downTierLabel = "L2 · −15→30%";
+    downSteps = D2;
+  }
+  const downside = downSteps.map((pct) => ({ label: fmtPct(pct), price: avg * (1 + pct), pct }));
+  if (gain >= 0) {
+    return { upside, downside: [], tier, tierLabel, mode: "upside" };
+  }
+  return { upside: [], downside, tier: downTier, tierLabel: downTierLabel, mode: "downside" };
+}
+
 export default function PositionAndTradesCard({
   symbol,
   currentPrice,
@@ -355,7 +404,14 @@ export default function PositionAndTradesCard({
       ? ((currentPrice - avg) / avg) * 100
       : null;
 
-  const targets = useMemo(() => (avg != null && avg > 0 ? recoveryTargets(avg) : []), [avg]);
+  const ladder = useMemo(
+    () =>
+      avg != null && avg > 0
+        ? buildProfitTargets(avg, currentPrice)
+        : { upside: [], downside: [], tier: 1 as const, tierLabel: "", mode: "upside" as const },
+    [avg, currentPrice]
+  );
+  const targets = ladder.mode === "downside" ? ladder.downside : ladder.upside;
 
   const prompt = useMemo(
     () =>
@@ -500,27 +556,88 @@ export default function PositionAndTradesCard({
             <div className="text-[10px] font-bold uppercase text-slate-500 mb-1.5">
               Price to be profitable vs avg
             </div>
+            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1">
+              <div
+                className={`text-[10px] font-bold uppercase tracking-wide ${
+                  ladder.mode === "downside" ? "text-rose-700" : "text-slate-500"
+                }`}
+              >
+                {ladder.mode === "downside"
+                  ? `Downside vs avg · ${ladder.tierLabel}`
+                  : `Upside vs avg · ${ladder.tierLabel}`}
+              </div>
+              {ladder.mode === "upside" && ladder.tier === 3 && (
+                <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900">
+                  Near +60% · consider trim
+                </span>
+              )}
+            </div>
             <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-              {targets.map((t) => {
+              {targets.map((tg) => {
+                const isDown = ladder.mode === "downside";
                 const need =
-                  currentPrice > 0 ? ((t.price - currentPrice) / currentPrice) * 100 : null;
-                const already = currentPrice >= t.price;
-                const bagValue = holdings * t.price;
+                  currentPrice > 0 ? ((tg.price - currentPrice) / currentPrice) * 100 : null;
+                const already = isDown
+                  ? currentPrice > 0 && currentPrice <= tg.price
+                  : currentPrice >= tg.price;
+                const reached = targets.filter((l) =>
+                  isDown
+                    ? currentPrice > 0 && currentPrice <= l.price
+                    : currentPrice >= l.price
+                );
+                const currentStagePct =
+                  reached.length > 0 ? reached[reached.length - 1].pct : null;
+                const isCurrentStage =
+                  currentStagePct != null && tg.pct === currentStagePct;
+                const bagValue = holdings * tg.price;
                 const profitPhp = bagValue - spent;
                 return (
                   <div
-                    key={t.label}
-                    className={`rounded-lg border px-2 py-2 text-center ${
-                      already
-                        ? "border-emerald-300 bg-emerald-50"
-                        : "border-slate-200 bg-white"
+                    key={tg.label}
+                    className={`rounded-lg border-2 px-2 py-2 text-center transition ${
+                      isCurrentStage
+                        ? isDown
+                          ? "border-rose-600 bg-rose-100 shadow-md ring-2 ring-rose-400"
+                          : "border-emerald-600 bg-emerald-100 shadow-md ring-2 ring-emerald-400"
+                        : already
+                          ? isDown
+                            ? "border-rose-400 bg-rose-50"
+                            : "border-emerald-400 bg-emerald-50"
+                          : isDown
+                            ? "border-rose-200 bg-white"
+                            : "border-slate-200 bg-white"
                     }`}
                   >
-                    <div className="text-[10px] font-bold text-slate-500">{t.label}</div>
-                    <div className="font-mono text-xs font-bold text-slate-900">
-                      {formatPhp(t.price)}
+                    <div
+                      className={`text-[10px] font-bold ${
+                        already
+                          ? isDown
+                            ? "text-rose-900"
+                            : "text-emerald-800"
+                          : isDown
+                            ? "text-rose-600"
+                            : "text-slate-500"
+                      }`}
+                    >
+                      {already ? (isDown ? "▼ " : "✓ ") : ""}
+                      {tg.label}
                     </div>
-                    <div className="text-[10px] font-semibold text-indigo-800 mt-0.5">
+                    <div
+                      className={`font-mono text-xs font-bold ${
+                        already
+                          ? isDown
+                            ? "text-rose-950"
+                            : "text-emerald-950"
+                          : "text-slate-900"
+                      }`}
+                    >
+                      {formatPhp(tg.price)}
+                    </div>
+                    <div
+                      className={`mt-0.5 text-[10px] font-semibold ${
+                        isDown ? "text-rose-800" : "text-indigo-800"
+                      }`}
+                    >
                       Bag {formatPhp(bagValue)}
                     </div>
                     <div
@@ -532,15 +649,29 @@ export default function PositionAndTradesCard({
                       {formatPhp(profitPhp)} P&L
                     </div>
                     <div
-                      className={`text-[10px] font-semibold ${
-                        already ? "text-emerald-700" : "text-amber-700"
+                      className={`mt-0.5 text-[10px] font-extrabold ${
+                        isCurrentStage
+                          ? isDown
+                            ? "rounded bg-rose-600 px-1 py-0.5 text-white"
+                            : "rounded bg-emerald-600 px-1 py-0.5 text-white"
+                          : already
+                            ? isDown
+                              ? "text-rose-700"
+                              : "text-emerald-700"
+                            : isDown
+                              ? "text-rose-600"
+                              : "text-amber-700"
                       }`}
                     >
-                      {already
-                        ? "At / above"
-                        : need != null
-                          ? `+${need.toFixed(1)}% from now`
-                          : "—"}
+                      {isCurrentStage
+                        ? "You are here"
+                        : already
+                          ? isDown
+                            ? "Passed"
+                            : "Reached"
+                          : need != null
+                            ? `${need >= 0 ? "+" : ""}${need.toFixed(1)}% from now`
+                            : "—"}
                     </div>
                   </div>
                 );

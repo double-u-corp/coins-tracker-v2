@@ -1,8 +1,17 @@
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useState, useEffect, useMemo, type ReactNode } from "react";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
 import { buildCoinAnalytics, type CoinAnalytics } from "@/features/trade/useTradeLogic";
+
+const ManageCoinsView = dynamic(() => import("@/features/manage/ManageCoinsView"), {
+  ssr: false,
+  loading: () => (
+    <p className="py-6 text-center text-sm text-gray-500">Loading manage…</p>
+  ),
+});
+
 
 import { useHomeLogic } from "./useHomeLogic";
 import NewRecordModal from "./NewRecordModal";
@@ -178,6 +187,7 @@ function MonitorCard({
   portfolio,
   daysHeld,
   isRealized,
+  onManage,
 }: {
   card: {
     symbol: string;
@@ -215,6 +225,7 @@ function MonitorCard({
   portfolio: { symbol?: string; holdings?: number; spent?: number }[] | null | undefined;
   daysHeld?: number | null;
   isRealized?: boolean;
+  onManage?: (symbol: string, name: string) => void;
 }) {
   const hit =
     card.high?.alertType === "reached" || card.low?.alertType === "reached";
@@ -294,12 +305,24 @@ function MonitorCard({
             </div>
           ) : null}
         </div>
-        <Link
-          href={`/chart?symbol=${encodeURIComponent(card.symbol)}`}
-          className="shrink-0 text-sm font-bold text-brand-600 hover:underline"
-        >
-          Spot →
-        </Link>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          {onManage && (
+            <button
+              type="button"
+              onClick={() => onManage(card.symbol, card.name)}
+              className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-800 hover:bg-emerald-100"
+              title="Update high / low targets"
+            >
+              ⚙️ Manage
+            </button>
+          )}
+          <Link
+            href={`/chart?symbol=${encodeURIComponent(card.symbol)}`}
+            className="text-sm font-bold text-brand-600 hover:underline"
+          >
+            Spot →
+          </Link>
+        </div>
       </div>
 
       <div className="space-y-1.5 text-[11px]">
@@ -516,6 +539,7 @@ export default function HomeTable() {
     alertRecords,
     alertModalOpen,
     closeAlertModal,
+    loadSummary,
     cronTriggering,
     triggerCronManually,
     authenticated,
@@ -585,6 +609,10 @@ export default function HomeTable() {
   const [homeAnalyticsBySym, setHomeAnalyticsBySym] = useState<Record<string, CoinAnalytics>>({});
 
   const [directionCopied, setDirectionCopied] = useState(false);
+  const [manageOpen, setManageOpen] = useState(false);
+  const [manageSymbol, setManageSymbol] = useState<string | null>(null);
+  const [manageName, setManageName] = useState<string | null>(null);
+
 
   const copyDirectionAgent = async () => {
     const anchors = (["BTCPHP", "ETHPHP", "XAUTPHP"] as const).map((sym) => {
@@ -783,6 +811,48 @@ export default function HomeTable() {
   return (
     <div>
       <NewRecordModal open={alertModalOpen} records={alertRecords} onClose={closeAlertModal} />
+
+      {manageOpen && manageSymbol && (
+        <div
+          className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/45 p-0 sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Manage coin"
+          onClick={() => {
+            setManageOpen(false);
+            setManageSymbol(null);
+            setManageName(null);
+            void loadSummary?.();
+          }}
+        >
+          <div
+            className="flex max-h-[92vh] w-full max-w-lg flex-col rounded-t-2xl sm:rounded-xl border border-gray-200 bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2 border-b border-gray-100 px-4 py-3 shrink-0">
+              <h2 className="text-base font-bold text-gray-900">
+                ⚙️ Manage · {manageName || manageSymbol}{" "}
+                <span className="font-mono text-sm text-indigo-700">{manageSymbol}</span>
+              </h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setManageOpen(false);
+                  setManageSymbol(null);
+                  setManageName(null);
+                  void loadSummary?.();
+                }}
+                className="rounded-md border border-gray-200 px-2.5 py-1 text-sm font-bold text-gray-600 hover:bg-gray-50"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="overflow-y-auto px-3 py-3 sm:px-4">
+              <ManageCoinsView modalMode focusSymbol={manageSymbol} />
+            </div>
+          </div>
+        </div>
+      )}
       <PriceUpdateModal
         open={priceUpdateModalOpen}
         coin={priceUpdateCoin}
@@ -1358,6 +1428,11 @@ export default function HomeTable() {
                     portfolio={portfolio}
                     daysHeld={daysHeldBySymbol?.[card.symbol.toUpperCase()] ?? null}
                     isRealized={!!realizedSymbols?.[card.symbol.toUpperCase()]}
+                    onManage={(sym, name) => {
+                      setManageSymbol(sym);
+                      setManageName(name);
+                      setManageOpen(true);
+                    }}
                   />
                 ))}
               </div>
