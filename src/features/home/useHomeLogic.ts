@@ -864,5 +864,6 @@ export function useHomeLogic() {
     closeAlertModal,
     cronTriggering,
     triggerCronManually,
+    loadSummary,
   };
 }
