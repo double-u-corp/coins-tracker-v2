@@ -1337,27 +1337,32 @@ export default function HomeTable() {
             )}
           </section>
 
-          <HomeWatchPlanCharts
-            variant="plan"
-            emptyHint="No monitored coins without an open holding."
-            coins={planMonitorCards.map((card) => {
-              const coin =
-                allCoins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase()) ||
-                coins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase());
-              const pct =
-                movePctBySymbol[card.symbol] ??
-                movePctBySymbol[card.symbol.replace(/PHP$/i, "")] ??
-                coin?.priceChangePct ??
-                null;
-              return {
-                symbol: card.symbol,
-                name: card.name,
-                currentPrice: card.currentPrice ?? coin?.currentPrice ?? null,
-                priceChangePct: pct != null && Number.isFinite(pct) ? Number(pct) : null,
-                kind: "plan" as const,
-              };
-            })}
-          />
+          <section className="scroll-mt-20 rounded-xl border-2 border-sky-200 bg-sky-50/40 p-4 shadow-sm">
+            <div className="mb-3">
+              <h2 className="text-base font-extrabold text-sky-950">3 · Watch / plan · not held</h2>
+              <p className="mt-0.5 text-[11px] text-sky-900/80">
+                Monitored coins with no open bag — high/low targets, journal agent entry/exit, and
+                review dates. Includes realized / rebuy if still on monitor.
+              </p>
+            </div>
+            {planMonitorCards.length === 0 ? (
+              <p className="text-[11px] text-sky-800/70">
+                No monitored coins without an open holding. Flag coins on Manage → Monitor.
+              </p>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {planMonitorCards.map((card) => (
+                  <MonitorCard
+                    key={card.symbol}
+                    card={card}
+                    portfolio={portfolio}
+                    daysHeld={daysHeldBySymbol?.[card.symbol.toUpperCase()] ?? null}
+                    isRealized={!!realizedSymbols?.[card.symbol.toUpperCase()]}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
 </div>
       )}
 
