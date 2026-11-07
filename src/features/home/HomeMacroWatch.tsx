@@ -180,8 +180,39 @@ function formatMacroAgentPromptFromEvents(events: MacroEvent[]): string {
   return lines.join("\n");
 }
 
+
+const COINS_PH_PROMPT = `You are a neutral research assistant for a Philippines spot crypto trader who uses **Coins.ph** (coins.ph) for PHP pairs.
+
+## Task
+Summarize **current and upcoming** Coins.ph platform issues, specifically auditing inbound PHP funding (bank transfers / InstaPay / PESONet restrictions), delistings, new listings, and spot trading service health. Stay factual.
+
+## Cover (only if verified)
+1. **PHP Cash-In / Cash-Out & Banking Rails** — Status of direct bank transfers (InstaPay / PESONet), e-wallet gateways, or DCPay Philippines processing limitations impacting retail fiat onboarding.
+2. **Delistings** — Coins removed or scheduled for removal; final trade / withdrawal deadlines.
+3. **New listings** — Coins newly added or announced for Coins.ph PHP pairs.
+4. **Service & Trading Issues** — Maintenance windows, app outages, convert/spot engine latency, or KYC blocks.
+5. **Fees or Policy Changes** — Any adjustments affecting retail PHP spot users.
+
+## Rules
+- Be neutral. Do not invent outages or restrictions.
+- Prefer official Coins.ph announcements, support help center notices, status pages, and reputable local/crypto news.
+- Do **not** invent news. Do **NOT** use training-memory headlines (often stale).
+- If nothing verified, say **"none verified"** per section.
+- Philippines / PHP context. Not investment advice.
+
+## Answer format
+1. **Verdict:** All clear / Caution / Major issues
+2. **PHP Cash-In & Banking Rails** (status & details)
+3. **Delistings** (bullet list or none verified)
+4. **New coins** (bullet list or none verified)
+5. **Trading & service issues** (bullet list or none verified)
+6. **Sources** (links if found)
+7. **Recheck by** (date)
+`;
+
 export default function HomeMacroWatch() {
     const [macroPromptCopied, setMacroPromptCopied] = useState(false);
+  const [coinsPhCopied, setCoinsPhCopied] = useState(false);
   const [events, setEvents] = useState<MacroEvent[]>([]);
   const [meta, setMeta] = useState<MetaStore>({ version: 1, deletedKeys: [], history: [] });
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
@@ -503,6 +534,22 @@ export default function HomeMacroWatch() {
             title="Copy macro calendar agent prompt"
           >
             {macroPromptCopied ? "✅ Copied" : "📋 Macro agent"}
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(COINS_PH_PROMPT);
+                setCoinsPhCopied(true);
+                setTimeout(() => setCoinsPhCopied(false), 2000);
+              } catch {
+                /* ignore */
+              }
+            }}
+            className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-950 hover:bg-amber-100"
+            title="Coins.ph platform status research prompt"
+          >
+            {coinsPhCopied ? "✅ Copied" : "📋 Coins.ph agent"}
           </button>
           <button
             type="button"

@@ -16,7 +16,6 @@ const ManageCoinsView = dynamic(() => import("@/features/manage/ManageCoinsView"
 import { useHomeLogic } from "./useHomeLogic";
 import NewRecordModal from "./NewRecordModal";
 import HomeMacroWatch from "./HomeMacroWatch";
-import NewsSection from "./NewsSection";
 import HomeTwoDayMovers from "./HomeTwoDayMovers";
 import HomeWatchPlanCharts from "./HomeWatchPlanCharts";
 import HomeNearSupportCharts from "./HomeNearSupportCharts";
@@ -474,22 +473,49 @@ export default function HomeTable() {
     }
     setNextCronLabel(nextLabel);
 
-    // Enrich from Timing activity (same /api/swing-timing slots as Timing page)
+    // Enrich from Timing (28d): next-slot heat + book buy/sell weekday lean
     let cancelled = false;
-    fetch(`/api/swing-timing?days=14&_=${Date.now()}`, { cache: "no-store" })
+    fetch(`/api/swing-timing?days=28&_=${Date.now()}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((data: { slots?: { hour: number; label: string; avgAbsPct: number; intensity: string }[] } | null) => {
-        if (cancelled || !data?.slots?.length) return;
-        const match = data.slots.find((s) => s.hour === nextHour);
-        if (!match) return;
-        const avg =
-          match.avgAbsPct != null && Number.isFinite(match.avgAbsPct)
-            ? `${Number(match.avgAbsPct).toFixed(3)}% avg`
-            : null;
-        const heat = match.intensity ? String(match.intensity) : null;
-        const parts = [match.label || nextLabel, avg, heat].filter(Boolean);
-        setNextCronLabel(parts.join(" · "));
-      })
+      .then(
+        (
+          data: {
+            slots?: { hour: number; label: string; avgAbsPct: number; intensity: string }[];
+            dayFlow?: { label: string; upSharePct: number; avgSignedPct: number }[];
+          } | null
+        ) => {
+          if (cancelled || !data) return;
+          const parts: string[] = [];
+          if (data.slots?.length) {
+            const match = data.slots.find((s) => s.hour === nextHour);
+            if (match) {
+              const avg =
+                match.avgAbsPct != null && Number.isFinite(match.avgAbsPct)
+                  ? `${Number(match.avgAbsPct).toFixed(3)}% avg`
+                  : null;
+              const heat = match.intensity ? String(match.intensity) : null;
+              parts.push(...[match.label || nextLabel, avg, heat].filter(Boolean) as string[]);
+            } else {
+              parts.push(nextLabel);
+            }
+          } else {
+            parts.push(nextLabel);
+          }
+          // Overall book: strongest buy-lean / sell-lean weekdays (28d)
+          const flow = data.dayFlow;
+          if (flow && flow.length >= 2) {
+            const buyDay = flow[0];
+            const sellDay = flow[flow.length - 1];
+            if (buyDay?.label && sellDay?.label) {
+              parts.push(
+                `28d book: lean buy ${buyDay.label} (${Number(buyDay.upSharePct).toFixed(0)}% up)` +
+                  ` · lean sell ${sellDay.label} (${Number(sellDay.upSharePct).toFixed(0)}% up)`
+              );
+            }
+          }
+          setNextCronLabel(parts.join(" · "));
+        }
+      )
       .catch(() => {
         /* keep static nextLabel */
       });
@@ -1508,12 +1534,11 @@ export default function HomeTable() {
       )}
 
 
-      {/* 1) Market Signals (Core outlet + Price & RSS) */}
+      {/* 1) 2d movers */}
       <HomeTwoDayMovers />
 
-      <NewsSection />
 
-      {/* 2) Macro watch — after market signals */}
+      {/* 2) Macro watch */}
       <HomeMacroWatch />
 
       {/* 3) General journal */}

@@ -80,6 +80,24 @@ type CoinWeekdayBias = {
   lean: "buy-lean" | "sell-lean" | "mixed";
 };
 
+type UserFillOutcome = {
+  type: "buy" | "sell";
+  symbol: string;
+  name: string;
+  phpAmount: number;
+  price: number;
+  coinAmount: number;
+  /** ISO UTC */
+  transactedAt: string;
+  /** Manila label */
+  manilaLabel: string;
+  weekdayLabel: string;
+  /** % vs fill price */
+  path24hPct: number | null;
+  path72hPct: number | null;
+  pathToLatestPct: number | null;
+};
+
 type DayFlowSummary = {
   day: number;
   label: string;
@@ -117,6 +135,7 @@ type ResponseBody = {
   strongestUpWeekday: WeekdayStat | null;
   strongestDownWeekday: WeekdayStat | null;
   topMoversByHotSlot: CoinSlotHighlight[];
+  userFills: UserFillOutcome[];
   /** Ranked by totalAbsPct over last 48h — not the 14/30/60 hot-slot list */
   topMovers2d: Coin2dMover[];
   /** Weekdays sorted most buy-lean (high % up) → most sell-lean */
@@ -611,6 +630,91 @@ export default async function handler(
     );
   }
 
+
+  // Your fills in window + path after fill (from 3h polls)
+  const fillRows = await prisma.transaction.findMany({
+    where: {
+      transactedAt: { gte: since },
+      type: { in: ["buy", "sell"] },
+      coinId: { not: null },
+    },
+    include: { coin: { select: { id: true, symbol: true, name: true } } },
+    orderBy: { transactedAt: "asc" },
+  });
+
+  const userFills: UserFillOutcome[] = [];
+  for (const tx of fillRows) {
+    if (!tx.coin) continue;
+    const at = tx.transactedAt;
+    const manilaMs = at.getTime() + 8 * 60 * 60 * 1000;
+    const manila = new Date(manilaMs);
+    // format via UTC getters after +8 offset
+    const wd = WEEKDAY_LABELS[manila.getUTCDay()];
+    const manilaLabel = `${manila.getUTCFullYear()}-${String(manila.getUTCMonth() + 1).padStart(2, "0")}-${String(manila.getUTCDate()).padStart(2, "0")} ${String(manila.getUTCHours()).padStart(2, "0")}:${String(manila.getUTCMinutes()).padStart(2, "0")} MNL`;
+
+    const recs = await prisma.record.findMany({
+      where: { coinId: tx.coin.id, createdAt: { gte: at } },
+      orderBy: { createdAt: "asc" },
+      select: { price: true, createdAt: true },
+      take: 80,
+    });
+    const fillPx = Number(tx.price);
+    const pctAt = (hours: number): number | null => {
+      if (!(fillPx > 0) || recs.length === 0) return null;
+      const target = at.getTime() + hours * 3600 * 1000;
+      let last: number | null = null;
+      for (const r of recs) {
+        if (r.createdAt.getTime() <= target) last = r.price;
+        else break;
+      }
+      if (last == null) return null;
+      return Number((((last - fillPx) / fillPx) * 100).toFixed(2));
+    };
+    const latest =
+      recs.length > 0 && fillPx > 0
+        ? Number((((recs[recs.length - 1].price - fillPx) / fillPx) * 100).toFixed(2))
+        : null;
+
+    userFills.push({
+      type: tx.type === "sell" ? "sell" : "buy",
+      symbol: tx.coin.symbol,
+      name: tx.coin.name,
+      phpAmount: tx.phpAmount,
+      price: tx.price,
+      coinAmount: tx.coinAmount,
+      transactedAt: at.toISOString(),
+      manilaLabel,
+      weekdayLabel: wd,
+      path24hPct: pctAt(24),
+      path72hPct: pctAt(72),
+      pathToLatestPct: latest,
+    });
+  }
+
+  // Dynamic guidance from dayFlow + fills
+  if (userFills.length) {
+    const buys = userFills.filter((f) => f.type === "buy");
+    const sells = userFills.filter((f) => f.type === "sell");
+    const avgPath = (arr: UserFillOutcome[], key: "path24hPct" | "path72hPct") => {
+      const xs = arr.map((f) => f[key]).filter((x): x is number => x != null);
+      if (!xs.length) return null;
+      return Number((xs.reduce((a, b) => a + b, 0) / xs.length).toFixed(2));
+    };
+    if (buys.length) {
+      const a24 = avgPath(buys, "path24hPct");
+      const a72 = avgPath(buys, "path72hPct");
+      guidance.push(
+        `Your ${buys.length} buy(s) in this window: avg path 24h ${a24 != null ? a24 + "%" : "n/a"}, 72h ${a72 != null ? a72 + "%" : "n/a"} (vs fill price, poll path).`
+      );
+    }
+    if (sells.length) {
+      const a24 = avgPath(sells, "path24hPct");
+      guidance.push(
+        `Your ${sells.length} sell(s): avg path 24h after exit ${a24 != null ? a24 + "%" : "n/a"} (negative = price fell after sell = good timing).`
+      );
+    }
+  }
+
   return res.status(200).json({
     days,
     generatedAt: new Date().toISOString(),
@@ -628,6 +732,7 @@ export default async function handler(
     strongestUpWeekday,
     strongestDownWeekday,
     topMoversByHotSlot,
+    userFills,
     topMovers2d,
     dayFlow,
     coinsBuyLean,

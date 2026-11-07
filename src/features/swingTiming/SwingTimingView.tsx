@@ -85,6 +85,20 @@ type TimingResponse = {
   strongestUpWeekday?: WeekdayStat | null;
   strongestDownWeekday?: WeekdayStat | null;
   topMoversByHotSlot: CoinSlotHighlight[];
+  userFills?: {
+    type: "buy" | "sell";
+    symbol: string;
+    name: string;
+    phpAmount: number;
+    price: number;
+    coinAmount: number;
+    transactedAt: string;
+    manilaLabel: string;
+    weekdayLabel: string;
+    path24hPct: number | null;
+    path72hPct: number | null;
+    pathToLatestPct: number | null;
+  }[];
   /** Biggest movers last ~2 days only */
   topMovers2d?: Coin2dMover[];
   dayFlow?: DayFlowSummary[];
@@ -771,7 +785,7 @@ function symbolsFor2dPath(data: TimingResponse): string[] {
 }
 
 export default function SwingTimingView() {
-  const [days, setDays] = useState(30);
+  const [days, setDays] = useState(28);
   const [data, setData] = useState<TimingResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1032,7 +1046,7 @@ export default function SwingTimingView() {
           <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mr-1">
             Activity (slots/weekdays)
           </span>
-          {[14, 30, 60].map((d) => (
+          {[14, 28, 30, 60].map((d) => (
             <button
               key={d}
               type="button"
@@ -1181,6 +1195,61 @@ export default function SwingTimingView() {
           )}
 
           {/* Buy / sell day patterns */}
+
+          {(data.userFills && data.userFills.length > 0) && (
+            <div className="rounded-xl border-2 border-slate-200 bg-white p-4 shadow-sm space-y-3">
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900">
+                  Your fills · path after (Manila · {data.days}d)
+                </h3>
+                <p className="mt-0.5 text-[11px] text-slate-600">
+                  Logged buys/sells in this window. Path % is vs fill price using 3h polls — not a scorecard guarantee.
+                </p>
+              </div>
+              <div className="space-y-2">
+                {data.userFills.map((f, i) => {
+                  const pathCls = (v: number | null) => {
+                    if (v == null) return "text-slate-500";
+                    if (f.type === "buy") return v >= 0 ? "text-emerald-700" : "text-rose-700";
+                    // sell: price down after sell is good
+                    return v <= 0 ? "text-emerald-700" : "text-amber-700";
+                  };
+                  const fmt = (v: number | null) =>
+                    v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+                  return (
+                    <div
+                      key={`${f.transactedAt}-${f.symbol}-${i}`}
+                      className={`rounded-lg border px-3 py-2 text-[11px] ${
+                        f.type === "buy"
+                          ? "border-emerald-100 bg-emerald-50/40"
+                          : "border-rose-100 bg-rose-50/40"
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-1">
+                        <span className="font-bold text-slate-900">
+                          {f.type === "buy" ? "BUY" : "SELL"} {f.name}{" "}
+                          <span className="font-mono font-semibold text-slate-500">{f.symbol}</span>
+                        </span>
+                        <span className="text-slate-600">{f.manilaLabel} · {f.weekdayLabel}</span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-slate-700">
+                        <span>
+                          ₱{f.phpAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })} @{" "}
+                          {f.price}
+                        </span>
+                        <span className={pathCls(f.path24hPct)}>24h {fmt(f.path24hPct)}</span>
+                        <span className={pathCls(f.path72hPct)}>72h {fmt(f.path72hPct)}</span>
+                        <span className={pathCls(f.pathToLatestPct)}>
+                          to now {fmt(f.pathToLatestPct)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {data.dayFlow && data.dayFlow.length > 0 && (
             <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm space-y-4">
               <div>
@@ -1536,33 +1605,6 @@ export default function SwingTimingView() {
                 })}
             </div>
           </div>
-
-
-                    {data.topMoversByHotSlot.length > 0 && data.hottestSlot && (
-            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-              <h2 className="text-sm font-bold text-gray-900 mb-1">
-                Most active coins in the hottest window
-              </h2>
-              <p className="text-[11px] text-gray-500 mb-3">
-                {data.hottestSlot.label} — coins with the largest average |move| into that slot
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {data.topMoversByHotSlot.map((c) => (
-                  <Link
-                    key={c.symbol}
-                    href={`/structure?symbol=${encodeURIComponent(c.symbol)}`}
-                    className="flex items-center justify-between rounded-md border border-gray-100 px-3 py-2 text-xs hover:border-indigo-300 hover:bg-indigo-50/40 transition"
-                  >
-                    <span className="font-semibold text-gray-900">
-                      {c.name}{" "}
-                      <span className="font-normal text-gray-400">({c.symbol})</span>
-                    </span>
-                    <span className="font-mono font-bold text-indigo-800">{c.avgAbsPct}%</span>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
 
           <p className="text-[11px] text-gray-400">
             Data as of{" "}
