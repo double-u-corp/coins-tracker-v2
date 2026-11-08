@@ -25,7 +25,8 @@ type DailyPtFull = DailyPt & { high?: number; low?: number };
 /** Agent prompt: rank top near-support coins for spot entry monitoring. */
 function buildNearSupportEntryPrompt(
   hits: RangeHit[],
-  movers2d: { symbol: string; name?: string; netPct?: number; totalAbsPct?: number }[] = []
+    watchPlan: { symbol: string; name: string; currentPrice?: number | null }[] = [],
+  movers2d: { symbol: string; name?: string; netPct?: number; totalAbsPct?: number }[] = [],
 ): string {
   const lines: string[] = [];
   lines.push(
@@ -231,6 +232,7 @@ function positionIn30d(points: DailyPtFull[]): Omit<RangeHit, "symbol" | "name">
  */
 export default function HomeNearSupportCharts({
   universe,
+    watchPlanCoins = []
 }: {
   /** Prefer full watchlist symbols from Home (symbol + name). */
   universe: { symbol: string; name?: string }[];
@@ -392,7 +394,7 @@ export default function HomeNearSupportCharts({
             type="button"
             disabled={hits.length === 0}
             onClick={async () => {
-              const text = buildNearSupportEntryPrompt(hits, movers2d);
+              const text = buildNearSupportEntryPrompt(hits, watchPlanCoins, movers2d);
               try {
                 await navigator.clipboard.writeText(text);
                 setPromptCopied(true);
