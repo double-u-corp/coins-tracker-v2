@@ -43,6 +43,7 @@ export interface PriceLineChartProps {
   buyMarks?: { dayKey: string; price: number }[] | null;
   /** Optional analysis overlays controlled from parent (Spot). */
   overlayControls?: {
+    showClose?: boolean;
     showHigh: boolean;
     showLow: boolean;
     showKey: boolean;
@@ -50,6 +51,7 @@ export interface PriceLineChartProps {
     showS2: boolean;
     showR1: boolean;
     showR2: boolean;
+    onToggleClose?: () => void;
     onToggleHigh: () => void;
     onToggleLow: () => void;
     onToggleKey: () => void;
@@ -346,13 +348,15 @@ export default function PriceLineChart({
         )}
         {overlayControls && (
           <>
+            <IndicatorPill
+              active={overlayControls.showClose !== false}
+              onClick={() => overlayControls.onToggleClose?.()}
+              color="teal"
+              label="11:05"
+            />
             <IndicatorPill active={overlayControls.showHigh} onClick={overlayControls.onToggleHigh} color="green" label="High" />
             <IndicatorPill active={overlayControls.showLow} onClick={overlayControls.onToggleLow} color="red" label="Low" />
             <IndicatorPill active={overlayControls.showKey} onClick={overlayControls.onToggleKey} color="purple" label="Key" />
-            <IndicatorPill active={overlayControls.showS1} onClick={overlayControls.onToggleS1} color="green" label="S1" />
-            <IndicatorPill active={overlayControls.showS2} onClick={overlayControls.onToggleS2} color="green" label="S2" />
-            <IndicatorPill active={overlayControls.showR1} onClick={overlayControls.onToggleR1} color="red" label="R1" />
-            <IndicatorPill active={overlayControls.showR2} onClick={overlayControls.onToggleR2} color="red" label="R2" />
           </>
         )}
       </div>
@@ -404,8 +408,20 @@ export default function PriceLineChart({
               />
             )}
 
+            {/* Daily close prefers 11:05 PM Manila from API — toggle via 11:05 pill */}
+            {(overlayControls == null || overlayControls.showClose !== false) && (
+              <Line
+                type="monotone"
+                dataKey="close"
+                stroke="#0f766e"
+                strokeWidth={2}
+                dot={false}
+                name="11:05 PM"
+                connectNulls
+              />
+            )}
             {showHigh && (
-              <Line type="monotone" dataKey={priceLineName === "Price" ? "price" : "high"} stroke="#22c55e" strokeWidth={1.5} dot={false} name={priceLineName} connectNulls />
+              <Line type="monotone" dataKey="high" stroke="#22c55e" strokeWidth={1.5} dot={false} name="High" connectNulls />
             )}
             <Line
               type="monotone"

@@ -1,6 +1,11 @@
 import { useMemo, useState } from "react";
 import { formatPhp } from "@/lib/format";
 import { findLastPumpContext } from "./TradingInsightCard";
+import { computeConfluenceSignal, detectCrossoverEvent } from "./Technicals";
+import {
+  formatEntryReviewPrompt,
+  formatEntryReviewPromptForGoogle,
+} from "./TradingInsightCard";
 
 type Tx = {
   id: number | string;
@@ -468,13 +473,66 @@ export default function PositionAndTradesCard({
             Spot bag, P&amp;L vs average, recovery targets, and agent review prompt
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void copyPrompt()}
-          className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-900 hover:bg-indigo-100"
-        >
-          {copied ? "✅ Copied" : holding ? "📋 Agent: add more?" : rebuy ? "📋 Agent: rebuy?" : "📋 Agent: buy advice?"}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void copyPrompt()}
+            className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-900 hover:bg-indigo-100"
+          >
+            {copied ? "✅ Copied" : holding ? "📋 Agent: add more?" : rebuy ? "📋 Agent: rebuy?" : "📋 Agent: buy advice?"}
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                const pts = points || [];
+                const confluence = computeConfluenceSignal(pts, {
+                  support: support ?? null,
+                  resistance: resistance ?? null,
+                  currentPrice: currentPrice ?? null,
+                });
+                const cross = pts.length ? detectCrossoverEvent(pts) : null;
+                const full = formatEntryReviewPrompt(
+                  symbol,
+                  confluence,
+                  cross,
+                  portfolio,
+                  null,
+                  pts
+                );
+                const mini = formatEntryReviewPromptForGoogle(
+                  symbol,
+                  confluence,
+                  cross,
+                  portfolio,
+                  null,
+                  pts
+                );
+                try {
+                  await navigator.clipboard.writeText(full);
+                } catch {
+                  /* ignore */
+                }
+                window.open(
+                  `https://www.google.com/search?q=${encodeURIComponent(mini)}`,
+                  "_blank",
+                  "noopener,noreferrer"
+                );
+              } catch {
+                /* fallback */
+                try {
+                  await navigator.clipboard.writeText(prompt);
+                } catch {
+                  /* ignore */
+                }
+              }
+            }}
+            title="Copies full Spot review to clipboard; opens Google with compact prompt (±30d catalysts + journal markdown)"
+            className="rounded-md border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-bold text-sky-900 hover:bg-sky-100"
+          >
+            🔍 Google review
+          </button>
+        </div>
       </div>
 
       {/* Position summary */}

@@ -403,8 +403,9 @@ export default function ChartView() {
     portfolio,
   } = useChartLogic();
 
-  const [showHigh, setShowHigh] = useState(true);
-  const [showLow, setShowLow] = useState(true);
+  const [showClose, setShowClose] = useState(true);
+  const [showHigh, setShowHigh] = useState(false);
+  const [showLow, setShowLow] = useState(false);
   const [showKeyLevels, setShowKeyLevels] = useState(false);
   const [showS1, setShowS1] = useState(false);
   const [showS2, setShowS2] = useState(false);
@@ -855,7 +856,7 @@ export default function ChartView() {
 
   const structureExtraLevels = useMemo(() => {
     if (points.length < 5) return null;
-    const anyLevel = showS1 || showS2 || showR1 || showR2;
+    const anyLevel = false; // S1–R2 overlays removed from Spot chart
     if (!anyLevel) return null;
     const sup = technicals.support ?? 0;
     const res = technicals.resistance ?? 0;
@@ -1166,20 +1167,22 @@ export default function ChartView() {
                 intradayPoints={intradayPoints}
                 buyMarks={buyMarks}
                 overlayControls={{
+                  showClose,
                   showHigh,
                   showLow,
                   showKey: showKeyLevels,
-                  showS1,
-                  showS2,
-                  showR1,
-                  showR2,
+                  showS1: false,
+                  showS2: false,
+                  showR1: false,
+                  showR2: false,
+                  onToggleClose: () => setShowClose((v) => !v),
                   onToggleHigh: () => setShowHigh((v) => !v),
                   onToggleLow: () => setShowLow((v) => !v),
                   onToggleKey: () => setShowKeyLevels((v) => !v),
-                  onToggleS1: () => setShowS1((v) => !v),
-                  onToggleS2: () => setShowS2((v) => !v),
-                  onToggleR1: () => setShowR1((v) => !v),
-                  onToggleR2: () => setShowR2((v) => !v),
+                  onToggleS1: () => {},
+                  onToggleS2: () => {},
+                  onToggleR1: () => {},
+                  onToggleR2: () => {},
                 }}
               />
             )}

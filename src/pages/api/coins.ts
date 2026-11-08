@@ -243,6 +243,7 @@ async function handleChart(
     close: number;
     open: number;
     openLocked: boolean; // true once 02:05 (or carried 23:05) set
+    eveningClose: number | null; // nearest 23:05 Manila print for this day
   };
   const buckets = new Map<string, BucketAcc>();
   /** Manila calendar day (YYYY-MM-DD) → price nearest 23:05 for next-day open carry */
@@ -285,11 +286,15 @@ async function handleChart(
         close: record.price,
         open: record.price,
         openLocked: isOpen205,
+        eveningClose: isEvening1105 ? record.price : (null as number | null),
       });
     } else {
       existing.high = Math.max(existing.high, record.price);
       existing.low = Math.min(existing.low, record.price);
       existing.close = record.price;
+      if (isEvening1105) {
+        existing.eveningClose = record.price;
+      }
       // Lock open on 02:05 Manila when we see it
       if (isOpen205) {
         existing.open = record.price;
@@ -323,12 +328,13 @@ async function handleChart(
   }
 
   const points: ChartPoint[] = Array.from(buckets.entries())
-    .map(([period, { label, high, low, close, open }]) => ({
+    .map(([period, { label, high, low, close, open, eveningClose }]) => ({
       period,
       label,
       high,
       low,
-      close,
+      // Default chart path: 11:05 PM Manila when we have that poll, else last print of day
+      close: eveningClose != null ? eveningClose : close,
       open,
     }))
     .sort((a, b) => a.period.localeCompare(b.period));

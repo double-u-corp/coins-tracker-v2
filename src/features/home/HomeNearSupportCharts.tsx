@@ -25,7 +25,8 @@ type DailyPtFull = DailyPt & { high?: number; low?: number };
 /** Agent prompt: rank top near-support coins for spot entry monitoring. */
 function buildNearSupportEntryPrompt(
   hits: RangeHit[],
-  watchPlan: { symbol: string; name: string; currentPrice?: number | null }[] = []
+  watchPlan: { symbol: string; name: string; currentPrice?: number | null }[] = [],
+  movers2d: { symbol: string; name?: string; netPct?: number; totalAbsPct?: number }[] = []
 ): string {
   const lines: string[] = [];
   lines.push(
@@ -34,7 +35,7 @@ function buildNearSupportEntryPrompt(
   lines.push(``);
   lines.push(`## Task`);
   lines.push(
-    `Help the trader **monitor** and rank coins for possible **staged limit buys** (not market-chase). Do not force a bullish bias. Weak/unclear → WAIT / SKIP and hold cash.`
+    `Help the trader **monitor** and rank which coin is **better to stage a spot buy** from Lists A+B+C (not market-chase). One top pick or HOLD CASH. Do not force a bullish bias. Weak/unclear -> WAIT / SKIP and hold cash.`
   );
   lines.push(``);
   lines.push(`## List A — Near 30-day support · top 8 (app ranking)`);
@@ -74,9 +75,33 @@ function buildNearSupportEntryPrompt(
     });
   }
   lines.push(``);
+  lines.push(`## List C — 2d · biggest movers (path |%| over ~2 days)`);
+  lines.push(
+    `Most movement recently — may be news-driven. Rank for spot entry only if not extended chase; prefer pullbacks.`
+  );
+  if (!movers2d.length) {
+    lines.push(`(none loaded)`);
+  } else {
+    movers2d.slice(0, 10).forEach((m, i) => {
+      const sym = String(m.symbol).toUpperCase();
+      const base = m.name || sym.replace(/PHP$/i, "");
+      const net =
+        m.netPct != null && Number.isFinite(Number(m.netPct))
+          ? `${Number(m.netPct) >= 0 ? "+" : ""}${Number(m.netPct).toFixed(1)}% net`
+          : "";
+      const abs =
+        m.totalAbsPct != null && Number.isFinite(Number(m.totalAbsPct))
+          ? `${Number(m.totalAbsPct).toFixed(1)}% path`
+          : "";
+      lines.push(
+        `${i + 1}. **${base}** (\`${sym}\`) — ${[abs, net].filter(Boolean).join(" · ") || "mover"}`
+      );
+    });
+  }
+  lines.push(``);
   lines.push(`## Mandatory research (before any ranking)`);
   lines.push(
-    `For **each** coin in List A and List B, search **verified** sources only (no training-memory headlines; do not invent events):`
+    `For **each** coin in List A, List B, and List C, search **verified** sources only (no training-memory headlines; do not invent events):`
   );
   lines.push(
     `1. **Past ~30 calendar days** — news, listings/delistings, unlocks, exploits, hacks, governance, partnerships, regulatory hits tied to the **project ticker/name** (not the local PHP pair suffix).`
@@ -207,12 +232,9 @@ function positionIn30d(points: DailyPtFull[]): Omit<RangeHit, "symbol" | "name">
  */
 export default function HomeNearSupportCharts({
   universe,
-  watchPlanCoins = [],
 }: {
   /** Prefer full watchlist symbols from Home (symbol + name). */
   universe: { symbol: string; name?: string }[];
-  /** Watch/plan coins not currently held (List B in the agent prompt). */
-  watchPlanCoins?: { symbol: string; name: string; currentPrice?: number | null }[];
 }) {
   const [hits, setHits] = useState<RangeHit[]>([]);
   const [loading, setLoading] = useState(false);
@@ -222,6 +244,45 @@ export default function HomeNearSupportCharts({
   const [dailyPoints, setDailyPoints] = useState<DailyPt[]>([]);
   const [seriesLoading, setSeriesLoading] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
+  const [movers2d, setMovers2d] = useState<
+    { symbol: string; name?: string; netPct?: number; totalAbsPct?: number }[]
+  >([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        let list: any[] = [];
+        for (const d of [14, 28, 7]) {
+          const res = await fetch(`/api/swing-timing?days=${d}&_=${Date.now()}`, {
+            cache: "no-store",
+          });
+          if (!res.ok) continue;
+          const data = await res.json();
+          if (Array.isArray(data.topMovers2d) && data.topMovers2d.length) {
+            list = data.topMovers2d;
+            break;
+          }
+        }
+        if (!cancelled) {
+          setMovers2d(
+            list.slice(0, 10).map((m: any) => ({
+              symbol: String(m.symbol),
+              name: m.name ? String(m.name) : undefined,
+              netPct: m.netPct != null ? Number(m.netPct) : undefined,
+              totalAbsPct: m.totalAbsPct != null ? Number(m.totalAbsPct) : undefined,
+            }))
+          );
+        }
+      } catch {
+        /* optional */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
 
   const scan = useCallback(async (force = false) => {
     const list = universe.filter((u) => u.symbol && !/^(BTC|ETH|XAUT)PHP$/i.test(u.symbol));
@@ -313,7 +374,7 @@ export default function HomeNearSupportCharts({
           <p className="mt-0.5 text-[11px] text-rose-900/80">
             Lowest % of the 30-day range first (near support / discount zone). Same 3h + 20 SMA
             chart. Use <span className="font-semibold">Entry monitor prompt</span> for agent research on this
-            top 8 <span className="font-semibold">plus Watch / plan · not held</span> (±30d news/events,
+            top 8 <span className="font-semibold">+ Watch / plan + 2d movers</span> (±30d news/events,
             X accounts, copy-ready markdown). Confirm on Spot — not a buy signal by itself.
           </p>
         </div>
@@ -330,7 +391,7 @@ export default function HomeNearSupportCharts({
             type="button"
             disabled={hits.length === 0}
             onClick={async () => {
-              const text = buildNearSupportEntryPrompt(hits, watchPlanCoins);
+              const text = buildNearSupportEntryPrompt(hits, watchPlanCoins, movers2d);
               try {
                 await navigator.clipboard.writeText(text);
                 setPromptCopied(true);

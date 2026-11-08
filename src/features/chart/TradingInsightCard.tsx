@@ -550,15 +550,39 @@ export function formatEntryReviewPromptForGoogle(
     day: "2-digit",
   });
 
+  parts.push(
+    `Mandatory research BEFORE verdict: (A) past ~30 days verified news/events for ${base}; (B) next ~30 days dated catalysts (unlocks, listings, upgrades, governance) or "none verified"; (C) security/exploit last ~90d or "searched none found". Do not invent news. No training-memory headlines.`
+  );
+
   if (isAllocated) {
     parts.push(
-      `Answer: 1) ADD | ADD ONLY ON PULLBACK | DO NOT ADD | TRIM  2) why  3) add levels/size or why not  4) invalidation  5) Timeframe valid until/review by YYYY-MM-DD (today Manila ${todayManila})  6) news  7) Journal note with Agent + Prompt: Spot Insights · Google review mini. Neutral. Do not invent news.`
+      `Answer: 1) ADD | ADD ONLY ON PULLBACK | DO NOT ADD | TRIM  2) why (tech+catalyst)  3) levels/size or why not  4) invalidation  5) review by YYYY-MM-DD (Manila; today ${todayManila})  6) past30/next30/security  7) End with copy-paste markdown journal ONLY with exact labels:`
     );
   } else {
     parts.push(
-      `Answer: 1) READY TO STAGE | WAIT FOR PULLBACK | SKIP  2) why  3) ladder + invalidation  4) Timeframe: valid until / review by YYYY-MM-DD (today Manila ${todayManila})  5) news  6) Catalysts first. Thin data=wait. Journal: Agent + Prompt Spot Insights · Google review mini. Neutral. Do not invent news.`
+      `Answer: 1) READY TO STAGE | WAIT FOR PULLBACK | SKIP  2) why  3) ladder+invalidation  4) review by YYYY-MM-DD (Manila; today ${todayManila})  5) past30/next30/security  6) End with copy-paste markdown journal ONLY with exact labels:`
     );
   }
+
+  parts.push(
+    [
+      "```markdown",
+      `## ${symbol} · google review · ${todayManila} (Manila)`,
+      "- **Agent:** Spot Trading Desk AI (name model)",
+      "- **Prompt:** Spot · Google review",
+      "- **Verdict:** …",
+      "- **Price now:** …",
+      "- **Target entry:** ₱… or n/a",
+      "- **Target exit:** ₱… or n/a",
+      "- **Invalidation:** …",
+      "- **Review by:** YYYY-MM-DD",
+      "- **Past 30d:** …",
+      "- **Next 30d:** …",
+      "- **Security 90d:** …",
+      "- **Why:** …",
+      "```",
+    ].join("\n")
+  );
 
   return parts.join(" ");
 }
@@ -671,25 +695,6 @@ export default function TradingInsightCard({
           Spot Trading Insights <span className="text-brand-600">({symbol}/PHP)</span>
         </h3>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={handleCopyAgentPrompt}
-            className="rounded-md border border-gray-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-800 hover:bg-gray-50"
-          >
-            {agentCopied
-              ? "✅ Copied"
-              : activePortfolio && activePortfolio.holdings > 0
-                ? "📋 Copy add/size review"
-                : "📋 Copy entry review"}
-          </button>
-          <button
-            type="button"
-            onClick={handleOpenGoogleReview}
-            title="Opens Google with a short review prompt. Full prompt also copied."
-            className="rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-800 hover:bg-sky-100"
-          >
-            🔍 Google review
-          </button>
           <span
             className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold ${
               BIAS_BADGE_CLASSES[confluence.bias]

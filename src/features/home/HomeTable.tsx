@@ -475,55 +475,69 @@ export default function HomeTable() {
     }
     setNextCronLabel(nextLabel);
 
-    // Timing cache (28d): next-slot heat + book lean + random Did-you-know tip
+    // Timing: load newest cached window among 28 → 14 → 7 (from Timing "Run analysis").
+    // Each Home load re-fetches the API; data is dynamic vs last successful Timing run.
     let cancelled = false;
-    fetch(`/api/swing-timing?days=28&_=${Date.now()}`, { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then(
-        (
-          data: {
-            slots?: { hour: number; label: string; avgAbsPct: number; intensity: string }[];
-            dayFlow?: { label: string; upSharePct: number; avgSignedPct: number }[];
-            guidance?: string[];
-          } | null
-        ) => {
-          if (cancelled || !data) return;
-          if (data.slots?.length) {
-            const match = data.slots.find((s) => s.hour === nextHour);
-            if (match) {
-              const avg =
-                match.avgAbsPct != null && Number.isFinite(match.avgAbsPct)
-                  ? `${Number(match.avgAbsPct).toFixed(3)}% avg`
-                  : null;
-              const heat = match.intensity ? String(match.intensity) : null;
-              setNextCronLabel(
-                [match.label || nextLabel, avg, heat].filter(Boolean).join(" · ")
-              );
-            }
-          }
-          const flow = data.dayFlow;
-          if (flow && flow.length >= 2 && flow[0]?.label && flow[flow.length - 1]?.label) {
-            const buyDay = flow[0];
-            const sellDay = flow[flow.length - 1];
-            setBookLeanSnippet(
-              `28d book: lean buy ${buyDay.label} (${Number(buyDay.upSharePct).toFixed(0)}% up) · lean sell ${sellDay.label} (${Number(sellDay.upSharePct).toFixed(0)}% up)`
-            );
-          }
-          const tips = (data.guidance || []).filter(
-            (g) =>
-              g &&
-              !g.startsWith("No cached analysis") &&
-              g.length > 20
+    void (async () => {
+      type TimingSnap = {
+        days?: number;
+        slots?: { hour: number; label: string; avgAbsPct: number; intensity: string }[];
+        dayFlow?: { label: string; upSharePct: number; avgSignedPct: number }[];
+        guidance?: string[];
+        fromCache?: boolean;
+      };
+      let data: TimingSnap | null = null;
+      let usedDays = 28;
+      for (const d of [28, 14, 7] as const) {
+        try {
+          const r = await fetch(`/api/swing-timing?days=${d}&_=${Date.now()}`, {
+            cache: "no-store",
+          });
+          if (!r.ok) continue;
+          const json = (await r.json()) as TimingSnap;
+          const hasFlow = Array.isArray(json.dayFlow) && json.dayFlow.length >= 2;
+          const hasSlots = Array.isArray(json.slots) && json.slots.length > 0;
+          const tipsOk = (json.guidance || []).some(
+            (g) => g && !String(g).startsWith("No cached analysis") && String(g).length > 20
           );
-          if (tips.length) {
-            const pick = tips[Math.floor(Math.random() * tips.length)];
-            setDidYouKnow(pick);
+          if (hasFlow || hasSlots || tipsOk) {
+            data = json;
+            usedDays = json.days && [7, 14, 28].includes(json.days) ? json.days : d;
+            break;
           }
+        } catch {
+          /* try next window */
         }
-      )
-      .catch(() => {
-        /* keep static nextLabel */
-      });
+      }
+      if (cancelled || !data) return;
+      if (data.slots?.length) {
+        const match = data.slots.find((s) => s.hour === nextHour);
+        if (match) {
+          const avg =
+            match.avgAbsPct != null && Number.isFinite(match.avgAbsPct)
+              ? `${Number(match.avgAbsPct).toFixed(3)}% avg`
+              : null;
+          const heat = match.intensity ? String(match.intensity) : null;
+          setNextCronLabel(
+            [match.label || nextLabel, avg, heat].filter(Boolean).join(" · ")
+          );
+        }
+      }
+      const flow = data.dayFlow;
+      if (flow && flow.length >= 2 && flow[0]?.label && flow[flow.length - 1]?.label) {
+        const buyDay = flow[0];
+        const sellDay = flow[flow.length - 1];
+        setBookLeanSnippet(
+          `${usedDays}d book: lean buy ${buyDay.label} (${Number(buyDay.upSharePct).toFixed(0)}% up) · lean sell ${sellDay.label} (${Number(sellDay.upSharePct).toFixed(0)}% up)`
+        );
+      }
+      const tips = (data.guidance || []).filter(
+        (g) => g && !String(g).startsWith("No cached analysis") && String(g).length > 20
+      );
+      if (tips.length) {
+        setDidYouKnow(tips[Math.floor(Math.random() * tips.length)]);
+      }
+    })();
     return () => {
       cancelled = true;
     };
@@ -1363,7 +1377,7 @@ export default function HomeTable() {
             {heldFreeCards.length === 0 ? (
               <p className="text-[11px] text-emerald-800/70">No free / recovered leftovers right now.</p>
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-2 -mx-1 px-1 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:snap-none sm:pb-0 sm:px-0">
                 {heldFreeCards.map((card) => {
                   const sym = card.symbol.toUpperCase();
                   const coin =
@@ -1384,7 +1398,7 @@ export default function HomeTable() {
                   return (
                     <div
                       key={sym}
-                      className="rounded-xl border border-emerald-200 bg-white p-3 shadow-sm"
+                      className="snap-center shrink-0 w-[min(92vw,22rem)] sm:w-auto sm:shrink rounded-xl border border-emerald-200 bg-white p-3 shadow-sm"
                     >
                       <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
                         <div className="min-w-0">
