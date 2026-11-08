@@ -33,7 +33,7 @@ type Props = {
   support?: number | null;
   resistance?: number | null;
   /** Daily chart points — used for last local high / pump context in agent prompt */
-  points?: { period?: string; high?: number; low?: number; close?: number }[] | null;
+  points?: { period?: string; label?: string; high?: number; low?: number; close?: number }[] | null;
 };
 
 function buildAgentPrompt(args: {
@@ -50,7 +50,7 @@ function buildAgentPrompt(args: {
   support: number | null | undefined;
   resistance: number | null | undefined;
   txs: Tx[];
-  points?: { period?: string; high?: number; low?: number; close?: number }[] | null;
+  points?: { period?: string; label?: string; high?: number; low?: number; close?: number }[] | null;
 }): string {
   const base = args.symbol.replace(/PHP$/i, "") || args.symbol;
   const price = args.currentPrice;
