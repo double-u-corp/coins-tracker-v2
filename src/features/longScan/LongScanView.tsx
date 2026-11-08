@@ -4,6 +4,7 @@ import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
 import type { JournalEntryView } from "@/validators/journalSchema";
 import FormattedAiResponse from "@/components/FormattedAiResponse";
+import JournalSidebar from "@/features/chart/JournalSidebar";
 import dynamic from "next/dynamic";
 import LongScanPollChart from "./LongScanPollChart";
 
@@ -66,6 +67,141 @@ function biasRank(bias: string): number {
 }
 
 type CoinFlag = "bad" | "monitor" | "nochase" | "neutral" | "revisit" | "special" | "";
+
+const FLAG_LABELS: Record<Exclude<CoinFlag, "">, string> = {
+  bad: "Bad news",
+  monitor: "Monitor",
+  nochase: "Don't chase",
+  neutral: "Neutral",
+  revisit: "Revisit later",
+  special: "Special watch",
+};
+
+function isLongScanJournalTitle(title: string | null | undefined): boolean {
+  const t = (title || "").trim();
+  return /^LONG-SCAN\b/i.test(t) || t.startsWith("[LONG-SCAN]");
+}
+
+function buildLongScanRankPrompt(
+  groups: {
+    symbol: string;
+    name: string;
+    rows: {
+      bias: string;
+      score: number;
+      maxScore: number;
+      confidence: number;
+      currentPrice: number;
+      support: number | null;
+      resistance: number | null;
+      isExtended: boolean;
+      tier: string;
+      signalsNote: string | null;
+      scannedAt: string;
+      ladder: LadderLevel[];
+      invalidation: number | null;
+      target: number | null;
+    }[];
+  }[],
+  flags: Record<string, CoinFlag>,
+  livePriceBySymbol?: Record<string, number | null>
+): string {
+  const lines: string[] = [];
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+  lines.push(`You are a neutral research assistant for a Philippines **spot LONG-only** PHP trader (local exchanges — buy/sell only; no shorting, leverage, or margin).`);
+  lines.push(`Analysis date (Manila): **${today}**.`);
+  lines.push(``);
+  lines.push(`## Primary goal`);
+  lines.push(`The trader has about **₱10,000** to deploy in **one** spot buy (or a tight staged ladder on a single coin).`);
+  lines.push(`Using **only verified research** for the **past ~30 days** and **next ~30 days** of events/catalysts, answer:`);
+  lines.push(`**Which coin currently on this LONG-scan list is the best candidate to consider buying with ₱10,000 — or should they hold cash?**`);
+  lines.push(`Ranking is a decision aid for that ₱10k question, not a prediction or guarantee.`);
+  lines.push(``);
+  lines.push(`## Research rules`);
+  lines.push(`- **Mandatory security scan first** (every coin, before ranking or "special"): search last ~90 days for **exploit, hack, bridge hack, outage, pause withdrawals, validator failure, chain halt, security incident** + project name / chain name (e.g. BNB + "BNB Chain" / BSC).`);
+  lines.push(`- If a **verified** security incident is material to the coin or its chain, you must **not** treat a roadmap/hardfork alone as bullish. Prefer flag **bad** or **monitor**; ₱10k verdict leans **HOLD CASH** unless the incident is clearly resolved and priced.`);
+  lines.push(`- Then for each coin: official/project calendar, unlocks/supply, listings/delistings, regulatory/political only if asset-linked.`);
+  lines.push(`- Past ~30d and forward ~30d for non-security catalysts. No dated item after search → **none verified** (never silent skip).`);
+  lines.push(`- **"None verified" is only valid after an explicit search** for that category — not when you skipped the scan.`);
+  lines.push(`- Do **not** invent news. Do **not** use training-memory headlines.`);
+  lines.push(`- Hardfork / upgrade = operational catalyst, **not** proof of price-up. Do not rank a coin top for ₱10k only because an upgrade date is near.`);
+  lines.push(`- Neutral: weak/bearish evidence → cash / monitor / bad / nochase over forcing a buy.`);
+  lines.push(`- Spot only: never recommend shorting or leverage.`);
+  lines.push(`- In the per-coin section include a line: **Security (90d):** verified items or "searched, none found".`);
+  lines.push(``);
+  lines.push(`## Prior board flags (must compare)`);
+  lines.push(`Each coin may already have a flag from a previous LONG-scan review. Report **prior → new** and **CHANGED** or **UNCHANGED**.`);
+  lines.push(`Allowed new flags (exactly one per coin):`);
+  lines.push(`1. **bad** — Bad news / avoid`);
+  lines.push(`2. **monitor** — Watch; not ready to stage`);
+  lines.push(`3. **nochase** — Don't chase; wait pullback`);
+  lines.push(`4. **neutral** — No edge`);
+  lines.push(`5. **revisit** — Revisit later (give a date if possible)`);
+  lines.push(`6. **special** — Special watch (idiosyncratic catalyst)`);
+  lines.push(``);
+  lines.push(`## Coins on screen now (${groups.length}) — LONG-scan filter result`);
+  if (!groups.length) {
+    lines.push(`(none — empty filter)`);
+  }
+  groups.forEach((g, i) => {
+    const best = g.rows[0];
+    const key = g.symbol.toUpperCase();
+    const prior = flags[key] || "";
+    const priorLabel = prior ? FLAG_LABELS[prior as Exclude<CoinFlag, "">] || prior : "none (empty)";
+    const live = livePriceBySymbol?.[key];
+    const px =
+      live != null && Number.isFinite(live) ? live : best?.currentPrice;
+    const base = g.symbol.replace(/PHP$/i, "") || g.name;
+    lines.push(``);
+    lines.push(`### ${i + 1}. ${g.name} (${g.symbol})`);
+    lines.push(`- Prior board flag: **${priorLabel}**`);
+    lines.push(`- Latest scan bias: **${best?.bias || "?"}** (score ${best?.score ?? "?"}/${best?.maxScore ?? "?"}, conf ${best != null ? Math.round((best.confidence || 0) * 100) : "?"}%)`);
+    lines.push(`- Tier: ${best?.tier || "—"} · Extended: ${best?.isExtended ? "yes" : "no"}`);
+    lines.push(`- Price (scan): ${best?.currentPrice ?? "—"} · Live: ${px ?? "—"}`);
+    lines.push(`- Support: ${best?.support ?? "—"} · Resistance: ${best?.resistance ?? "—"}`);
+    if (best?.invalidation != null) lines.push(`- Invalidation: ~${best.invalidation}`);
+    if (best?.target != null) lines.push(`- Target ref: ~${best.target}`);
+    if (best?.ladder?.length) {
+      lines.push(`- Ladder: ${best.ladder.map((l) => `~${l.price} (${l.basis}, ${l.allocationPct}%)`).join("; ")}`);
+    }
+    if (best?.signalsNote) lines.push(`- Signals: ${best.signalsNote}`);
+    lines.push(`- Last hit: ${best?.scannedAt || "—"}`);
+    lines.push(`- News search ticker: **${base}** / **${g.name}** (not non-crypto meanings of the ticker).`);
+    if (px != null && Number(px) > 0) {
+      const coinsApprox = 10000 / Number(px);
+      lines.push(`- ~₱10,000 at live price ≈ **${coinsApprox.toFixed(4)}** ${base}`);
+    }
+  });
+  lines.push(``);
+  lines.push(`## Answer format`);
+  lines.push(`1. **₱10k verdict:** BUY candidate **SYMBOL** | or **HOLD CASH** (one line + why).`);
+  lines.push(`2. **Ranked table** (best → worst for deploying ₱10k as spot): Rank | Coin | New flag | Prior | Changed? | 1-line why`);
+  lines.push(`3. **Per coin:** **Security (90d)** first; then past 30d / next 30d catalysts (or none verified).`);
+  lines.push(`4. **Flag change summary** — only coins where prior → new differs.`);
+  lines.push(`5. **Required copy-paste markdown** for the next agent check / LONG-scan journal (exact labels):`);
+  lines.push(``);
+  lines.push("```markdown");
+  lines.push(`## LONG-SCAN rank · ${today} (Manila)`);
+  lines.push(`- **Agent:** Spot Trading Desk AI (name model)`);
+  lines.push(`- **Prompt:** LONG-scan · ₱10k rank`);
+  lines.push(`- **₱10k verdict:** BUY SYMBOL | HOLD CASH`);
+  lines.push(`- **Top pick:** SYMBOL or none`);
+  lines.push(`- **Target entry:** ₱… or n/a`);
+  lines.push(`- **Target exit:** ₱… or n/a`);
+  lines.push(`- **Invalidation:** …`);
+  lines.push(`- **Review by:** YYYY-MM-DD`);
+  lines.push(`- **Rank (best→worst):** SYMBOL (flag) > …`);
+  lines.push(`- **Flag changes:** SYMBOL prior→new; … or none`);
+  lines.push(`- **Security (90d):** searched, none found | or brief verified items`);
+  lines.push(`- **News (verified):** …`);
+  lines.push(`- **Why:** …`);
+  lines.push("```");
+  lines.push(``);
+  lines.push(`End with that fenced block so it can be saved under a journal title starting with **LONG-SCAN** (LONG-scan page only).`);
+  return lines.join("\n");
+}
+
+
 
 function parseCompactSignals(note: string | null): string[] {
   if (!note) return [];
@@ -146,6 +282,7 @@ export default function LongScanView({
   const [runs, setRuns] = useState<Run[]>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [rankPromptCopied, setRankPromptCopied] = useState(false);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -160,6 +297,13 @@ export default function LongScanView({
   const [journalLoading, setJournalLoading] = useState(false);
   const [journalError, setJournalError] = useState<string | null>(null);
   const [journalDeletingId, setJournalDeletingId] = useState<number | null>(null);
+  const [journalDraft, setJournalDraft] = useState("");
+  const [lsJournalEntries, setLsJournalEntries] = useState<JournalEntryView[]>([]);
+  const [lsJournalLoading, setLsJournalLoading] = useState(false);
+  const [lsJournalError, setLsJournalError] = useState<string | null>(null);
+
+  const [journalSaving, setJournalSaving] = useState(false);
+
   const [coinFlags, setCoinFlags] = useState<Record<string, CoinFlag>>({});
   const [manageOpen, setManageOpen] = useState(false);
   const [manageSymbol, setManageSymbol] = useState<string | null>(null);
@@ -403,9 +547,14 @@ export default function LongScanView({
             `/api/journal?symbol=${encodeURIComponent(sym)}&from=${from}`
           );
           if (!res.ok) return;
-          const data = (await res.json()) as { entries?: { symbol: string | null }[] };
+          const data = (await res.json()) as {
+            entries?: { symbol: string | null; title?: string }[];
+          };
           const n = (data.entries || []).filter(
-            (e) => e.symbol && e.symbol.toUpperCase() === sym
+            (e) =>
+              e.symbol &&
+              e.symbol.toUpperCase() === sym &&
+              isLongScanJournalTitle(e.title)
           ).length;
           next[sym] = n;
         } catch {
@@ -564,7 +713,10 @@ export default function LongScanView({
       const all = data.entries || [];
       // API may include general (null symbol) when filtering by coin — keep only this coin
       const only = all.filter(
-        (e) => e.symbol && e.symbol.toUpperCase() === symbol.toUpperCase()
+        (e) =>
+          e.symbol &&
+          e.symbol.toUpperCase() === symbol.toUpperCase() &&
+          isLongScanJournalTitle(e.title)
       );
       setJournalEntries(only);
     } catch (err) {
@@ -601,6 +753,44 @@ export default function LongScanView({
     })();
   };
 
+
+  const saveLongScanJournal = async () => {
+    if (!journalSymbol) return;
+    const notes = journalDraft.trim();
+    if (!notes) {
+      setJournalError("Paste the agent markdown note before saving.");
+      return;
+    }
+    setJournalSaving(true);
+    setJournalError(null);
+    try {
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+      const res = await fetch("/api/journal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol: journalSymbol.toUpperCase(),
+          entryDate: today,
+          title: `LONG-SCAN rank · ${today}`,
+          notes,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((data as { error?: string }).error || `Save failed (${res.status})`);
+      setJournalDraft("");
+      await loadJournalForSymbol(journalSymbol);
+      void loadLongScanJournalFeed();
+      setJournalCountBySymbol((prev) => {
+        const key = journalSymbol.toUpperCase();
+        return { ...prev, [key]: (prev[key] || 0) + 1 };
+      });
+    } catch (err) {
+      setJournalError((err as Error).message);
+    } finally {
+      setJournalSaving(false);
+    }
+  };
+
   const closeJournal = () => {
     setJournalOpen(false);
     setJournalSymbol(null);
@@ -608,6 +798,7 @@ export default function LongScanView({
     setJournalPrice(null);
     setJournalEntries([]);
     setJournalError(null);
+    setJournalDraft("");
   };
 
 
@@ -642,6 +833,106 @@ export default function LongScanView({
   };
 
 
+
+
+  const loadLongScanJournalFeed = useCallback(async () => {
+    setLsJournalLoading(true);
+    setLsJournalError(null);
+    try {
+      const from = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const res = await fetch(`/api/journal?from=${from}`);
+      if (!res.ok) throw new Error(`Failed to load LONG-scan journal (${res.status})`);
+      const data = (await res.json()) as { entries?: JournalEntryView[] };
+      const only = (data.entries || []).filter((e) => isLongScanJournalTitle(e.title));
+      setLsJournalEntries(only);
+    } catch (err) {
+      setLsJournalError((err as Error).message);
+      setLsJournalEntries([]);
+    } finally {
+      setLsJournalLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!modalMode) void loadLongScanJournalFeed();
+  }, [modalMode, loadLongScanJournalFeed]);
+
+  const addLongScanJournal = useCallback(
+    async (input: { symbol: string | null; entryDate: string; title: string; notes: string }) => {
+      let title = (input.title || "").trim();
+      if (!isLongScanJournalTitle(title)) {
+        title = title ? `LONG-SCAN · ${title}` : `LONG-SCAN · note`;
+      }
+      const res = await fetch("/api/journal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol: input.symbol || null,
+          entryDate: input.entryDate,
+          title,
+          notes: input.notes,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data as { error?: string }).error || `Save failed (${res.status})`);
+      }
+      await loadLongScanJournalFeed();
+    },
+    [loadLongScanJournalFeed]
+  );
+
+  const deleteLongScanJournal = useCallback(
+    async (id: number) => {
+      const res = await fetch("/api/journal", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error || `Delete failed (${res.status})`);
+      }
+      await loadLongScanJournalFeed();
+    },
+    [loadLongScanJournalFeed]
+  );
+
+  const updateLongScanJournal = useCallback(
+    async (id: number, input: { title?: string; notes?: string }) => {
+      let title = input.title;
+      if (title != null && title.trim() && !isLongScanJournalTitle(title)) {
+        title = `LONG-SCAN · ${title.trim()}`;
+      }
+      const res = await fetch("/api/journal", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, title, notes: input.notes }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error || `Update failed (${res.status})`);
+      }
+      await loadLongScanJournalFeed();
+    },
+    [loadLongScanJournalFeed]
+  );
+
+  const copyRankPrompt = useCallback(async () => {
+    const text = buildLongScanRankPrompt(
+      displayedGroups,
+      coinFlags,
+      priceBySymbol
+    );
+    try {
+      await navigator.clipboard.writeText(text);
+      setRankPromptCopied(true);
+      setTimeout(() => setRankPromptCopied(false), 2000);
+    } catch {
+      setError("Could not copy rank prompt");
+    }
+  }, [displayedGroups, coinFlags, priceBySymbol]);
+
   return (
     <div className={`mx-auto max-w-6xl ${modalMode ? "px-2 py-2" : "px-4 py-6"}`}>
       {!modalMode && (
@@ -660,14 +951,25 @@ export default function LongScanView({
             )}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void runNow()}
-          disabled={running}
-          className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900 hover:bg-emerald-100 disabled:opacity-50"
-        >
-          {running ? "Scanning…" : "↻ Run scan now"}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void copyRankPrompt()}
+            disabled={displayedGroups.length === 0}
+            className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-900 hover:bg-indigo-100 disabled:opacity-50"
+            title="Copy agent prompt for coins currently on screen (after filters)"
+          >
+            {rankPromptCopied ? "✅ Copied" : "📋 Rank coins (agent)"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void runNow()}
+            disabled={running}
+            className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900 hover:bg-emerald-100 disabled:opacity-50"
+          >
+            {running ? "Scanning…" : "↻ Run scan now"}
+          </button>
+        </div>
       </div>
       )}
 
@@ -1045,7 +1347,7 @@ export default function LongScanView({
                       {" · "}
                     </>
                   ) : null}
-                  Notes for this coin only · read-only · delete if outdated. Add/edit on Spot or Home.
+                  LONG-scan notes only (title starts with LONG-SCAN). Paste agent rank markdown below to save for the next check.
                 </p>
               </div>
               <button
@@ -1058,6 +1360,26 @@ export default function LongScanView({
             </div>
 
             <div className="overflow-y-auto px-4 py-3 space-y-3">
+              <div className="rounded-lg border border-indigo-100 bg-indigo-50/50 p-3 space-y-2">
+                <div className="text-[11px] font-bold text-indigo-900">
+                  Save rank note for next agent check
+                </div>
+                <textarea
+                  value={journalDraft}
+                  onChange={(e) => setJournalDraft(e.target.value)}
+                  rows={5}
+                  placeholder="Paste the agent ## LONG-SCAN rank markdown block here…"
+                  className="w-full rounded-md border border-indigo-200 bg-white px-2 py-1.5 text-xs font-mono text-slate-800"
+                />
+                <button
+                  type="button"
+                  onClick={() => void saveLongScanJournal()}
+                  disabled={journalSaving || !journalDraft.trim()}
+                  className="rounded-md border border-indigo-300 bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {journalSaving ? "Saving…" : "💾 Save LONG-SCAN note"}
+                </button>
+              </div>
               {journalError && (
                 <p className="text-xs text-rose-700 bg-rose-50 border border-rose-100 rounded-md px-2 py-1.5">
                   {journalError}
@@ -1070,7 +1392,7 @@ export default function LongScanView({
                   ))}
                 </div>
               ) : journalEntries.length === 0 ? (
-                <p className="text-sm text-gray-500 py-6 text-center">No journal notes for this coin yet.</p>
+                <p className="text-sm text-gray-500 py-6 text-center">No LONG-SCAN journal notes for this coin yet. Paste agent markdown above to save.</p>
               ) : (
                 journalEntries.map((e) => (
                   <article
@@ -1122,6 +1444,40 @@ export default function LongScanView({
         </div>
       )}
 
+
+
+      {!modalMode && (
+        <div className="mt-10 rounded-lg border border-indigo-100 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-indigo-50 pb-3">
+            <div>
+              <h3 className="text-base font-semibold text-gray-900">
+                📡 LONG-scan journal &amp; notes
+              </h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Only notes titled <span className="font-semibold">LONG-SCAN …</span> (rank checks and scan notes).
+                Home general journal is separate and will not appear here.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void loadLongScanJournalFeed()}
+              className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-100"
+            >
+              ↻ Refresh
+            </button>
+          </div>
+          <JournalSidebar
+            entries={lsJournalEntries}
+            loading={lsJournalLoading}
+            error={lsJournalError}
+            defaultSymbol=""
+            authenticated={true}
+            onAdd={addLongScanJournal}
+            onDelete={deleteLongScanJournal}
+            onUpdate={updateLongScanJournal}
+          />
+        </div>
+      )}
 
       {manageOpen && manageSymbol && (
         <div
