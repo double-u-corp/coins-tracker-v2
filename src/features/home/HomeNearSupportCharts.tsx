@@ -235,6 +235,8 @@ export default function HomeNearSupportCharts({
 }: {
   /** Prefer full watchlist symbols from Home (symbol + name). */
   universe: { symbol: string; name?: string }[];
+    /** Watch/plan coins not currently held (List B in the agent prompt). */
+  watchPlanCoins?: { symbol: string; name: string; currentPrice?: number | null }[];
 }) {
   const [hits, setHits] = useState<RangeHit[]>([]);
   const [loading, setLoading] = useState(false);
