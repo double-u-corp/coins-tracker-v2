@@ -158,6 +158,8 @@ type ResponseBody = {
     }[];
   }[];
   guidance: string[];
+  fromCache?: boolean;
+  cacheUpdatedAt?: string | null;
 };
 
 type ErrorBody = { error: string };
@@ -228,8 +230,62 @@ export default async function handler(
   // Bust CDN/browser cache when user hits Refresh
   res.setHeader("Cache-Control", "no-store, max-age=0");
 
-  const daysRaw = Number(req.query.days ?? 30);
-  const days = Number.isFinite(daysRaw) ? Math.min(90, Math.max(7, Math.round(daysRaw))) : 30;
+  const daysRaw = Number(req.query.days ?? 28);
+  // Only 7 / 14 / 28 supported for cache keys
+  let days = Number.isFinite(daysRaw) ? Math.round(daysRaw) : 28;
+  if (![7, 14, 28].includes(days)) {
+    days = days <= 10 ? 7 : days <= 21 ? 14 : 28;
+  }
+  const forceRefresh =
+    req.query.refresh === "1" ||
+    req.query.refresh === "true" ||
+    req.query.force === "1";
+
+  const cacheKey = `swing-timing-${days}`;
+
+  if (!forceRefresh) {
+    try {
+      const cached = await prisma.catalystLog.findUnique({ where: { promptId: cacheKey } });
+      if (cached?.response) {
+        const parsed = JSON.parse(cached.response) as ResponseBody;
+        if (parsed && Array.isArray(parsed.slots)) {
+          return res.status(200).json({
+            ...parsed,
+            days,
+            fromCache: true,
+            cacheUpdatedAt: cached.updatedAt?.toISOString?.() ?? cached.createdAt?.toISOString?.() ?? null,
+          });
+        }
+      }
+    } catch {
+      /* fall through to empty */
+    }
+    return res.status(200).json({
+      days,
+      generatedAt: new Date().toISOString(),
+      slots: [],
+      weekdays: [],
+      hottestSlot: null,
+      quietestSlot: null,
+      hottestWeekday: null,
+      quietestWeekday: null,
+      strongestUpSlot: null,
+      strongestDownSlot: null,
+      strongestUpWeekday: null,
+      strongestDownWeekday: null,
+      topMoversByHotSlot: [],
+      userFills: [],
+      topMovers2d: [],
+      dayFlow: [],
+      coinsBuyLean: [],
+      coinsSellLean: [],
+      coinWeekdayTable: [],
+      guidance: ["No cached analysis for this range. Click Run analysis on Timing."],
+      fromCache: true,
+      cacheUpdatedAt: null,
+    });
+  }
+
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
   const coins = await prisma.coin.findMany({
@@ -715,7 +771,7 @@ export default async function handler(
     }
   }
 
-  return res.status(200).json({
+  const body: ResponseBody = {
     days,
     generatedAt: new Date().toISOString(),
     slots: slots.sort((a, b) => a.hour - b.hour),
@@ -739,5 +795,26 @@ export default async function handler(
     coinsSellLean,
     coinWeekdayTable,
     guidance,
-  });
+    fromCache: false,
+    cacheUpdatedAt: new Date().toISOString(),
+  };
+
+  try {
+    await prisma.catalystLog.upsert({
+      where: { promptId: cacheKey },
+      create: {
+        promptId: cacheKey,
+        category: "Daily",
+        response: JSON.stringify(body),
+      },
+      update: {
+        category: "Daily",
+        response: JSON.stringify(body),
+      },
+    });
+  } catch {
+    /* non-fatal */
+  }
+
+  return res.status(200).json(body);
 }

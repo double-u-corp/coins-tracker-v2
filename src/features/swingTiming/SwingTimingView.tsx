@@ -117,6 +117,8 @@ type TimingResponse = {
     }[];
   }[];
   guidance: string[];
+  fromCache?: boolean;
+  cacheUpdatedAt?: string | null;
 };
 
 const INTENSITY_STYLES: Record<
@@ -979,29 +981,34 @@ export default function SwingTimingView() {
     }
   };
 
-  const load = useCallback(async (d: number) => {
+    const load = useCallback(async (d: number, opts?: { refresh?: boolean }) => {
+    const refresh = !!opts?.refresh;
     setLoading(true);
     setError(null);
     try {
-      // cache-bust so Refresh always hits the API
-      const res = await fetch(`/api/swing-timing?days=${d}&_=${Date.now()}`, {
-        cache: "no-store",
+      const q = new URLSearchParams({
+        days: String(d),
+        _: String(Date.now()),
       });
+      if (refresh) q.set("refresh", "1");
+      const res = await fetch(`/api/swing-timing?${q}`, { cache: "no-store" });
       if (!res.ok) throw new Error(`Failed to load (${res.status})`);
       const json: TimingResponse = await res.json();
       setData(json);
-      setRefreshedAt(new Date().toISOString());
+      setRefreshedAt(json.cacheUpdatedAt || new Date().toISOString());
     } catch (err) {
       setError((err as Error).message);
-      setData(null);
+      if (refresh) setData(null);
     } finally {
       setLoading(false);
     }
   }, []);
 
+  // Load cached snapshot only — full recompute is "Run analysis"
   useEffect(() => {
-    void load(days);
+    void load(days, { refresh: false });
   }, [days, load]);
+
 
   useEffect(() => {
     if (!data) {
@@ -1033,9 +1040,8 @@ export default function SwingTimingView() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-sm text-gray-600 max-w-2xl">
-            Which of your <span className="font-semibold">~3h poll windows</span> and{" "}
-            <span className="font-semibold">weekdays</span> usually move the most across monitored
-            coins. Use this to know when to watch vs stage limits — not as a buy signal. Confirm on{" "}
+            Cached snapshot loads by default (no heavy recompute). Click <span className="font-semibold">Run analysis</span> to rebuild
+            for 7 / 14 / 28 days. Use to watch vs stage limits — not a buy signal. Confirm on{" "}
             <Link href="/chart" className="font-semibold text-purple-700 hover:underline">
               Spot
             </Link>
@@ -1046,7 +1052,7 @@ export default function SwingTimingView() {
           <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mr-1">
             Activity (slots/weekdays)
           </span>
-          {[14, 28, 30, 60].map((d) => (
+          {[7, 14, 28].map((d) => (
             <button
               key={d}
               type="button"
@@ -1063,12 +1069,12 @@ export default function SwingTimingView() {
           ))}
           <button
             type="button"
-            onClick={() => void load(days)}
+            onClick={() => void load(days, { refresh: true })}
             disabled={loading}
             className="rounded-md border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-800 hover:bg-indigo-100 disabled:opacity-50"
             title="Recompute from latest poll history"
           >
-            {loading ? "Refreshing…" : "↻ Refresh"}
+            {loading ? "Refreshing…" : "↻ Run analysis"}
           </button>
           <button
             type="button"
@@ -1624,6 +1630,7 @@ export default function SwingTimingView() {
               </>
             )}{" "}
             · consecutive polls ≤5h apart · Manila time/day
+            {data.fromCache ? " · cached" : " · freshly computed"}
             {loading && <span className="text-indigo-600"> · updating…</span>}
           </p>
         </>

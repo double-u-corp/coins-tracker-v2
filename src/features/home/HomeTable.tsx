@@ -442,6 +442,8 @@ function MonitorCard({
 
 
 export default function HomeTable() {
+  const [bookLeanSnippet, setBookLeanSnippet] = useState<string | null>(null);
+  const [didYouKnow, setDidYouKnow] = useState<string | null>(null);
   const [nextCronLabel, setNextCronLabel] = useState("Calculating…");
 
   useEffect(() => {
@@ -473,7 +475,7 @@ export default function HomeTable() {
     }
     setNextCronLabel(nextLabel);
 
-    // Enrich from Timing (28d): next-slot heat + book buy/sell weekday lean
+    // Timing cache (28d): next-slot heat + book lean + random Did-you-know tip
     let cancelled = false;
     fetch(`/api/swing-timing?days=28&_=${Date.now()}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
@@ -482,10 +484,10 @@ export default function HomeTable() {
           data: {
             slots?: { hour: number; label: string; avgAbsPct: number; intensity: string }[];
             dayFlow?: { label: string; upSharePct: number; avgSignedPct: number }[];
+            guidance?: string[];
           } | null
         ) => {
           if (cancelled || !data) return;
-          const parts: string[] = [];
           if (data.slots?.length) {
             const match = data.slots.find((s) => s.hour === nextHour);
             if (match) {
@@ -494,26 +496,29 @@ export default function HomeTable() {
                   ? `${Number(match.avgAbsPct).toFixed(3)}% avg`
                   : null;
               const heat = match.intensity ? String(match.intensity) : null;
-              parts.push(...[match.label || nextLabel, avg, heat].filter(Boolean) as string[]);
-            } else {
-              parts.push(nextLabel);
-            }
-          } else {
-            parts.push(nextLabel);
-          }
-          // Overall book: strongest buy-lean / sell-lean weekdays (28d)
-          const flow = data.dayFlow;
-          if (flow && flow.length >= 2) {
-            const buyDay = flow[0];
-            const sellDay = flow[flow.length - 1];
-            if (buyDay?.label && sellDay?.label) {
-              parts.push(
-                `28d book: lean buy ${buyDay.label} (${Number(buyDay.upSharePct).toFixed(0)}% up)` +
-                  ` · lean sell ${sellDay.label} (${Number(sellDay.upSharePct).toFixed(0)}% up)`
+              setNextCronLabel(
+                [match.label || nextLabel, avg, heat].filter(Boolean).join(" · ")
               );
             }
           }
-          setNextCronLabel(parts.join(" · "));
+          const flow = data.dayFlow;
+          if (flow && flow.length >= 2 && flow[0]?.label && flow[flow.length - 1]?.label) {
+            const buyDay = flow[0];
+            const sellDay = flow[flow.length - 1];
+            setBookLeanSnippet(
+              `28d book: lean buy ${buyDay.label} (${Number(buyDay.upSharePct).toFixed(0)}% up) · lean sell ${sellDay.label} (${Number(sellDay.upSharePct).toFixed(0)}% up)`
+            );
+          }
+          const tips = (data.guidance || []).filter(
+            (g) =>
+              g &&
+              !g.startsWith("No cached analysis") &&
+              g.length > 20
+          );
+          if (tips.length) {
+            const pick = tips[Math.floor(Math.random() * tips.length)];
+            setDidYouKnow(pick);
+          }
         }
       )
       .catch(() => {
@@ -975,10 +980,35 @@ export default function HomeTable() {
         </div>
       </div>
 
-      <AlertBanner
-        variant={error ? "error" : bannerVariant(lastCronStatus)}
-        message={error ? `Failed to load data: ${error}` : `Last cron run: ${formatDateTime(lastCronRun)} | Next run: ${nextCronLabel}`}
-      />
+      {error ? (
+        <AlertBanner variant="error" message={`Failed to load data: ${error}`} />
+      ) : (
+        <div className="mb-3 space-y-2">
+          <AlertBanner
+            variant={bannerVariant(lastCronStatus)}
+            message={`Last cron run: ${formatDateTime(lastCronRun)} · Next: ${nextCronLabel}`}
+          />
+          {bookLeanSnippet && (
+            <AlertBanner variant="info" message={bookLeanSnippet} />
+          )}
+          {didYouKnow && (
+            <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2.5 text-sm text-violet-950">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <span className="font-bold text-violet-800">Did you know · </span>
+                  <span className="text-violet-900/90">{didYouKnow}</span>
+                </div>
+                <Link
+                  href="/timing"
+                  className="shrink-0 rounded-md border border-violet-300 bg-white px-2.5 py-1 text-[11px] font-bold text-violet-900 hover:bg-violet-100"
+                >
+                  Timing →
+                </Link>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Direction anchors — not trade ideas */}
       {!loading && (
