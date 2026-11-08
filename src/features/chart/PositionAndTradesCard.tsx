@@ -485,7 +485,39 @@ export default function PositionAndTradesCard({
             type="button"
             onClick={async () => {
               try {
-                const pts = points || [];
+                const pts = (points || [])
+                  .filter(
+                    (p) =>
+                      p &&
+                      (typeof p.high === "number" ||
+                        typeof p.low === "number" ||
+                        typeof p.close === "number")
+                  )
+                  .map((p, i) => {
+                    const high =
+                      typeof p.high === "number"
+                        ? p.high
+                        : typeof p.close === "number"
+                          ? p.close
+                          : typeof p.low === "number"
+                            ? p.low
+                            : 0;
+                    const low =
+                      typeof p.low === "number"
+                        ? p.low
+                        : typeof p.close === "number"
+                          ? p.close
+                          : high;
+                    const period = p.period || p.label || `p-${i}`;
+                    const label = p.label || p.period || period;
+                    return {
+                      period,
+                      label,
+                      high,
+                      low,
+                      close: typeof p.close === "number" ? p.close : undefined,
+                    };
+                  });
                 const confluence = computeConfluenceSignal(pts, {
                   support: support ?? null,
                   resistance: resistance ?? null,
