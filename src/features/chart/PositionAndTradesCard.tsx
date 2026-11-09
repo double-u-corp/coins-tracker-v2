@@ -661,7 +661,6 @@ export default function PositionAndTradesCard({
               </div>
             )}
           </div>
-
           <div>
             <div className="text-[10px] font-bold uppercase text-slate-500 mb-1.5">
               Price to be profitable vs avg
