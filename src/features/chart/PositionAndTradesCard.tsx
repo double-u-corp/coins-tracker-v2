@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   updateHoldMae,
   formatMaeBadge,
   levelWasTouched,
+  hydrateHoldMaeFromDb,
 } from "@/lib/holdMae";
 import { formatPhp } from "@/lib/format";
 import { findLastPumpContext } from "./TradingInsightCard";
@@ -401,6 +402,9 @@ export default function PositionAndTradesCard({
   points = null,
 }: Props) {
   const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    void hydrateHoldMaeFromDb();
+  }, []);
 
   const holdings = portfolio?.holdings ?? 0;
   const spent = portfolio?.spent ?? 0;
@@ -428,6 +432,11 @@ export default function PositionAndTradesCard({
     [avg, currentPrice]
   );
   const targets = ladder.mode === "downside" ? ladder.downside : ladder.upside;
+  const mae =
+    holdings > 0 && avg != null && avg > 0 && currentPrice > 0
+      ? updateHoldMae(symbol, avg, currentPrice)
+      : null;
+  const maeBadge = formatMaeBadge(mae);
 
   const prompt = useMemo(
     () =>
@@ -657,30 +666,30 @@ export default function PositionAndTradesCard({
             <div className="text-[10px] font-bold uppercase text-slate-500 mb-1.5">
               Price to be profitable vs avg
             </div>
+            {maeBadge && holdings > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                <span className="rounded-md border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-800">
+                  {maeBadge}
+                </span>
+                {avg != null &&
+                  currentPrice > 0 &&
+                  mae &&
+                  (currentPrice - avg) / avg > mae.worstPct + 0.01 && (
+                    <span className="rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                      {(currentPrice - avg) / avg >= 0
+                        ? "Recovered · wait paid off"
+                        : "Recovering toward avg"}
+                    </span>
+                  )}
+              </div>
+            )}
             <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1">
               <div
                 className={`text-[10px] font-bold uppercase tracking-wide ${
                   ladder.mode === "downside" ? "text-rose-700" : "text-slate-500"
                 }`}
               >
-                {maeBadge && holdings > 0 && (
-            <div className="mb-2 flex flex-wrap gap-1.5">
-              <span className="rounded-md border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-800">
-                {maeBadge}
-              </span>
-              {avg != null &&
-                currentPrice > 0 &&
-                mae &&
-                (currentPrice - avg) / avg > mae.worstPct + 0.01 && (
-                  <span className="rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
-                    {(currentPrice - avg) / avg >= 0
-                      ? "Recovered · wait paid off"
-                      : "Recovering toward avg"}
-                  </span>
-                )}
-            </div>
-          )}
-          {ladder.mode === "downside"
+                {ladder.mode === "downside"
                   ? `Downside vs avg · ${ladder.tierLabel}`
                   : `Upside vs avg · ${ladder.tierLabel}`}
               </div>
