@@ -1,3 +1,4 @@
+import { refreshHoldFloorsFromPortfolio } from "@/lib/holdFloorDb";
 import prisma from "./prisma";
 import { fetchPrice, deriveNameFromSymbol } from "./coinsApi";
 import { pruneOldRecords, pruneOldNews, pruneOldCronLogs } from "./retention";
@@ -178,17 +179,30 @@ export async function runCronJob(): Promise<CronResult[]> {
       : "";
   const newsNote = newsWarnings.length > 0 ? ` News fetch issues: ${newsWarnings.join("; ")}.` : "";
 
+  let floorNote = "";
+  try {
+    const floors = await refreshHoldFloorsFromPortfolio();
+    if (floors.updated || floors.closed) {
+      floorNote = ` Hold floors: ${floors.updated} open updated, ${floors.closed} closed.`;
+    }
+  } catch {
+    /* non-fatal */
+  }
+
   if (errors.length === 0) {
     await prisma.cronLog.update({
       where: { id: cronLog.id },
-      data: { status: "success", message: `Updated ${results.length} coin(s).${pruneNote}${newsNote}` },
+      data: {
+        status: "success",
+        message: `Updated ${results.length} coin(s).${pruneNote}${newsNote}${floorNote}`,
+      },
     });
   } else {
     await prisma.cronLog.update({
       where: { id: cronLog.id },
       data: {
         status: results.length > 0 ? "partial" : "error",
-        message: `${results.length} succeeded, ${errors.length} failed: ${errors.join("; ")}.${pruneNote}${newsNote}`,
+        message: `${results.length} succeeded, ${errors.length} failed: ${errors.join("; ")}.${pruneNote}${newsNote}${floorNote}`,
       },
     });
   }

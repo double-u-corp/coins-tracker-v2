@@ -1,4 +1,10 @@
 import Link from "next/link";
+import {
+  updateHoldMae,
+  formatMaeBadge,
+  levelWasTouched,
+  type HoldMae,
+} from "@/lib/holdMae";
 import dynamic from "next/dynamic";
 import { useState, useEffect, useMemo, type ReactNode } from "react";
 import AlertBanner from "@/components/AlertBanner";
@@ -1163,6 +1169,11 @@ export default function HomeTable() {
                       : { upside: [], downside: [], tier: 1 as const, tierLabel: "", mode: "upside" as const };
                   const targets = ladder.upside;
                   const downTargets = ladder.downside;
+                  const mae: HoldMae | null =
+                    typeof window !== "undefined" && avg != null && avg > 0 && price > 0
+                      ? updateHoldMae(sym, avg, price)
+                      : null;
+                  const maeBadge = formatMaeBadge(mae);
                   return (
                     <div
                       key={sym}
@@ -1217,6 +1228,22 @@ export default function HomeTable() {
                             </span>
                           )}
                         </div>
+                        {maeBadge && (
+                          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                            <span className="rounded-md border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-800">
+                              {maeBadge}
+                            </span>
+                            {pnlPct != null &&
+                              mae &&
+                              pnlPct / 100 > mae.worstPct + 0.01 && (
+                                <span className="rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                                  {pnlPct >= 0
+                                    ? "Recovered · wait paid off"
+                                    : "Recovering toward avg"}
+                                </span>
+                              )}
+                          </div>
+                        )}
                         {(daysHeld != null || sinceLabel) && (
                           <div className="mt-1 text-[11px] text-slate-600">
                             Days held:{" "}
@@ -1265,6 +1292,13 @@ export default function HomeTable() {
                                 reached.length > 0 ? reached[reached.length - 1].pct : null;
                               const isCurrentStage =
                                 currentStagePct != null && tg.pct === currentStagePct;
+                              const touchedBefore =
+                                isDown && levelWasTouched(mae, tg.pct);
+                              const recoveredPast =
+                                isDown &&
+                                touchedBefore &&
+                                price > 0 &&
+                                price > tg.price;
                               const need =
                                 price > 0 ? ((tg.price - price) / price) * 100 : null;
                               return (
@@ -1343,13 +1377,19 @@ export default function HomeTable() {
                                   >
                                     {isCurrentStage
                                       ? "You are here"
-                                      : already
-                                        ? isDown
-                                          ? "Passed"
-                                          : "Reached"
-                                        : need != null
-                                          ? `${need >= 0 ? "+" : ""}${need.toFixed(1)}% from now`
-                                          : "—"}
+                                      : recoveredPast
+                                        ? "Held · recovered"
+                                        : already
+                                          ? isDown
+                                            ? touchedBefore
+                                              ? "Passed · floor"
+                                              : "Passed"
+                                            : "Reached"
+                                          : touchedBefore && isDown
+                                            ? "Touched before"
+                                            : need != null
+                                              ? `${need >= 0 ? "+" : ""}${need.toFixed(1)}% from now`
+                                              : "—"}
                                   </div>
                                 </div>
                               );

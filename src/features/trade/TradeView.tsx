@@ -3,6 +3,7 @@ import Link from "next/link";
 import Dropdown from "@/components/Dropdown";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp, formatCoinAmount } from "@/lib/format";
+import { updateHoldMae, formatMaeBadge } from "@/lib/holdMae";
 import { useTradeLogic, TradeType, formatCycleReviewPrompt, buildCoinLedger, phpFromPrice } from "./useTradeLogic";
 import CoinLedger from "./CoinLedger";
 import TradeTimelineChart from "./TradeTimelineChart"; // adjust path if the chart lives elsewhere
@@ -749,6 +750,29 @@ export default function TradeView() {
                               ? "0d"
                               : "—"}
                           </div>
+                          {c.holdings > 0 &&
+                            c.avgCost != null &&
+                            c.avgCost > 0 &&
+                            c.currentPrice != null &&
+                            c.currentPrice > 0 && (() => {
+                              const mae = updateHoldMae(c.symbol, c.avgCost, c.currentPrice);
+                              const badge = formatMaeBadge(mae);
+                              if (!badge) return null;
+                              const recovering =
+                                mae &&
+                                c.unrealizedPct != null &&
+                                c.unrealizedPct / 100 > mae.worstPct + 0.01;
+                              return (
+                                <div className="mt-1 text-[9px] font-bold leading-tight text-rose-700">
+                                  {badge}
+                                  {recovering ? (
+                                    <span className="mt-0.5 block text-emerald-700">
+                                      {(c.unrealizedPct ?? 0) >= 0 ? "Recovered" : "Recovering"}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              );
+                            })()}
                         </div>
                         <div className="bg-white px-1 py-2 min-w-0">
                           <div className="text-[9px] font-bold uppercase tracking-wide text-slate-400">Avg</div>

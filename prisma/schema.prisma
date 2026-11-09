@@ -19,6 +19,7 @@ model Coin {
   journalEntries JournalEntry[]
   newsItems      NewsItem[]
   longScanHits   LongScanHit[]
+  holdFloors     HoldFloor[]
 }
 
 model Record {
@@ -180,4 +181,23 @@ model LongScanRun {
   message   String?
 
   @@index([scannedAt])
+}
+
+// Deepest drawdown vs avg cost while a bag is open (MAE floor).
+// One open row per coin (closedAt null); closed rows keep history.
+model HoldFloor {
+  id          Int       @id @default(autoincrement())
+  coinId      Int
+  coin        Coin      @relation(fields: [coinId], references: [id], onDelete: Cascade)
+  avgCost     Float
+  worstPrice  Float
+  /// (worstPrice - avgCost) / avgCost — negative when underwater
+  worstPct    Float
+  reachedAt   DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  closedAt    DateTime?
+
+  @@index([coinId, closedAt])
+  @@index([closedAt])
 }

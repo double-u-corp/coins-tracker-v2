@@ -1,4 +1,9 @@
 import { useMemo, useState } from "react";
+import {
+  updateHoldMae,
+  formatMaeBadge,
+  levelWasTouched,
+} from "@/lib/holdMae";
 import { formatPhp } from "@/lib/format";
 import { findLastPumpContext } from "./TradingInsightCard";
 import { computeConfluenceSignal, detectCrossoverEvent } from "./Technicals";
@@ -658,7 +663,24 @@ export default function PositionAndTradesCard({
                   ladder.mode === "downside" ? "text-rose-700" : "text-slate-500"
                 }`}
               >
-                {ladder.mode === "downside"
+                {maeBadge && holdings > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              <span className="rounded-md border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-800">
+                {maeBadge}
+              </span>
+              {avg != null &&
+                currentPrice > 0 &&
+                mae &&
+                (currentPrice - avg) / avg > mae.worstPct + 0.01 && (
+                  <span className="rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                    {(currentPrice - avg) / avg >= 0
+                      ? "Recovered · wait paid off"
+                      : "Recovering toward avg"}
+                  </span>
+                )}
+            </div>
+          )}
+          {ladder.mode === "downside"
                   ? `Downside vs avg · ${ladder.tierLabel}`
                   : `Upside vs avg · ${ladder.tierLabel}`}
               </div>
@@ -685,6 +707,9 @@ export default function PositionAndTradesCard({
                   reached.length > 0 ? reached[reached.length - 1].pct : null;
                 const isCurrentStage =
                   currentStagePct != null && tg.pct === currentStagePct;
+                const touchedBefore = isDown && levelWasTouched(mae, tg.pct);
+                const recoveredPast =
+                  isDown && touchedBefore && currentPrice > 0 && currentPrice > tg.price;
                 const bagValue = holdings * tg.price;
                 const profitPhp = bagValue - spent;
                 return (
@@ -761,13 +786,17 @@ export default function PositionAndTradesCard({
                     >
                       {isCurrentStage
                         ? "You are here"
-                        : already
-                          ? isDown
-                            ? "Passed"
-                            : "Reached"
-                          : need != null
-                            ? `${need >= 0 ? "+" : ""}${need.toFixed(1)}% from now`
-                            : "—"}
+                        : recoveredPast
+                          ? "Held · recovered"
+                          : already
+                            ? isDown
+                              ? "Passed · floor"
+                              : "Reached"
+                            : touchedBefore && isDown
+                              ? "Touched before"
+                              : need != null
+                                ? `${need >= 0 ? "+" : ""}${need.toFixed(1)}% from now`
+                                : "—"}
                     </div>
                   </div>
                 );
