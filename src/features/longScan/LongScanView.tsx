@@ -712,12 +712,18 @@ export default function LongScanView({
       const data = (await res.json()) as { entries: JournalEntryView[] };
       const all = data.entries || [];
       // API may include general (null symbol) when filtering by coin — keep only this coin
-      const only = all.filter(
-        (e) =>
-          e.symbol &&
-          e.symbol.toUpperCase() === symbol.toUpperCase() &&
-          isLongScanJournalTitle(e.title)
-      );
+      const only = all
+        .filter(
+          (e) =>
+            e.symbol &&
+            e.symbol.toUpperCase() === symbol.toUpperCase() &&
+            isLongScanJournalTitle(e.title)
+        )
+        .sort((a, b) => {
+          const ta = new Date(a.createdAt || a.entryDate).getTime();
+          const tb = new Date(b.createdAt || b.entryDate).getTime();
+          return tb - ta;
+        });
       setJournalEntries(only);
     } catch (err) {
       setJournalError((err as Error).message);
@@ -843,7 +849,13 @@ export default function LongScanView({
       const res = await fetch(`/api/journal?from=${from}`);
       if (!res.ok) throw new Error(`Failed to load LONG-scan journal (${res.status})`);
       const data = (await res.json()) as { entries?: JournalEntryView[] };
-      const only = (data.entries || []).filter((e) => isLongScanJournalTitle(e.title));
+      const only = (data.entries || [])
+        .filter((e) => isLongScanJournalTitle(e.title))
+        .sort((a, b) => {
+          const ta = new Date(a.createdAt || a.entryDate).getTime();
+          const tb = new Date(b.createdAt || b.entryDate).getTime();
+          return tb - ta;
+        });
       setLsJournalEntries(only);
     } catch (err) {
       setLsJournalError((err as Error).message);
@@ -1472,6 +1484,7 @@ export default function LongScanView({
             error={lsJournalError}
             defaultSymbol=""
             authenticated={true}
+            excludeLongScanNotes={false}
             onAdd={addLongScanJournal}
             onDelete={deleteLongScanJournal}
             onUpdate={updateLongScanJournal}

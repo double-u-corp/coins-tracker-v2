@@ -579,6 +579,9 @@ export function useHomeLogic() {
     for (const e of journalEntries) {
       if (!e.symbol) continue;
       if (!monitoredSymbols.has(e.symbol)) continue;
+      // LONG-SCAN notes are for /long-scan only — do not surface on Home monitor
+      const jt = (e.title || "").trim();
+      if (/^LONG-SCAN\b/i.test(jt) || jt.startsWith("[LONG-SCAN]")) continue;
       const dates = extractReviewDatesFromNotes(e.notes || "");
       if (!dates.length) continue;
       const coin = coinBySym.get(e.symbol);

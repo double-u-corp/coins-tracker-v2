@@ -24,10 +24,43 @@ interface JournalSidebarProps {
   onAdd: (input: { symbol: string | null; entryDate: string; title: string; notes: string }) => Promise<void>;
   onDelete: (id: number) => Promise<void>;
   onUpdate?: (id: number, input: { title?: string; notes?: string }) => Promise<void>;
+  /** When true (default), hide LONG-SCAN notes (those only belong on /long-scan). */
+  excludeLongScanNotes?: boolean;
 }
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatDateTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      timeZone: "Asia/Manila",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function isLongScanJournalTitle(title: string | null | undefined): boolean {
+  const s = (title || "").trim();
+  return /^LONG-SCAN\b/i.test(s) || s.startsWith("[LONG-SCAN]");
+}
+
+function sortJournalNewestFirst<T extends { createdAt?: string; entryDate?: string; id?: number }>(
+  list: T[]
+): T[] {
+  return [...list].sort((a, b) => {
+    const ta = new Date(a.createdAt || a.entryDate || 0).getTime();
+    const tb = new Date(b.createdAt || b.entryDate || 0).getTime();
+    if (tb !== ta) return tb - ta;
+    return (Number(b.id) || 0) - (Number(a.id) || 0);
+  });
 }
 
 export default function JournalSidebar({
@@ -39,7 +72,13 @@ export default function JournalSidebar({
   onAdd,
   onDelete,
   onUpdate,
+  excludeLongScanNotes = true,
 }: JournalSidebarProps) {
+  const sortedEntries = sortJournalNewestFirst(
+    excludeLongScanNotes
+      ? (entries || []).filter((e) => !isLongScanJournalTitle(e.title))
+      : entries || []
+  );
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -133,11 +172,11 @@ export default function JournalSidebar({
         {updateError && <AlertBanner variant="error" message={updateError} />}
         {loading ? (
           <p className="text-xs text-gray-500">Loading…</p>
-        ) : entries.length === 0 ? (
+        ) : sortedEntries.length === 0 ? (
           <p className="text-xs text-gray-500">No journal entries in this range yet.</p>
         ) : (
           <ul className="flex flex-col gap-2">
-            {entries.map((entry) => {
+            {sortedEntries.map((entry) => {
               const isEditing = editingId === entry.id;
 
               return (
@@ -145,7 +184,7 @@ export default function JournalSidebar({
                   {isEditing ? (
                     <div className="flex flex-col gap-2.5">
                       <div className="text-xs font-medium text-gray-500">
-                        {formatDate(entry.entryDate)}
+                        {formatDateTime(entry.createdAt || entry.entryDate)}
                         {entry.symbol && <span className="ml-1 text-gray-400">· {entry.symbol}</span>}
                       </div>
 
@@ -192,7 +231,7 @@ export default function JournalSidebar({
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <div className="text-xs font-medium text-gray-500">
-                            {formatDate(entry.entryDate)}
+                            {formatDateTime(entry.createdAt || entry.entryDate)}
                             {entry.symbol && <span className="ml-1 text-gray-400">· {entry.symbol}</span>}
                           </div>
                           <div className="text-sm font-semibold text-gray-900">{entry.title?.trim() ?? ""}</div>

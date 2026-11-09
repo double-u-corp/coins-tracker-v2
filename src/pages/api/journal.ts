@@ -40,7 +40,7 @@ async function handleList(req: NextApiRequest, res: NextApiResponse<ListResponse
       ...symbolFilter,
     },
     include: { coin: true },
-    orderBy: { entryDate: "desc" },
+    orderBy: [{ createdAt: "desc" }, { entryDate: "desc" }],
   });
 
   const views: JournalEntryView[] = entries.map((e) => ({

@@ -1598,7 +1598,12 @@ export default function HomeTable() {
           </div>
         </div>
         <JournalSidebar
-          entries={(journalEntries || []).filter((e) => !e.symbol)}
+          entries={(journalEntries || []).filter(
+            (e) =>
+              !e.symbol &&
+              !/^LONG-SCAN\b/i.test((e.title || "").trim()) &&
+              !(e.title || "").trim().startsWith("[LONG-SCAN]")
+          )}
           loading={journalLoading}
           error={journalError}
           defaultSymbol=""
