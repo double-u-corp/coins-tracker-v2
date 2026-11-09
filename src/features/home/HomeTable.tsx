@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   updateHoldMae,
+  getHoldMae,
   formatMaeBadge,
   levelWasTouched,
   hydrateHoldMaeFromDb,
@@ -182,6 +183,231 @@ function CoinCard({ coin, canUpdatePrice, onUpdatePriceClick }: CoinCardProps) {
           <div className="mt-1 text-red-700">Recorded: {formatPhp(coin.recordedLow)}</div>
           <div className="text-gray-500">Target: {formatPhp(coin.targetLow)}</div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+/** Compact barometer for Watch/plan (and any MonitorCard): where price sits vs avg or journal levels. */
+type MiniBarStep = {
+  key: string;
+  label: string;
+  price: number;
+  state: "here" | "recovered" | "passed" | "touched" | "ahead" | "neutral";
+};
+
+function MiniBarometer({
+  symbol,
+  price,
+  avg,
+  entry,
+  exit,
+  lowTarget,
+  highTarget,
+}: {
+  symbol: string;
+  price: number | null;
+  avg?: number | null;
+  entry?: number | null;
+  exit?: number | null;
+  lowTarget?: number | null;
+  highTarget?: number | null;
+}) {
+  if (price == null || !(price > 0)) return null;
+
+  const mae =
+    avg != null && avg > 0
+      ? updateHoldMae(symbol, avg, price)
+      : getHoldMae(symbol);
+  const steps: MiniBarStep[] = [];
+
+  if (avg != null && avg > 0) {
+    const ladder = buildProfitTargets(avg, price);
+    const levels = ladder.mode === "downside" ? ladder.downside : ladder.upside;
+    const isDown = ladder.mode === "downside";
+    for (const tg of levels) {
+      const already = isDown ? price <= tg.price : price >= tg.price;
+      const touched = isDown && levelWasTouched(mae, tg.pct);
+      const recovered = isDown && touched && price > tg.price;
+      const reached = levels.filter((l) =>
+        isDown ? price <= l.price : price >= l.price
+      );
+      const currentPct =
+        reached.length > 0 ? reached[reached.length - 1].pct : null;
+      const here = currentPct != null && tg.pct === currentPct;
+      let state: MiniBarStep["state"] = "neutral";
+      if (here) state = "here";
+      else if (recovered) state = "recovered";
+      else if (already) state = isDown ? "passed" : "ahead";
+      else if (touched) state = "touched";
+      else state = "neutral";
+      steps.push({
+        key: `a-${tg.label}`,
+        label: tg.label,
+        price: tg.price,
+        state,
+      });
+    }
+  } else {
+    // Journal / target levels only (not held)
+    const refs: { key: string; label: string; price: number }[] = [];
+    if (entry != null && entry > 0)
+      refs.push({ key: "entry", label: "Entry", price: entry });
+    if (lowTarget != null && lowTarget > 0 && (entry == null || Math.abs(lowTarget - entry) / entry > 0.01))
+      refs.push({ key: "low", label: "Low", price: lowTarget });
+    if (exit != null && exit > 0)
+      refs.push({ key: "exit", label: "Exit", price: exit });
+    if (highTarget != null && highTarget > 0 && (exit == null || Math.abs(highTarget - exit) / exit > 0.01))
+      refs.push({ key: "high", label: "High", price: highTarget });
+    refs.sort((a, b) => a.price - b.price);
+    if (refs.length === 0) {
+      if (mae && mae.worstPct < -0.005) {
+        const floorPx = mae.worstPrice;
+        const need =
+          floorPx > 0 ? ((price - floorPx) / floorPx) * 100 : null;
+        return (
+          <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50/80 px-2 py-1.5">
+            <div className="text-[9px] font-bold uppercase tracking-wide text-slate-500">
+              Barometer
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-bold">
+              <span className="rounded bg-rose-100 px-1.5 py-0.5 text-rose-800">
+                {formatMaeBadge(mae)}
+              </span>
+              {need != null && (
+                <span className="text-slate-600">
+                  Now {need >= 0 ? "+" : ""}
+                  {need.toFixed(1)}% vs floor
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      }
+      return null;
+    }
+    // Find nearest level for "here"
+    let nearest = refs[0];
+    let nearestDist = Math.abs(price - nearest.price) / nearest.price;
+    for (const r of refs) {
+      const d = Math.abs(price - r.price) / r.price;
+      if (d < nearestDist) {
+        nearestDist = d;
+        nearest = r;
+      }
+    }
+    for (const r of refs) {
+      const pctAway = ((price - r.price) / r.price) * 100;
+      let state: MiniBarStep["state"] = "neutral";
+      if (r.key === nearest.key && nearestDist <= 0.03) state = "here";
+      else if (price >= r.price) state = "ahead";
+      else state = "neutral";
+      // Recovered past entry: price above entry after floor below entry
+      if (
+        (r.key === "entry" || r.key === "low") &&
+        mae &&
+        mae.worstPrice < r.price &&
+        price > r.price
+      ) {
+        state = "recovered";
+      }
+      steps.push({
+        key: r.key,
+        label: `${r.label}${
+          state === "here"
+            ? ""
+            : state === "recovered"
+              ? ""
+              : ` ${pctAway >= 0 ? "+" : ""}${pctAway.toFixed(0)}%`
+        }`,
+        price: r.price,
+        state,
+      });
+    }
+  }
+
+  if (steps.length === 0) return null;
+
+  const stateClass = (s: MiniBarStep["state"]) => {
+    switch (s) {
+      case "here":
+        return "border-rose-500 bg-rose-50 ring-1 ring-rose-300";
+      case "recovered":
+        return "border-sky-500 bg-sky-50 ring-1 ring-sky-300";
+      case "passed":
+        return "border-rose-300 bg-rose-50/80";
+      case "touched":
+        return "border-violet-300 bg-violet-50";
+      case "ahead":
+        return "border-emerald-400 bg-emerald-50";
+      default:
+        return "border-slate-200 bg-white";
+    }
+  };
+  const stateLabel = (s: MiniBarStep["state"]) => {
+    switch (s) {
+      case "here":
+        return "You are here";
+      case "recovered":
+        return "↑ Held · recovered";
+      case "passed":
+        return "Passed";
+      case "touched":
+        return "Touched";
+      case "ahead":
+        return "Above";
+      default:
+        return "Watch";
+    }
+  };
+
+  return (
+    <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50/60 px-2 py-1.5">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-1">
+        <span className="text-[9px] font-bold uppercase tracking-wide text-slate-500">
+          Barometer
+        </span>
+        {formatMaeBadge(mae) && (
+          <span className="rounded bg-rose-100 px-1 py-0.5 text-[9px] font-bold text-rose-800">
+            {formatMaeBadge(mae)}
+          </span>
+        )}
+      </div>
+      <div
+        className={`grid gap-1 ${
+          steps.length <= 2
+            ? "grid-cols-2"
+            : steps.length === 3
+              ? "grid-cols-3"
+              : "grid-cols-2 sm:grid-cols-4"
+        }`}
+      >
+        {steps.map((s) => (
+          <div
+            key={s.key}
+            className={`rounded-md border px-1.5 py-1 text-center ${stateClass(s.state)}`}
+          >
+            <div className="text-[9px] font-bold text-slate-700">{s.label}</div>
+            <div className="font-mono text-[10px] font-bold tabular-nums text-slate-900">
+              {formatPhp(s.price)}
+            </div>
+            <div
+              className={`mt-0.5 text-[9px] font-extrabold ${
+                s.state === "recovered"
+                  ? "rounded bg-sky-600 px-1 text-white"
+                  : s.state === "here"
+                    ? "rounded bg-rose-600 px-1 text-white"
+                    : s.state === "ahead"
+                      ? "text-emerald-700"
+                      : "text-slate-500"
+              }`}
+            >
+              {stateLabel(s.state)}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1537,6 +1763,12 @@ export default function HomeTable() {
                           </span>
                         </div>
                       </div>
+
+                      <MiniBarometer
+                        symbol={sym}
+                        price={nowPx}
+                        avg={avg != null && avg > 0 ? avg : null}
+                      />
                     </div>
                   );
                 })}
