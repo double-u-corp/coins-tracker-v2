@@ -661,6 +661,7 @@ export default function PositionAndTradesCard({
               </div>
             )}
           </div>
+
           <div>
             <div className="text-[10px] font-bold uppercase text-slate-500 mb-1.5">
               Price to be profitable vs avg
@@ -728,13 +729,17 @@ export default function PositionAndTradesCard({
                         ? isDown
                           ? "border-rose-600 bg-rose-100 shadow-md ring-2 ring-rose-400"
                           : "border-emerald-600 bg-emerald-100 shadow-md ring-2 ring-emerald-400"
-                        : already
-                          ? isDown
-                            ? "border-rose-400 bg-rose-50"
-                            : "border-emerald-400 bg-emerald-50"
-                          : isDown
-                            ? "border-rose-200 bg-white"
-                            : "border-slate-200 bg-white"
+                        : recoveredPast
+                          ? "border-sky-500 bg-sky-50 shadow-sm ring-1 ring-sky-300"
+                          : already
+                            ? isDown
+                              ? "border-rose-400 bg-rose-50"
+                              : "border-emerald-400 bg-emerald-50"
+                            : touchedBefore && isDown
+                              ? "border-violet-300 bg-violet-50/80"
+                              : isDown
+                                ? "border-rose-200 bg-white"
+                                : "border-slate-200 bg-white"
                     }`}
                   >
                     <div
@@ -783,19 +788,23 @@ export default function PositionAndTradesCard({
                           ? isDown
                             ? "rounded bg-rose-600 px-1 py-0.5 text-white"
                             : "rounded bg-emerald-600 px-1 py-0.5 text-white"
-                          : already
-                            ? isDown
-                              ? "text-rose-700"
-                              : "text-emerald-700"
-                            : isDown
-                              ? "text-rose-600"
-                              : "text-amber-700"
+                          : recoveredPast
+                            ? "rounded bg-sky-600 px-1.5 py-0.5 text-white shadow-sm"
+                            : already
+                              ? isDown
+                                ? "rounded bg-rose-500/90 px-1 py-0.5 text-white"
+                                : "text-emerald-700"
+                              : touchedBefore && isDown
+                                ? "rounded bg-violet-600 px-1 py-0.5 text-white"
+                                : isDown
+                                  ? "text-rose-600"
+                                  : "text-amber-700"
                       }`}
                     >
                       {isCurrentStage
                         ? "You are here"
                         : recoveredPast
-                          ? "Held · recovered"
+                          ? "↑ Held · recovered"
                           : already
                             ? isDown
                               ? "Passed · floor"
