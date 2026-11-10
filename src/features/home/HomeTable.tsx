@@ -196,8 +196,6 @@ type MiniBarStep = {
   label: string;
   price: number;
   state: "here" | "recovered" | "passed" | "touched" | "ahead" | "neutral";
-  /** Level vs avg cost: >0 above avg, <0 below (used for green/red value colouring). */
-  sign?: number;
 };
 
 function MiniBarometer({
@@ -208,13 +206,10 @@ function MiniBarometer({
   exit,
   lowTarget,
   highTarget,
-  signColors = false,
 }: {
   symbol: string;
   price: number | null;
   avg?: number | null;
-  /** Colour level values green when above avg (positive) and red when below (negative). */
-  signColors?: boolean;
   entry?: number | null;
   exit?: number | null;
   lowTarget?: number | null;
@@ -253,7 +248,6 @@ function MiniBarometer({
         label: tg.label,
         price: tg.price,
         state,
-        sign: tg.price - avg,
       });
     }
   } else {
@@ -341,7 +335,7 @@ function MiniBarometer({
       case "here":
         return "border-rose-500 bg-rose-50 ring-1 ring-rose-300";
       case "recovered":
-        return "border-sky-500 bg-sky-50 ring-1 ring-sky-300";
+        return "border-slate-200 bg-sky-50";
       case "passed":
         return "border-rose-300 bg-rose-50/80";
       case "touched":
@@ -393,38 +387,10 @@ function MiniBarometer({
         {steps.map((s) => (
           <div
             key={s.key}
-            className={`rounded-md border px-1.5 py-1 text-center ${
-              signColors && s.sign != null && s.sign !== 0
-                ? s.sign > 0
-                  ? `border-emerald-500 bg-emerald-50 ${
-                      s.state === "here" ? "ring-1 ring-emerald-300" : ""
-                    }`
-                  : `border-rose-500 bg-rose-50 ${
-                      s.state === "here" ? "ring-1 ring-rose-300" : ""
-                    }`
-                : stateClass(s.state)
-            }`}
+            className={`rounded-md border px-1.5 py-1 text-center ${stateClass(s.state)}`}
           >
-            <div
-              className={`text-[9px] font-bold ${
-                signColors && s.sign != null && s.sign !== 0
-                  ? s.sign > 0
-                    ? "text-emerald-700"
-                    : "text-rose-700"
-                  : "text-slate-700"
-              }`}
-            >
-              {s.label}
-            </div>
-            <div
-              className={`font-mono text-[10px] font-bold tabular-nums ${
-                signColors && s.sign != null && s.sign !== 0
-                  ? s.sign > 0
-                    ? "text-emerald-700"
-                    : "text-rose-700"
-                  : "text-slate-900"
-              }`}
-            >
+            <div className="text-[9px] font-bold text-slate-700">{s.label}</div>
+            <div className="font-mono text-[10px] font-bold tabular-nums text-slate-900">
               {formatPhp(s.price)}
             </div>
             <div
@@ -432,11 +398,7 @@ function MiniBarometer({
                 s.state === "recovered"
                   ? "rounded bg-sky-600 px-1 text-white"
                   : s.state === "here"
-                    ? `rounded px-1 text-white ${
-                        signColors && s.sign != null && s.sign > 0
-                          ? "bg-emerald-600"
-                          : "bg-rose-600"
-                      }`
+                    ? "rounded bg-rose-600 px-1 text-white"
                     : s.state === "ahead"
                       ? "text-emerald-700"
                       : "text-slate-500"
@@ -922,6 +884,20 @@ export default function HomeTable() {
       if (holdings > 0 && spent <= 0) free.push(row);
       else cost.push(row);
     }
+    const unrealizedPct = (sym: string) => {
+      const pos = portfolio?.find((p) => p.symbol?.toUpperCase() === sym);
+      const coin =
+        allCoins.find((c) => c.symbol.toUpperCase() === sym) ||
+        coins.find((c) => c.symbol.toUpperCase() === sym);
+      const holdings = pos?.holdings ?? openHoldingsBySymbol?.[sym] ?? 0;
+      const spent = pos?.spent ?? 0;
+      const price = Number(coin?.currentPrice ?? pos?.currentPrice ?? 0) || 0;
+      if (!(holdings > 0) || !(spent > 0) || !(price > 0)) return 0;
+      const avg = spent / holdings;
+      if (!(avg > 0)) return 0;
+      return ((price - avg) / avg) * 100;
+    };
+    cost.sort((a, b) => unrealizedPct(a.symbol) - unrealizedPct(b.symbol)); // negative first
     return { heldCostCards: cost, heldFreeCards: free };
   }, [heldSyms, allCoins, coins, portfolio, openHoldingsBySymbol]);
 
@@ -1399,7 +1375,7 @@ export default function HomeTable() {
                 No open bags with remaining cost (or trades still loading).
               </p>
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-2 -mx-1 px-1 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:snap-none sm:pb-0 sm:px-0">
                 {heldCostCards.map((card) => {
                   const sym = card.symbol.toUpperCase();
                   const coin =
@@ -1446,7 +1422,7 @@ export default function HomeTable() {
                   return (
                     <div
                       key={sym}
-                      className="rounded-xl border border-indigo-200 bg-white p-3 shadow-sm"
+                      className="snap-center shrink-0 w-[min(92vw,22rem)] sm:w-auto sm:shrink rounded-xl border border-indigo-200 bg-white p-3 shadow-sm"
                     >
                       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                         <div className="min-w-0">
@@ -1578,17 +1554,13 @@ export default function HomeTable() {
                                       ? isDown
                                         ? "border-rose-600 bg-rose-100 shadow-md ring-2 ring-rose-400"
                                         : "border-emerald-600 bg-emerald-100 shadow-md ring-2 ring-emerald-400"
-                                      : recoveredPast
-                                        ? "border-sky-500 bg-sky-50 shadow-sm ring-1 ring-sky-300"
-                                        : already
-                                          ? isDown
-                                            ? "border-rose-400 bg-rose-50"
-                                            : "border-emerald-400 bg-emerald-50"
-                                          : touchedBefore && isDown
-                                            ? "border-violet-300 bg-violet-50/80"
-                                            : isDown
-                                              ? "border-rose-200 bg-white"
-                                              : "border-slate-200 bg-white"
+                                      : already
+                                        ? isDown
+                                          ? "border-rose-400 bg-rose-50"
+                                          : "border-emerald-400 bg-emerald-50"
+                                        : isDown
+                                          ? "border-rose-200 bg-white"
+                                          : "border-slate-200 bg-white"
                                   }`}
                                 >
                                   <div
@@ -1806,7 +1778,6 @@ export default function HomeTable() {
                         symbol={sym}
                         price={nowPx}
                         avg={avg != null && avg > 0 ? avg : null}
-                        signColors
                       />
                     </div>
                   );
