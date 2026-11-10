@@ -497,12 +497,28 @@ export default function HomeMacroWatch() {
   };
 
   const display = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return events.filter((e) => {
-      const d = new Date(e.date);
-      if (Number.isNaN(d.getTime())) return true;
-      return d.getTime() >= today.getTime() - 86400000;
+    const manilaToday = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+    const manilaYesterday = new Date(Date.now() + 8 * 3600_000 - 86400000)
+      .toISOString()
+      .slice(0, 10);
+    const filtered = events.filter((e) => {
+      const day = String(
+        (e as { manilaDateKey?: string }).manilaDateKey || e.date || ""
+      ).slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return true;
+      return day >= manilaYesterday;
+    });
+    return [...filtered].sort((a, b) => {
+      const da = String(
+        (a as { manilaDateKey?: string }).manilaDateKey || a.date || ""
+      ).slice(0, 10);
+      const db = String(
+        (b as { manilaDateKey?: string }).manilaDateKey || b.date || ""
+      ).slice(0, 10);
+      const aToday = da === manilaToday ? 0 : 1;
+      const bToday = db === manilaToday ? 0 : 1;
+      if (aToday !== bToday) return aToday - bToday;
+      return da.localeCompare(db) || String(a.title).localeCompare(String(b.title));
     });
   }, [events]);
 
@@ -743,11 +759,22 @@ export default function HomeMacroWatch() {
               evt.severity === "high" ||
               evt.type === "FOMC" ||
               /FOMC|CPI|NFP|jobs/i.test(evt.title);
+            const manilaToday = new Date(Date.now() + 8 * 3600_000)
+              .toISOString()
+              .slice(0, 10);
+            const eventDay = String(
+              (evt as { manilaDateKey?: string }).manilaDateKey || evt.date || ""
+            ).slice(0, 10);
+            const isToday = eventDay === manilaToday;
             return (
               <div
                 key={`${evt.date}-${evt.title}-${i}`}
                 className={`rounded-lg border px-3 py-2.5 relative ${
-                  high ? "border-rose-200 bg-rose-50/50" : "border-slate-100 bg-slate-50/80"
+                  isToday
+                    ? "border-amber-400 bg-amber-50 ring-2 ring-amber-300/80 shadow-md"
+                    : high
+                      ? "border-rose-200 bg-rose-50/50"
+                      : "border-slate-100 bg-slate-50/80"
                 }`}
               >
                 <button
@@ -764,6 +791,11 @@ export default function HomeMacroWatch() {
                   >
                     {evt.type}
                   </span>
+                  {isToday && (
+                    <span className="rounded border border-amber-500 bg-amber-400 px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-amber-950">
+                      Today
+                    </span>
+                  )}
                   {high && (
                     <span className="rounded border border-rose-300 bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-800">
                       High priority

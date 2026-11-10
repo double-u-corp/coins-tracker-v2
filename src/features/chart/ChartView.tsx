@@ -9,7 +9,6 @@ import { useChartLogic, type ChartRange } from "./useChartLogic";
 import { formatPhp } from "@/lib/format";
 import { getSupportResistance, BIAS_BADGE_CLASSES, BIAS_PRIORITY, isLongExtended, isWatchlistBuyLowHit, isNearSupportWorthCheck , buildStructureKeyLevels, calculateSMASeries, calculateSMAAt } from "./Technicals";
 import { useCoinScanner, formatScanResultsForJournal, formatSingleScanResult } from "./useCoinScanner";
-import MacroDayBanner from "./MacroDayBanner";
 import PositionAndTradesCard from "./PositionAndTradesCard";
 
 const PriceLineChart = dynamic(() => import("./PriceLineChart"), {
@@ -258,7 +257,7 @@ function PollMiniLine({
             <circle
               cx={p.x}
               cy={p.y}
-              r={isMobileChart ? 7 : 4.5}
+              r={isMobileChart ? 4 : 3}
               fill="#f59e0b"
               stroke="#fff"
               strokeWidth={1.5}
@@ -273,7 +272,7 @@ function PollMiniLine({
             <circle
               cx={p.x}
               cy={p.y}
-              r={28}
+              r={16}
               fill="transparent"
               className="cursor-pointer"
               onMouseEnter={() =>
@@ -312,7 +311,7 @@ function PollMiniLine({
             <circle
               cx={p.x}
               cy={p.y}
-              r={p.s.isCurrent ? 9 : p.s.isDayStart ? 7 : 5.5}
+              r={p.s.isCurrent ? 5 : p.s.isDayStart ? 4 : 3}
               fill={p.s.isCurrent ? "#059669" : p.s.isDayStart ? "#7c3aed" : "#4c1d95"}
               className="pointer-events-none"
             />
@@ -742,7 +741,7 @@ export default function ChartView() {
         key={`${dayTag}-${s.hour}`}
         title={`${dayTag} ${s.label} Manila${dayStart ? " · day start" : ""}${sameHour ? " · same hour as now" : ""}`}
         style={{ containerType: "inline-size" }}
-        className={`relative flex w-[5.75rem] sm:w-[6.75rem] flex-none flex-col items-center justify-center rounded-xl px-1.5 py-3 text-center shadow-sm transition-colors sm:px-2.5 ${
+        className={`relative flex w-[4.75rem] sm:w-[5.75rem] flex-none flex-col items-center justify-center rounded-lg px-1 py-2 text-center shadow-sm transition-colors sm:px-1.5 ${
           s.isCurrent
             ? "border-2 border-emerald-500 bg-gradient-to-b from-emerald-50 to-emerald-100/80 ring-2 ring-emerald-200/80"
             : dayStart
@@ -757,7 +756,7 @@ export default function ChartView() {
         }`}
       >
         {s.isCurrent && (
-          <span className="absolute -top-2 left-1/2 inline-flex -translate-x-1/2 items-center gap-1 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-white shadow-sm">
+          <span className="absolute -top-1.5 left-1/2 inline-flex -translate-x-1/2 items-center gap-0.5 rounded-full bg-emerald-600 px-1 py-px text-[7px] font-bold uppercase tracking-wider text-white shadow-sm">
             <span className="relative flex h-1.5 w-1.5">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
@@ -950,7 +949,6 @@ export default function ChartView() {
         )}
       </div>
 
-      <MacroDayBanner />
 
       {/* Watchlist Scan hidden — use LONG scan page */}
 

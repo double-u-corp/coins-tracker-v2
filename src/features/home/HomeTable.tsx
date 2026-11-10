@@ -206,6 +206,7 @@ function MiniBarometer({
   exit,
   lowTarget,
   highTarget,
+  tone,
 }: {
   symbol: string;
   price: number | null;
@@ -214,6 +215,8 @@ function MiniBarometer({
   exit?: number | null;
   lowTarget?: number | null;
   highTarget?: number | null;
+  /** outer strip only: green if free bag up, red if down */
+  tone?: "up" | "down" | null;
 }) {
   if (price == null || !(price > 0)) return null;
 
@@ -363,8 +366,15 @@ function MiniBarometer({
     }
   };
 
+  const stripTone =
+    tone === "up"
+      ? "border-emerald-300 bg-emerald-50"
+      : tone === "down"
+        ? "border-rose-300 bg-rose-50"
+        : "border-slate-200 bg-slate-50/60";
+
   return (
-    <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50/60 px-2 py-1.5">
+    <div className={`mt-2 rounded-lg border px-2 py-1.5 ${stripTone}`}>
       <div className="mb-1 flex flex-wrap items-center justify-between gap-1">
         <span className="text-[9px] font-bold uppercase tracking-wide text-slate-500">
           Barometer
@@ -712,8 +722,7 @@ export default function HomeTable() {
     }
     setNextCronLabel(nextLabel);
 
-    // Timing: load newest cached window among 28 → 14 → 7 (from Timing "Run analysis").
-    // Each Home load re-fetches the API; data is dynamic vs last successful Timing run.
+    // Timing: fetch 7 / 14 / 28 caches (from Timing "Run analysis") and show every lean line we have.
     let cancelled = false;
     void (async () => {
       type TimingSnap = {
@@ -723,32 +732,39 @@ export default function HomeTable() {
         guidance?: string[];
         fromCache?: boolean;
       };
-      let data: TimingSnap | null = null;
-      let usedDays = 28;
-      for (const d of [28, 14, 7] as const) {
+      const leanParts: string[] = [];
+      let tipsPool: string[] = [];
+      let slotsForNext: TimingSnap["slots"] | undefined;
+
+      for (const d of [7, 14, 28] as const) {
         try {
           const r = await fetch(`/api/swing-timing?days=${d}&_=${Date.now()}`, {
             cache: "no-store",
           });
           if (!r.ok) continue;
           const json = (await r.json()) as TimingSnap;
-          const hasFlow = Array.isArray(json.dayFlow) && json.dayFlow.length >= 2;
-          const hasSlots = Array.isArray(json.slots) && json.slots.length > 0;
-          const tipsOk = (json.guidance || []).some(
+          const usedDays =
+            json.days && [7, 14, 28].includes(Number(json.days)) ? Number(json.days) : d;
+          const flow = json.dayFlow;
+          if (flow && flow.length >= 2 && flow[0]?.label && flow[flow.length - 1]?.label) {
+            const buyDay = flow[0];
+            const sellDay = flow[flow.length - 1];
+            leanParts.push(
+              `${usedDays}d book: lean buy ${buyDay.label} (${Number(buyDay.upSharePct).toFixed(0)}% up) · lean sell ${sellDay.label} (${Number(sellDay.upSharePct).toFixed(0)}% up)`
+            );
+          }
+          if (json.slots?.length && !slotsForNext) slotsForNext = json.slots;
+          const tips = (json.guidance || []).filter(
             (g) => g && !String(g).startsWith("No cached analysis") && String(g).length > 20
           );
-          if (hasFlow || hasSlots || tipsOk) {
-            data = json;
-            usedDays = json.days && [7, 14, 28].includes(json.days) ? json.days : d;
-            break;
-          }
+          if (tips.length) tipsPool = tipsPool.concat(tips);
         } catch {
           /* try next window */
         }
       }
-      if (cancelled || !data) return;
-      if (data.slots?.length) {
-        const match = data.slots.find((s) => s.hour === nextHour);
+      if (cancelled) return;
+      if (slotsForNext?.length) {
+        const match = slotsForNext.find((s) => s.hour === nextHour);
         if (match) {
           const avg =
             match.avgAbsPct != null && Number.isFinite(match.avgAbsPct)
@@ -760,19 +776,12 @@ export default function HomeTable() {
           );
         }
       }
-      const flow = data.dayFlow;
-      if (flow && flow.length >= 2 && flow[0]?.label && flow[flow.length - 1]?.label) {
-        const buyDay = flow[0];
-        const sellDay = flow[flow.length - 1];
-        setBookLeanSnippet(
-          `${usedDays}d book: lean buy ${buyDay.label} (${Number(buyDay.upSharePct).toFixed(0)}% up) · lean sell ${sellDay.label} (${Number(sellDay.upSharePct).toFixed(0)}% up)`
-        );
+      if (leanParts.length) {
+        // One window only (7 / 14 / 28), random each Home load
+        setBookLeanSnippet(leanParts[Math.floor(Math.random() * leanParts.length)]);
       }
-      const tips = (data.guidance || []).filter(
-        (g) => g && !String(g).startsWith("No cached analysis") && String(g).length > 20
-      );
-      if (tips.length) {
-        setDidYouKnow(tips[Math.floor(Math.random() * tips.length)]);
+      if (tipsPool.length) {
+        setDidYouKnow(tipsPool[Math.floor(Math.random() * tipsPool.length)]);
       }
     })();
     return () => {
@@ -1549,18 +1558,18 @@ export default function HomeTable() {
                               return (
                                 <div
                                   key={`${isDown ? "dn" : "up"}-${tg.label}`}
-                                  className={`rounded-lg border-2 px-2 py-2 text-center transition ${
+                                  className={`rounded-lg border border-slate-200 px-2 py-2 text-center transition ${
                                     isCurrentStage
                                       ? isDown
-                                        ? "border-rose-600 bg-rose-100 shadow-md ring-2 ring-rose-400"
-                                        : "border-emerald-600 bg-emerald-100 shadow-md ring-2 ring-emerald-400"
-                                      : already
-                                        ? isDown
-                                          ? "border-rose-400 bg-rose-50"
-                                          : "border-emerald-400 bg-emerald-50"
-                                        : isDown
-                                          ? "border-rose-200 bg-white"
-                                          : "border-slate-200 bg-white"
+                                        ? "bg-rose-100"
+                                        : "bg-emerald-100"
+                                      : recoveredPast
+                                        ? "bg-sky-50"
+                                        : already
+                                          ? isDown
+                                            ? "bg-rose-50"
+                                            : "bg-emerald-50"
+                                          : "bg-white"
                                   }`}
                                 >
                                   <div
@@ -1778,6 +1787,17 @@ export default function HomeTable() {
                         symbol={sym}
                         price={nowPx}
                         avg={avg != null && avg > 0 ? avg : null}
+                        tone={
+                          openPct != null
+                            ? openPct >= 0
+                              ? "up"
+                              : "down"
+                            : openPnl != null
+                              ? openPnl >= 0
+                                ? "up"
+                                : "down"
+                              : null
+                        }
                       />
                     </div>
                   );
