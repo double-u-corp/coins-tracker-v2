@@ -196,6 +196,8 @@ type MiniBarStep = {
   label: string;
   price: number;
   state: "here" | "recovered" | "passed" | "touched" | "ahead" | "neutral";
+  /** Level vs avg cost: >0 above avg, <0 below (used for green/red value colouring). */
+  sign?: number;
 };
 
 function MiniBarometer({
@@ -206,10 +208,13 @@ function MiniBarometer({
   exit,
   lowTarget,
   highTarget,
+  signColors = false,
 }: {
   symbol: string;
   price: number | null;
   avg?: number | null;
+  /** Colour level values green when above avg (positive) and red when below (negative). */
+  signColors?: boolean;
   entry?: number | null;
   exit?: number | null;
   lowTarget?: number | null;
@@ -248,6 +253,7 @@ function MiniBarometer({
         label: tg.label,
         price: tg.price,
         state,
+        sign: tg.price - avg,
       });
     }
   } else {
@@ -389,8 +395,26 @@ function MiniBarometer({
             key={s.key}
             className={`rounded-md border px-1.5 py-1 text-center ${stateClass(s.state)}`}
           >
-            <div className="text-[9px] font-bold text-slate-700">{s.label}</div>
-            <div className="font-mono text-[10px] font-bold tabular-nums text-slate-900">
+            <div
+              className={`text-[9px] font-bold ${
+                signColors && s.sign != null && s.sign !== 0
+                  ? s.sign > 0
+                    ? "text-emerald-700"
+                    : "text-rose-700"
+                  : "text-slate-700"
+              }`}
+            >
+              {s.label}
+            </div>
+            <div
+              className={`font-mono text-[10px] font-bold tabular-nums ${
+                signColors && s.sign != null && s.sign !== 0
+                  ? s.sign > 0
+                    ? "text-emerald-700"
+                    : "text-rose-700"
+                  : "text-slate-900"
+              }`}
+            >
               {formatPhp(s.price)}
             </div>
             <div
@@ -1768,6 +1792,7 @@ export default function HomeTable() {
                         symbol={sym}
                         price={nowPx}
                         avg={avg != null && avg > 0 ? avg : null}
+                        signColors
                       />
                     </div>
                   );
