@@ -393,7 +393,17 @@ function MiniBarometer({
         {steps.map((s) => (
           <div
             key={s.key}
-            className={`rounded-md border px-1.5 py-1 text-center ${stateClass(s.state)}`}
+            className={`rounded-md border px-1.5 py-1 text-center ${
+              signColors && s.sign != null && s.sign !== 0
+                ? s.sign > 0
+                  ? `border-emerald-500 bg-emerald-50 ${
+                      s.state === "here" ? "ring-1 ring-emerald-300" : ""
+                    }`
+                  : `border-rose-500 bg-rose-50 ${
+                      s.state === "here" ? "ring-1 ring-rose-300" : ""
+                    }`
+                : stateClass(s.state)
+            }`}
           >
             <div
               className={`text-[9px] font-bold ${
@@ -422,7 +432,11 @@ function MiniBarometer({
                 s.state === "recovered"
                   ? "rounded bg-sky-600 px-1 text-white"
                   : s.state === "here"
-                    ? "rounded bg-rose-600 px-1 text-white"
+                    ? `rounded px-1 text-white ${
+                        signColors && s.sign != null && s.sign > 0
+                          ? "bg-emerald-600"
+                          : "bg-rose-600"
+                      }`
                     : s.state === "ahead"
                       ? "text-emerald-700"
                       : "text-slate-500"
