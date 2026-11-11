@@ -422,6 +422,7 @@ export function formatEntryReviewPrompt(
     lines.push(`- **Last pump / local high (if relevant):** date · peak · why it may have faded`);
     lines.push(`- **Invalidation (add thesis broken if):** …`);
     lines.push(`- **Review by:** YYYY-MM-DD`);
+    lines.push(`- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration · short detail (repeat line per event; omit if none)`);
     lines.push(`- **News audit:** exploit / unlock / listing / partnership / regulatory`);
     lines.push(`- **News (verified only):** …`);
     lines.push(`- **Why (1–3 short lines):**`);
@@ -444,6 +445,7 @@ export function formatEntryReviewPrompt(
     lines.push(`  - … (pct)`);
     lines.push(`- **Invalidation:** …`);
     lines.push(`- **Review by:** YYYY-MM-DD`);
+    lines.push(`- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration · short detail (repeat line per event; omit if none)`);
     lines.push(`- **News audit:** exploit / unlock / listing / partnership / regulatory`);
     lines.push(`- **News (verified only):** …`);
     lines.push(`- **Why (1–3 short lines):**`);
@@ -576,6 +578,7 @@ export function formatEntryReviewPromptForGoogle(
       "- **Target exit:** ₱… or n/a",
       "- **Invalidation:** …",
       "- **Review by:** YYYY-MM-DD",
+      "- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration · short detail (repeat line per event; omit if none)",
       "- **Past 30d:** …",
       "- **Next 30d:** …",
       "- **Security 90d:** …",

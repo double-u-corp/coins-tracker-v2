@@ -790,6 +790,14 @@ export default function SwingTimingView() {
   const [days, setDays] = useState(28);
   const [data, setData] = useState<TimingResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [macroImpactLoading, setMacroImpactLoading] = useState(false);
+  const [macroImpact, setMacroImpact] = useState<{
+    generatedAt?: string | null;
+    tips?: string[];
+    meetings?: { type: string; title: string; date: string; downShare24h: number; avgSigned24h: number; sampleCoins: number }[];
+    message?: string;
+  } | null>(null);
+
   const [error, setError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
   const [patternCoin, setPatternCoin] = useState<string>("");
@@ -880,6 +888,23 @@ export default function SwingTimingView() {
       setTimeout(() => setAgentCopied(null), 2000);
     } catch {
       setError("Could not copy weekday activity");
+    }
+  };
+
+  
+  const loadMacroImpact = async (refresh = false) => {
+    setMacroImpactLoading(true);
+    try {
+      const url = refresh
+        ? `/api/timing-macro-impact?refresh=1&_=${Date.now()}`
+        : `/api/timing-macro-impact?_=${Date.now()}`;
+      const r = await fetch(url, { cache: "no-store" });
+      if (!r.ok) throw new Error(await r.text());
+      setMacroImpact(await r.json());
+    } catch (e) {
+      setMacroImpact({ tips: [], message: (e as Error).message });
+    } finally {
+      setMacroImpactLoading(false);
     }
   };
 
@@ -981,7 +1006,7 @@ export default function SwingTimingView() {
     }
   };
 
-    const load = useCallback(async (d: number, opts?: { refresh?: boolean }) => {
+  const load = useCallback(async (d: number, opts?: { refresh?: boolean }) => {
     const refresh = !!opts?.refresh;
     setLoading(true);
     setError(null);
@@ -1005,8 +1030,7 @@ export default function SwingTimingView() {
   }, []);
 
   // Load cached snapshot only — full recompute is "Run analysis"
-  useEffect(() => {
-    void load(days, { refresh: false });
+  useEffect(() => { void loadMacroImpact(false); void load(days, { refresh: false });
   }, [days, load]);
 
 
@@ -1078,6 +1102,16 @@ export default function SwingTimingView() {
           </button>
           <button
             type="button"
+            onClick={() => void loadMacroImpact(true)}
+            disabled={macroImpactLoading}
+            className="rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-950 hover:bg-amber-100 disabled:opacity-50"
+            title="Compare watchlist moves after past CPI / NFP / FOMC / PCE — saved for Home Did you know"
+          >
+            {macroImpactLoading ? "Analyzing…" : "📊 Last CPI/NFP/FOMC impact"}
+          </button>
+
+          <button
+            type="button"
             onClick={() => void copyTimingPrompt()}
             disabled={!data || loading}
             className="rounded-md border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-bold text-violet-900 hover:bg-violet-100 disabled:opacity-50"
@@ -1098,6 +1132,60 @@ export default function SwingTimingView() {
       </div>
 
       {error && <AlertBanner variant="error" message={error} />}
+
+      {macroImpact && (macroImpact.tips?.length || macroImpact.meetings?.length || macroImpact.message) ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4 shadow-sm">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-bold text-amber-950">Macro meeting impact (your book)</h2>
+            {macroImpact.generatedAt ? (
+              <span className="text-[10px] text-amber-900/70">
+                Updated {new Date(macroImpact.generatedAt).toLocaleString(undefined, { timeZone: "Asia/Manila" })} Manila
+              </span>
+            ) : null}
+          </div>
+          <p className="mb-2 text-[11px] text-amber-900/80">
+            Uses poll path ~24h / 72h after past CPI, NFP, FOMC, PCE (from Macro watch). Saved for Home
+            “Did you know”. Not a trade signal.
+          </p>
+          {macroImpact.message && !(macroImpact.tips && macroImpact.tips.length) ? (
+            <p className="text-xs text-amber-900">{macroImpact.message}</p>
+          ) : null}
+          <ul className="space-y-1.5 text-[12px] text-amber-950">
+            {(macroImpact.tips || []).map((tip, i) => (
+              <li key={i} className="rounded-md border border-amber-100 bg-white/80 px-2 py-1.5">
+                {tip}
+              </li>
+            ))}
+          </ul>
+          {macroImpact.meetings && macroImpact.meetings.length > 0 ? (
+            <div className="mt-3 overflow-x-auto">
+              <table className="min-w-full text-left text-[11px]">
+                <thead>
+                  <tr className="text-amber-900/70">
+                    <th className="py-1 pr-2">Type</th>
+                    <th className="py-1 pr-2">Date</th>
+                    <th className="py-1 pr-2">% coins ↓ 24h</th>
+                    <th className="py-1 pr-2">Avg 24h</th>
+                    <th className="py-1">n</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {macroImpact.meetings.map((m, i) => (
+                    <tr key={`${m.type}-${m.date}-${i}`} className="border-t border-amber-100">
+                      <td className="py-1 pr-2 font-bold">{m.type}</td>
+                      <td className="py-1 pr-2 font-mono">{m.date}</td>
+                      <td className="py-1 pr-2">{m.downShare24h}%</td>
+                      <td className="py-1 pr-2">{m.avgSigned24h}%</td>
+                      <td className="py-1">{m.sampleCoins}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
 
       {loading && !data && (
         <p className="text-sm text-gray-500 py-8 text-center">Computing slot-to-slot swings…</p>

@@ -189,7 +189,8 @@ function buildLongScanRankPrompt(
   lines.push(`- **Target entry:** ₱… or n/a`);
   lines.push(`- **Target exit:** ₱… or n/a`);
   lines.push(`- **Invalidation:** …`);
-  lines.push(`- **Review by:** YYYY-MM-DD`);
+  lines.push(`- **Review by:** YYYY-MM-DD
+- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration · short detail (repeat line per event; omit if none)`);
   lines.push(`- **Rank (best→worst):** SYMBOL (flag) > …`);
   lines.push(`- **Flag changes:** SYMBOL prior→new; … or none`);
   lines.push(`- **Security (90d):** searched, none found | or brief verified items`);

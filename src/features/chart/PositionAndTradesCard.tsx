@@ -303,6 +303,7 @@ If a **verified** incident exists → flag it and lean **WAIT / SKIP / DO NOT AD
     lines.push(`- **Sell / trim if:** …`);
     lines.push(`- **Invalidation:** …`);
     lines.push(`- **Review by:** YYYY-MM-DD`);
+    lines.push(`- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration · short detail (repeat line per event; omit if none)`);
     lines.push(`- **News (verified):** …`);
     lines.push(`- **Why:** …`);
   } else {
@@ -326,6 +327,7 @@ If a **verified** incident exists → flag it and lean **WAIT / SKIP / DO NOT AD
     lines.push(`- **Entry / invalidation / TP:** …`);
     lines.push(`- **Size note:** …`);
     lines.push(`- **Review by:** YYYY-MM-DD`);
+    lines.push(`- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration · short detail (repeat line per event; omit if none)`);
     lines.push(`- **News (verified):** …`);
     lines.push(`- **Why:** …`);
   }
@@ -724,23 +726,19 @@ export default function PositionAndTradesCard({
                 return (
                   <div
                     key={tg.label}
-                    className={`rounded-lg border-2 px-2 py-2 text-center transition ${
-                      isCurrentStage
-                        ? isDown
-                          ? "border-rose-600 bg-rose-100 shadow-md ring-2 ring-rose-400"
-                          : "border-emerald-600 bg-emerald-100 shadow-md ring-2 ring-emerald-400"
-                        : recoveredPast
-                          ? "border-sky-500 bg-sky-50 shadow-sm ring-1 ring-sky-300"
-                          : already
-                            ? isDown
-                              ? "border-rose-400 bg-rose-50"
-                              : "border-emerald-400 bg-emerald-50"
-                            : touchedBefore && isDown
-                              ? "border-violet-300 bg-violet-50/80"
-                              : isDown
-                                ? "border-rose-200 bg-white"
-                                : "border-slate-200 bg-white"
-                    }`}
+                    className={`rounded-lg border border-slate-200 px-2 py-2 text-center transition ${
+                        isCurrentStage
+                          ? isDown
+                            ? "bg-rose-100"
+                            : "bg-emerald-100"
+                          : recoveredPast
+                            ? "bg-sky-50"
+                            : already
+                              ? isDown
+                                ? "bg-rose-50"
+                                : "bg-emerald-50"
+                              : "bg-white"
+                      }`}
                   >
                     <div
                       className={`text-[10px] font-bold ${

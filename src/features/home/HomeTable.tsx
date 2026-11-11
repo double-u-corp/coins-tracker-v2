@@ -8,6 +8,7 @@ import {
   type HoldMae,
 } from "@/lib/holdMae";
 import dynamic from "next/dynamic";
+import HomeCoinWatchDates from "./HomeCoinWatchDates";
 import { useState, useEffect, useMemo, type ReactNode } from "react";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
@@ -366,15 +367,8 @@ function MiniBarometer({
     }
   };
 
-  const stripTone =
-    tone === "up"
-      ? "border-emerald-300 bg-emerald-50"
-      : tone === "down"
-        ? "border-rose-300 bg-rose-50"
-        : "border-slate-200 bg-slate-50/60";
-
   return (
-    <div className={`mt-2 rounded-lg border px-2 py-1.5 ${stripTone}`}>
+    <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50/60 px-2 py-1.5">
       <div className="mb-1 flex flex-wrap items-center justify-between gap-1">
         <span className="text-[9px] font-bold uppercase tracking-wide text-slate-500">
           Barometer
@@ -779,6 +773,21 @@ export default function HomeTable() {
       if (leanParts.length) {
         // One window only (7 / 14 / 28), random each Home load
         setBookLeanSnippet(leanParts[Math.floor(Math.random() * leanParts.length)]);
+      }
+      try {
+        const mi = await fetch(`/api/timing-macro-impact?_=${Date.now()}`, {
+          cache: "no-store",
+        });
+        if (mi.ok) {
+          const body = (await mi.json()) as { tips?: string[] };
+          if (Array.isArray(body.tips)) {
+            for (const tip of body.tips) {
+              if (tip && String(tip).length > 20) tipsPool.push(String(tip));
+            }
+          }
+        }
+      } catch {
+        /* optional */
       }
       if (tipsPool.length) {
         setDidYouKnow(tipsPool[Math.floor(Math.random() * tipsPool.length)]);
@@ -1787,17 +1796,6 @@ export default function HomeTable() {
                         symbol={sym}
                         price={nowPx}
                         avg={avg != null && avg > 0 ? avg : null}
-                        tone={
-                          openPct != null
-                            ? openPct >= 0
-                              ? "up"
-                              : "down"
-                            : openPnl != null
-                              ? openPnl >= 0
-                                ? "up"
-                                : "down"
-                              : null
-                        }
                       />
                     </div>
                   );
@@ -1911,7 +1909,10 @@ export default function HomeTable() {
       <HomeTwoDayMovers />
 
 
-      {/* 2) Macro watch */}
+      {/* 2a) Coin watch dates from journals */}
+      <HomeCoinWatchDates journalEntries={journalEntries} allCoins={allCoins} />
+
+      {/* 2b) Macro watch */}
       <HomeMacroWatch />
 
       {/* 3) General journal */}

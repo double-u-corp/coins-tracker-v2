@@ -4,6 +4,10 @@ import prisma from "@/lib/prisma";
 import { isAuthenticatedRequest } from "@/lib/auth";
 import { createJournalEntrySchema, deleteJournalEntrySchema } from "@/validators/journalSchema";
 import type { JournalEntryView } from "@/validators/journalSchema";
+import {
+  ingestJournalForCoinWatch,
+  removeCoinWatchForJournal,
+} from "@/lib/coinWatchStore";
 
 type ListResponse = { entries: JournalEntryView[] };
 type CreateResponse = { entry: JournalEntryView };
@@ -84,6 +88,18 @@ async function handleCreate(req: NextApiRequest, res: NextApiResponse<CreateResp
     include: { coin: true },
   });
 
+  try {
+    await ingestJournalForCoinWatch({
+      journalEntryId: entry.id,
+      notes: entry.notes,
+      title: entry.title,
+      symbol: entry.coin?.symbol ?? null,
+      coinId: entry.coinId ?? null,
+    });
+  } catch {
+    /* non-fatal */
+  }
+
   return res.status(201).json({
     entry: {
       id: entry.id,
@@ -125,6 +141,18 @@ async function handleUpdate(req: NextApiRequest, res: NextApiResponse<UpdateResp
     include: { coin: true },
   });
 
+  try {
+    await ingestJournalForCoinWatch({
+      journalEntryId: updated.id,
+      notes: updated.notes,
+      title: updated.title,
+      symbol: updated.coin?.symbol ?? null,
+      coinId: updated.coinId ?? null,
+    });
+  } catch {
+    /* non-fatal */
+  }
+
   return res.status(200).json({
     entry: {
       id: updated.id,
@@ -155,7 +183,13 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse<DeleteResp
     return res.status(404).json({ error: "Journal entry not found" });
   }
 
-  await prisma.journalEntry.delete({ where: { id: parsed.data.id } });
+  const jid = parsed.data.id;
+  await prisma.journalEntry.delete({ where: { id: jid } });
+  try {
+    await removeCoinWatchForJournal(jid);
+  } catch {
+    /* non-fatal */
+  }
   return res.status(200).json({ ok: true });
 }
 
