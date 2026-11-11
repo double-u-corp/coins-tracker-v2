@@ -25,7 +25,7 @@ export type CoinWatchEvent = {
 };
 
 const LABEL_RE =
-  /\b(unlock|delisting|delist|event|integration|listing|list|hardfork|hard\s*fork|conference|token\s*unlock)\b/i;
+  /\b(unlock|delisting|delist|event|integration|listing|list|hardfork|hard\s*fork|conference|token\s*unlock|governance|vote|validator|proposal)\b/i;
 
 function normalizeLabel(raw: string): CoinWatchLabel {
   const s = raw.toLowerCase().replace(/\s+/g, " ").trim();

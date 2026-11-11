@@ -241,7 +241,7 @@ If a **verified** incident exists → flag it and lean **WAIT / SKIP / DO NOT AD
   lines.push(`4. Why (max 3 bullets) — neutral; mix technical + catalyst; mention exploit/unlock if relevant`);
   lines.push(`5. Levels (entry / invalidation / take-profit) or "none — stay in cash"`);
   lines.push(
-    `   → Copy levels into journal: **Target entry** (new buy) or **Target re-entry** (already holding / add) and **Target exit** (full PHP, no commas). Always include **Review by:** YYYY-MM-DD (future Manila date).`
+    `   → Journal: **Target entry** / **Target re-entry**, **Target exit** (full PHP, no commas), **Review by:** YYYY-MM-DD, and **Watch date:** lines for every dated catalyst (see strict rules).`
   );
   lines.push(`6. Timeframe with ≥1 calendar recheck date (Manila)`);
   if (!args.holding) {
@@ -280,7 +280,14 @@ If a **verified** incident exists → flag it and lean **WAIT / SKIP / DO NOT AD
     `4. **Review by:** exactly \`YYYY-MM-DD\` (Manila calendar date). Example: \`2026-11-04\`. No extra words on that line.`
   );
   lines.push(
-    `Keep each of those four as its own bullet: \`- **Label:** value\`. Do not bold the value. Do not use tables for these four.`
+    `5. **Watch date:** one bullet per dated catalyst (governance vote, unlock, listing, hardfork, etc.). ` +
+      `Shape: \`- **Watch date:** YYYY-MM-DD · event · short detail\`. ` +
+      `Labels: unlock | delisting | event | integration | listing | hardfork. ` +
+      `Example: \`- **Watch date:** 2026-11-23 · event · Stellar Protocol 30 validator vote\`. ` +
+      `Repeat for each date. Omit only if none verified — never invent. App scrapes these into Coin watch dates.`
+  );
+  lines.push(
+    `Keep Agent / Target entry / Target exit / Review by as their own bullets. Watch date bullets are additional and may repeat.`
   );
   lines.push(``);
   lines.push("```markdown");
@@ -303,7 +310,7 @@ If a **verified** incident exists → flag it and lean **WAIT / SKIP / DO NOT AD
     lines.push(`- **Sell / trim if:** …`);
     lines.push(`- **Invalidation:** …`);
     lines.push(`- **Review by:** YYYY-MM-DD`);
-    lines.push(`- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration · short detail (repeat line per event; omit if none)`);
+    lines.push(`- **Watch date:** YYYY-MM-DD · event · short detail (repeat once per dated catalyst; omit only if none verified)`);
     lines.push(`- **News (verified):** …`);
     lines.push(`- **Why:** …`);
   } else {
@@ -327,7 +334,7 @@ If a **verified** incident exists → flag it and lean **WAIT / SKIP / DO NOT AD
     lines.push(`- **Entry / invalidation / TP:** …`);
     lines.push(`- **Size note:** …`);
     lines.push(`- **Review by:** YYYY-MM-DD`);
-    lines.push(`- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration · short detail (repeat line per event; omit if none)`);
+    lines.push(`- **Watch date:** YYYY-MM-DD · event · short detail (repeat once per dated catalyst; omit only if none verified)`);
     lines.push(`- **News (verified):** …`);
     lines.push(`- **Why:** …`);
   }

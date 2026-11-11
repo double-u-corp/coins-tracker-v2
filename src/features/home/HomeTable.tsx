@@ -680,6 +680,7 @@ function MonitorCard({
 
 export default function HomeTable() {
   const [bookLeanSnippet, setBookLeanSnippet] = useState<string | null>(null);
+  const [macroTriviaSnippet, setMacroTriviaSnippet] = useState<string | null>(null);
   const [didYouKnow, setDidYouKnow] = useState<string | null>(null);
   const [nextCronLabel, setNextCronLabel] = useState("Calculating…");
 
@@ -780,10 +781,13 @@ export default function HomeTable() {
         });
         if (mi.ok) {
           const body = (await mi.json()) as { tips?: string[] };
-          if (Array.isArray(body.tips)) {
-            for (const tip of body.tips) {
-              if (tip && String(tip).length > 20) tipsPool.push(String(tip));
-            }
+          const macroTips = (body.tips || []).filter(
+            (tip) => tip && String(tip).length > 15
+          );
+          if (macroTips.length) {
+            setMacroTriviaSnippet(
+              macroTips[Math.floor(Math.random() * macroTips.length)]
+            );
           }
         }
       } catch {
@@ -1273,6 +1277,20 @@ export default function HomeTable() {
           />
           {bookLeanSnippet && (
             <AlertBanner variant="info" message={bookLeanSnippet} />
+          )}
+          {macroTriviaSnippet && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2 text-[12px] text-amber-950">
+              <p className="leading-snug">
+                <span className="font-bold text-amber-900">Macro trivia · </span>
+                {macroTriviaSnippet}
+              </p>
+              <p className="mt-1 text-[10px] text-amber-800/80">
+                From Timing · last CPI/NFP/FOMC impact · alts only ·{" "}
+                <a href="/timing" className="font-bold underline">
+                  Timing →
+                </a>
+              </p>
+            </div>
           )}
           {didYouKnow && (
             <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2.5 text-sm text-violet-950">

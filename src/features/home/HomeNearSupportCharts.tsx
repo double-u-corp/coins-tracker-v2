@@ -25,8 +25,8 @@ type DailyPtFull = DailyPt & { high?: number; low?: number };
 /** Agent prompt: rank top near-support coins for spot entry monitoring. */
 function buildNearSupportEntryPrompt(
   hits: RangeHit[],
-    watchPlan: { symbol: string; name: string; currentPrice?: number | null }[] = [],
-  movers2d: { symbol: string; name?: string; netPct?: number; totalAbsPct?: number }[] = [],
+  watchPlan: { symbol: string; name: string; currentPrice?: number | null }[] = [],
+  movers2d: { symbol: string; name?: string; netPct?: number; totalAbsPct?: number }[] = []
 ): string {
   const lines: string[] = [];
   lines.push(
@@ -139,7 +139,13 @@ function buildNearSupportEntryPrompt(
   lines.push(``);
   lines.push(`## Final journal note (REQUIRED — pure markdown, copy-paste ready)`);
   lines.push(
-    `End with ONLY a fenced markdown block the trader can copy into their journal. Use this shape:`
+    `End with ONLY a fenced markdown block. For every dated catalyst on any listed coin, add a **Watch date** bullet (Home **Coin watch dates** scrapes these).`
+  );
+  lines.push(
+    `Shape: \`- **Watch date:** YYYY-MM-DD · event · short detail\` — one line per date. Labels: unlock | delisting | event | integration | listing | hardfork.`
+  );
+  lines.push(
+    `Examples: \`- **Watch date:** 2026-11-19 · event · SKY governance executive vote (Nov 9 proposal)\` then \`- **Watch date:** 2026-11-23 · event · Stellar Protocol 30 validator vote\`.`
   );
   lines.push(``);
   lines.push("```markdown");
@@ -151,6 +157,7 @@ function buildNearSupportEntryPrompt(
   lines.push(`- **Avoid:** … or none`);
   lines.push(`- **X accounts to follow:** coin — @handles`);
   lines.push(`- **Recheck by:** YYYY-MM-DD`);
+  lines.push(`- **Watch date:** YYYY-MM-DD · event · short detail (repeat per catalyst; omit only if none)`);
   lines.push(`- **Notes:** …`);
   lines.push("```");
   lines.push(``);
@@ -232,12 +239,9 @@ function positionIn30d(points: DailyPtFull[]): Omit<RangeHit, "symbol" | "name">
  */
 export default function HomeNearSupportCharts({
   universe,
-    watchPlanCoins = []
 }: {
   /** Prefer full watchlist symbols from Home (symbol + name). */
   universe: { symbol: string; name?: string }[];
-    /** Watch/plan coins not currently held (List B in the agent prompt). */
-  watchPlanCoins?: { symbol: string; name: string; currentPrice?: number | null }[];
 }) {
   const [hits, setHits] = useState<RangeHit[]>([]);
   const [loading, setLoading] = useState(false);

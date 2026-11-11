@@ -1152,121 +1152,82 @@ export default function SwingTimingView() {
 
       {error && <AlertBanner variant="error" message={error} />}
 
-      {macroImpact && (macroImpact.tips?.length || macroImpact.meetings?.length || macroImpact.message) ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4 shadow-sm space-y-4">
+            {macroImpact && (macroImpact.tips?.length || macroImpact.meetings?.length || macroImpact.message) ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50/40 p-3 shadow-sm space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-sm font-bold text-amber-950">Macro meeting impact (alts only)</h2>
+            <div>
+              <h2 className="text-sm font-bold text-amber-950">Macro impact · alts only</h2>
+              <p className="text-[10px] text-amber-900/75">
+                Latest meetings only (max 4). Details not kept forever — re-run after next print. Home uses short trivia.
+              </p>
+            </div>
             {macroImpact.generatedAt ? (
-              <span className="text-[10px] text-amber-900/70">
-                Updated {new Date(macroImpact.generatedAt).toLocaleString(undefined, { timeZone: "Asia/Manila" })} Manila
+              <span className="text-[10px] text-amber-900/60">
+                {new Date(macroImpact.generatedAt).toLocaleString(undefined, { timeZone: "Asia/Manila" })} MNL
               </span>
             ) : null}
           </div>
-          <p className="text-[11px] text-amber-900/80">
-            One slot per past CPI / NFP / FOMC / PCE / PPI from Macro watch. Poll path ~24h / 72h on your
-            alt book only (BTC, ETH, XAUT excluded). Saved for Home “Did you know”. Not a trade signal —
-            we do not invent official print numbers (e.g. +0.4% MoM); those stay in news/agent research.
-          </p>
           {macroImpact.message && !(macroImpact.meetings && macroImpact.meetings.length) ? (
             <p className="text-xs text-amber-900">{macroImpact.message}</p>
           ) : null}
 
-          <div className="space-y-3">
-            {(macroImpact.meetings || []).map((m, i) => {
-              const reg = m.regime24h || "mixed";
-              const regCls =
-                reg === "risk-off"
-                  ? "border-rose-300 bg-rose-50"
-                  : reg === "risk-on"
-                    ? "border-emerald-300 bg-emerald-50"
-                    : reg === "thin"
-                      ? "border-slate-200 bg-slate-50"
+          {/* Mobile carousel · desktop compact grid */}
+          {(macroImpact.meetings || []).length > 0 ? (
+            <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-1 -mx-1 px-1 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:snap-none sm:pb-0 sm:px-0">
+              {(macroImpact.meetings || []).map((m, i) => {
+                const reg = m.regime24h || "mixed";
+                const regCls =
+                  reg === "risk-off"
+                    ? "border-rose-300 bg-rose-50/90"
+                    : reg === "risk-on"
+                      ? "border-emerald-300 bg-emerald-50/90"
                       : "border-amber-200 bg-white";
-              return (
-                <div
-                  key={`${m.type}-${m.date}-${i}`}
-                  className={`rounded-lg border px-3 py-2.5 ${regCls}`}
-                >
-                  <div className="flex flex-wrap items-center gap-2 mb-1">
-                    <span className="rounded border border-amber-400 bg-amber-100 px-1.5 py-0.5 text-[10px] font-extrabold uppercase text-amber-950">
-                      {m.type}
-                    </span>
-                    <span className="font-mono text-xs font-bold text-slate-800">{m.date}</span>
-                    <span className="text-[10px] font-bold uppercase text-slate-600">{reg}</span>
-                    <span className="text-[10px] text-slate-500">n={m.sampleCoins} alts</span>
-                  </div>
-                  <div className="text-sm font-bold text-slate-900 leading-snug">{m.title}</div>
-                  <p className="mt-1 text-[12px] text-slate-700 leading-snug">
-                    {m.summary ||
-                      `${m.downShare24h}% alts down 24h (avg ${m.avgSigned24h}%)`}
-                  </p>
-                  <div className="mt-1 flex flex-wrap gap-3 text-[11px] font-semibold text-slate-600">
-                    <span>24h ↓ {m.downShare24h}% · avg {m.avgSigned24h}%</span>
-                    {m.downShare72h != null && (
-                      <span>72h ↓ {m.downShare72h}% · avg {m.avgSigned72h}%</span>
-                    )}
-                  </div>
-                  {m.topMoves && m.topMoves.length > 0 ? (
-                    <div className="mt-2 overflow-x-auto">
-                      <table className="min-w-full text-left text-[11px]">
-                        <thead>
-                          <tr className="text-slate-500">
-                            <th className="py-0.5 pr-2">Coin</th>
-                            <th className="py-0.5 pr-2">Before</th>
-                            <th className="py-0.5 pr-2">24h %</th>
-                            <th className="py-0.5">72h %</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {m.topMoves.map((c) => (
-                            <tr key={c.symbol} className="border-t border-slate-100/80">
-                              <td className="py-0.5 pr-2 font-bold">
-                                {c.name}{" "}
-                                <span className="font-mono text-[10px] text-slate-500">{c.symbol}</span>
-                              </td>
-                              <td className="py-0.5 pr-2 font-mono">
-                                {c.priceBefore >= 1000
-                                  ? c.priceBefore.toLocaleString("en-PH", { maximumFractionDigits: 0 })
-                                  : c.priceBefore.toLocaleString("en-PH", { maximumFractionDigits: 4 })}
-                              </td>
-                              <td
-                                className={`py-0.5 pr-2 font-bold ${(c.pct24h ?? 0) >= 0 ? "text-emerald-700" : "text-rose-700"}`}
-                              >
-                                {c.pct24h != null
-                                  ? `${c.pct24h >= 0 ? "+" : ""}${c.pct24h.toFixed(2)}%`
-                                  : "—"}
-                              </td>
-                              <td
-                                className={`py-0.5 font-bold ${(c.pct72h ?? 0) >= 0 ? "text-emerald-700" : "text-rose-700"}`}
-                              >
-                                {c.pct72h != null
-                                  ? `${c.pct72h >= 0 ? "+" : ""}${c.pct72h.toFixed(2)}%`
-                                  : "—"}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                return (
+                  <div
+                    key={`${m.type}-${m.date}-${i}`}
+                    className={`snap-center shrink-0 w-[min(88vw,18rem)] sm:w-auto sm:shrink rounded-lg border px-2.5 py-2 ${regCls}`}
+                  >
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="rounded bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-extrabold uppercase text-amber-950">
+                        {m.type}
+                      </span>
+                      <span className="font-mono text-[11px] font-bold">{m.date}</span>
+                      <span className="text-[10px] font-bold uppercase text-slate-600">{reg}</span>
                     </div>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
+                    <p className="mt-1 text-[11px] font-semibold text-slate-800 line-clamp-2">{m.title}</p>
+                    <p className="mt-0.5 text-[11px] text-slate-600">
+                      24h ↓{m.downShare24h}% · avg {m.avgSigned24h}%
+                      {m.downShare72h != null ? ` · 72h ↓${m.downShare72h}%` : ""}
+                    </p>
+                    {m.topMoves && m.topMoves.length > 0 ? (
+                      <ul className="mt-1.5 space-y-0.5 text-[10px]">
+                        {m.topMoves.slice(0, 4).map((c) => (
+                          <li key={c.symbol} className="flex justify-between gap-2 tabular-nums">
+                            <span className="truncate font-semibold text-slate-700">{c.name}</span>
+                            <span
+                              className={
+                                (c.pct24h ?? 0) >= 0 ? "font-bold text-emerald-700" : "font-bold text-rose-700"
+                              }
+                            >
+                              {c.pct24h != null
+                                ? `${c.pct24h >= 0 ? "+" : ""}${c.pct24h.toFixed(1)}%`
+                                : "—"}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
 
           {(macroImpact.tips || []).length > 0 ? (
-            <div>
-              <div className="text-[10px] font-bold uppercase tracking-wide text-amber-900/70 mb-1">
-                Tips (also feed Home Did you know)
-              </div>
-              <ul className="space-y-1.5 text-[12px] text-amber-950">
-                {(macroImpact.tips || []).map((tip, i) => (
-                  <li key={i} className="rounded-md border border-amber-100 bg-white/80 px-2 py-1.5">
-                    {tip}
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <p className="text-[11px] text-amber-950/90 rounded-md border border-amber-100 bg-white/70 px-2 py-1.5">
+              <span className="font-bold">Trivia · </span>
+              {(macroImpact.tips || [])[0]}
+            </p>
           ) : null}
         </div>
       ) : null}

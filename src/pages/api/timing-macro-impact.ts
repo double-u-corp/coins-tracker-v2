@@ -250,35 +250,40 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    // Newest meeting first overall
+    // Newest first; keep only last 4 meetings (storage + UI stay light)
     meetings.sort((a, b) => b.date.localeCompare(a.date));
+    const kept = meetings.slice(0, 4).map((m) => ({
+      ...m,
+      // Cap table size in DB
+      topMoves: (m.topMoves || []).slice(0, 5),
+    }));
 
     const tips: string[] = [];
     for (const fam of ["CPI", "NFP", "PCE", "FOMC", "PPI"]) {
-      const rows = meetings.filter((m) => m.type === fam).slice(0, 2);
+      const rows = kept.filter((m) => m.type === fam).slice(0, 2);
       if (rows.length >= 2) {
         const avgDown = (rows[0].downShare24h + rows[1].downShare24h) / 2;
         const avgMove = (rows[0].avgSigned24h + rows[1].avgSigned24h) / 2;
         tips.push(
-          `Did you know · Last two ${fam} dates (${rows[1].date} & ${rows[0].date}): ~${avgDown.toFixed(0)}% of your alts were down 24h after (avg move ${avgMove.toFixed(2)}%). BTC/ETH/XAUT excluded. Not a rule — confirm on Spot.`
+          `Last two ${fam} (${rows[1].date} & ${rows[0].date}): ~${avgDown.toFixed(0)}% of alts down 24h after (avg ${avgMove.toFixed(2)}%). Alts only — not a trade rule.`
         );
       } else if (rows.length === 1) {
         const r = rows[0];
         tips.push(
-          `Did you know · After ${fam} on ${r.date}: ${r.downShare24h.toFixed(0)}% of alts down in 24h (avg ${r.avgSigned24h.toFixed(2)}%). ${r.summary}`
+          `After ${fam} on ${r.date}: ${r.downShare24h.toFixed(0)}% of alts down in 24h (avg ${r.avgSigned24h.toFixed(2)}%). Alts only — confirm on Spot.`
         );
       }
     }
 
-    if (!meetings.length) {
+    if (!kept.length) {
       tips.push(
-        "No past CPI/NFP/FOMC/PCE rows with enough alt poll history. Keep Macro watch dates, then re-run impact."
+        "No past CPI/NFP/FOMC/PCE with enough alt poll history yet. Keep Macro watch dates, then re-run impact."
       );
     }
 
     const store: Store = {
       generatedAt: new Date().toISOString(),
-      meetings,
+      meetings: kept,
       tips,
     };
 
