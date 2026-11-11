@@ -239,9 +239,12 @@ function positionIn30d(points: DailyPtFull[]): Omit<RangeHit, "symbol" | "name">
  */
 export default function HomeNearSupportCharts({
   universe,
+  watchPlanCoins = [],
 }: {
   /** Prefer full watchlist symbols from Home (symbol + name). */
   universe: { symbol: string; name?: string }[];
+  /** Watch / plan coins (not held) for List B of the entry-monitor prompt. */
+  watchPlanCoins?: { symbol: string; name: string; currentPrice?: number | null }[];
 }) {
   const [hits, setHits] = useState<RangeHit[]>([]);
   const [loading, setLoading] = useState(false);
