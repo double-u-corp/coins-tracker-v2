@@ -36,7 +36,7 @@ function buildNearSupportEntryPrompt(
   lines.push(``);
   lines.push(`## Task`);
   lines.push(
-    `Help the trader **monitor** and rank which coin is **better to stage a spot buy** from Lists A-D (not market-chase). One top pick or HOLD CASH. Do not force a bullish bias. Weak/unclear -> WAIT / SKIP and hold cash.`
+    `Rank coins on Lists A–D using **verified news only** (past ~30d, present/72h, next ~30d, security ~90d). Chart labels are context — not the ranking basis. One top pick or HOLD CASH when news is thin/adverse. No shorting/leverage.`
   );
   lines.push(``);
   lines.push(`## List A — Near 30-day support · top 8 (app ranking)`);
@@ -123,13 +123,16 @@ function buildNearSupportEntryPrompt(
     `For **each** coin in Lists A–D, search **verified** sources only (no training-memory headlines; do not invent events):`
   );
   lines.push(
-    `1. **Past ~30 calendar days** — news, listings/delistings, unlocks, exploits, hacks, governance, partnerships, regulatory hits tied to the **project ticker/name** (not the local PHP pair suffix).`
+    `1. **Past ~30 calendar days** — listings/delistings, unlocks, exploits, hacks, governance, partnerships, regulatory (project ticker/name — not PHP suffix).`
   );
   lines.push(
-    `2. **Next ~30 calendar days** — scheduled unlocks, launches, conferences, token events, known court/regulatory dates if dated and sourced.`
+    `2. **Present / last ~72h** — verified items that could explain current moves.`
   );
   lines.push(
-    `3. **Security** — any exploit / bridge / protocol incident in the last ~90 days for that project.`
+    `3. **Next ~30 calendar days** — scheduled unlocks, launches, votes, hardforks, conferences, court/regulatory dates (dated + sourced).`
+  );
+  lines.push(
+    `4. **Security ~90d** — exploit / bridge / protocol incidents for that project.`
   );
   lines.push(
     `If a category has nothing verifiable after search, write **none verified** for that coin/category — never silent omission.`
@@ -148,13 +151,16 @@ function buildNearSupportEntryPrompt(
   lines.push(``);
   lines.push(`## Answer format`);
   lines.push(
-    `1. **Table** (one row per coin from A∪B): Rank | Coin | Source (A / B / both) | Monitor posture (PRIORITY WATCH / WATCH / WAIT / SKIP) | 1-line why | Key verified catalyst or "none verified" | X accounts`
+    `1. **Ranked table** (A∪B∪C∪D): Rank | Coin | Lists | News posture (PRIORITY / WATCH / WAIT / SKIP) | strongest verified catalyst or "none verified" | X accounts`
   );
   lines.push(
-    `2. **Best relative entry candidates** (max 3) across both lists — only if research supports staging; else say none.`
+    `2. **Best news-backed candidates** (max 3) — only if catalysts support monitoring; else none / HOLD CASH.`
   );
-  lines.push(`3. **Avoid / deprioritize** (if any) with reason.`);
+  lines.push(`3. **Avoid / deprioritize** (if any) with verified reason.`);
   lines.push(`4. **Recheck by** (Manila date, within ~7 days).`);
+  lines.push(
+    `5. **Watch date lines** — for every dated catalyst: \`- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration|listing|hardfork · short detail\``
+  );
   lines.push(``);
   lines.push(`## Final journal note (REQUIRED — pure markdown, copy-paste ready)`);
   lines.push(

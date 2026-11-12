@@ -113,15 +113,15 @@ function buildLongScanRankPrompt(
   lines.push(``);
   lines.push(`## Primary goal`);
   lines.push(`The trader has about **₱10,000** to deploy in **one** spot buy (or a tight staged ladder on a single coin).`);
-  lines.push(`Using **only verified research** for the **past ~30 days** and **next ~30 days** of events/catalysts, answer:`);
+  lines.push(`Using **only verified research** for **past ~30 days**, **present/~72h**, and **next ~30 days** of events/catalysts (plus security ~90d), answer:`);
   lines.push(`**Which coin currently on this LONG-scan list is the best candidate to consider buying with ₱10,000 — or should they hold cash?**`);
   lines.push(`Ranking is a decision aid for that ₱10k question, not a prediction or guarantee.`);
   lines.push(``);
   lines.push(`## Research rules`);
   lines.push(`- **Mandatory security scan first** (every coin, before ranking or "special"): search last ~90 days for **exploit, hack, bridge hack, outage, pause withdrawals, validator failure, chain halt, security incident** + project name / chain name (e.g. BNB + "BNB Chain" / BSC).`);
   lines.push(`- If a **verified** security incident is material to the coin or its chain, you must **not** treat a roadmap/hardfork alone as bullish. Prefer flag **bad** or **monitor**; ₱10k verdict leans **HOLD CASH** unless the incident is clearly resolved and priced.`);
-  lines.push(`- Then for each coin: official/project calendar, unlocks/supply, listings/delistings, regulatory/political only if asset-linked.`);
-  lines.push(`- Past ~30d and forward ~30d for non-security catalysts. No dated item after search → **none verified** (never silent skip).`);
+  lines.push(`- Then for each coin: official/project calendar, unlocks/supply, listings/delistings, regulatory/political only if asset-linked. **Rank primarily by this news quality**, not by scan score or support/resistance numbers.`);
+  lines.push(`- Past ~30d, present/~72h, and forward ~30d for non-security catalysts. No dated item after search → **none verified** (never silent skip).`);
   lines.push(`- **"None verified" is only valid after an explicit search** for that category — not when you skipped the scan.`);
   lines.push(`- Do **not** invent news. Do **not** use training-memory headlines.`);
   lines.push(`- Hardfork / upgrade = operational catalyst, **not** proof of price-up. Do not rank a coin top for ₱10k only because an upgrade date is near.`);
@@ -158,7 +158,7 @@ function buildLongScanRankPrompt(
     lines.push(`- Latest scan bias: **${best?.bias || "?"}** (score ${best?.score ?? "?"}/${best?.maxScore ?? "?"}, conf ${best != null ? Math.round((best.confidence || 0) * 100) : "?"}%)`);
     lines.push(`- Tier: ${best?.tier || "—"} · Extended: ${best?.isExtended ? "yes" : "no"}`);
     lines.push(`- Price (scan): ${best?.currentPrice ?? "—"} · Live: ${px ?? "—"}`);
-    lines.push(`- Support: ${best?.support ?? "—"} · Resistance: ${best?.resistance ?? "—"}`);
+    // S/R omitted from agent prompt — rank by verified news, not levels
     if (best?.invalidation != null) lines.push(`- Invalidation: ~${best.invalidation}`);
     if (best?.target != null) lines.push(`- Target ref: ~${best.target}`);
     if (best?.ladder?.length) {
@@ -176,7 +176,7 @@ function buildLongScanRankPrompt(
   lines.push(`## Answer format`);
   lines.push(`1. **₱10k verdict:** BUY candidate **SYMBOL** | or **HOLD CASH** (one line + why).`);
   lines.push(`2. **Ranked table** (best → worst for deploying ₱10k as spot): Rank | Coin | New flag | Prior | Changed? | 1-line why`);
-  lines.push(`3. **Per coin:** **Security (90d)** first; then past 30d / next 30d catalysts (or none verified).`);
+  lines.push(`3. **Per coin:** **Security (90d)** first; then past 30d / present / next 30d catalysts (or none verified). Include **Watch date** lines for every dated item.`);
   lines.push(`4. **Flag change summary** — only coins where prior → new differs.`);
   lines.push(`5. **Required copy-paste markdown** for the next agent check / LONG-scan journal (exact labels):`);
   lines.push(``);
@@ -189,8 +189,8 @@ function buildLongScanRankPrompt(
   lines.push(`- **Target entry:** ₱… or n/a`);
   lines.push(`- **Target exit:** ₱… or n/a`);
   lines.push(`- **Invalidation:** …`);
-  lines.push(`- **Review by:** YYYY-MM-DD
-- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration · short detail (repeat line per event; omit if none)`);
+  lines.push(`- **Review by:** YYYY-MM-DD`);
+    lines.push(`- **Watch date:** YYYY-MM-DD · event · short detail (repeat once per dated catalyst; omit only if none verified)`);
   lines.push(`- **Rank (best→worst):** SYMBOL (flag) > …`);
   lines.push(`- **Flag changes:** SYMBOL prior→new; … or none`);
   lines.push(`- **Security (90d):** searched, none found | or brief verified items`);

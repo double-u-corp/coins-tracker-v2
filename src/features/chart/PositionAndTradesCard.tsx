@@ -87,7 +87,7 @@ function buildAgentPrompt(args: {
   lines.push(``);
   lines.push(`## Market snapshot`);
   lines.push(`- Price now: ${price}`);
-  if (args.support != null) lines.push(`- App support ref: ~${args.support}`);
+  if (args.support != null) lines.push(`- App level ref (context only — not the research target): ~${args.support}`);
   if (args.resistance != null) lines.push(`- App resistance ref: ~${args.resistance}`);
 
   const pump = findLastPumpContext(args.points || []);

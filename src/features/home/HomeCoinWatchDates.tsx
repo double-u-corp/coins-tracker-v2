@@ -92,6 +92,15 @@ export default function HomeCoinWatchDates({
     }));
   }, [events, manilaToday]);
 
+  const upcomingDates = useMemo(
+    () => byDate.filter((g) => g.date >= manilaToday),
+    [byDate, manilaToday]
+  );
+  const archivedDates = useMemo(
+    () => byDate.filter((g) => g.date < manilaToday),
+    [byDate, manilaToday]
+  );
+
   const nameFor = (sym: string | null) => {
     if (!sym) return "—";
     const c = (allCoins || []).find((x) => x.symbol.toUpperCase() === sym.toUpperCase());
@@ -153,7 +162,7 @@ export default function HomeCoinWatchDates({
   };
 
   return (
-    <div className="mb-6 mt-6 rounded-lg border border-violet-100 bg-white p-4 shadow-sm">
+    <div className="mb-6 rounded-lg border border-violet-100 bg-white p-4 shadow-sm">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 className="text-sm font-bold uppercase tracking-wider text-violet-900 flex flex-wrap items-center gap-2">
@@ -198,18 +207,15 @@ export default function HomeCoinWatchDates({
         </p>
       ) : (
         <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-2 -mx-1 px-1 sm:mx-0 sm:grid sm:grid-cols-2 lg:grid-cols-3 sm:overflow-visible sm:snap-none sm:pb-0 sm:px-0">
-          {byDate.map(({ date, items }) => {
+          {upcomingDates.map(({ date, items }) => {
             const isToday = date === manilaToday;
-            const past = date < manilaToday;
             return (
               <div
                 key={date}
                 className={`snap-center shrink-0 w-[min(92vw,20rem)] sm:w-auto sm:shrink rounded-lg border px-3 py-2.5 ${
                   isToday
                     ? "border-amber-400 bg-amber-50 ring-2 ring-amber-300/80 shadow-md"
-                    : past
-                      ? "border-slate-200 bg-slate-50/90"
-                      : "border-violet-100 bg-violet-50/40"
+                    : "border-violet-100 bg-violet-50/40"
                 }`}
               >
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-1">
@@ -305,6 +311,47 @@ export default function HomeCoinWatchDates({
             );
           })}
         </div>
+        {archivedDates.length > 0 && (
+          <details className="mt-3 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2">
+            <summary className="cursor-pointer text-xs font-bold text-slate-700">
+              Archived · past dates ({archivedDates.length}) — auto-hidden from main board
+            </summary>
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {archivedDates.map(({ date, items }) => (
+                <div
+                  key={date}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 opacity-90"
+                >
+                  <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1">
+                    <span className="font-mono text-sm font-bold text-slate-700">{date}</span>
+                    <button
+                      type="button"
+                      disabled={busy === date}
+                      onClick={() => void delDate(date)}
+                      className="rounded border border-rose-200 bg-white px-1.5 py-0.5 text-[10px] font-bold text-rose-700 hover:bg-rose-50"
+                    >
+                      Delete date
+                    </button>
+                  </div>
+                  <ul className="space-y-1.5">
+                    {items.map((ev) => (
+                      <li key={ev.id} className="text-[11px] text-slate-700">
+                        <span className="font-semibold">{nameFor(ev.symbol)}</span>
+                        {ev.symbol ? (
+                          <span className="ml-1 font-mono text-[10px] text-slate-500">{ev.symbol}</span>
+                        ) : null}
+                        <span className="ml-1 rounded bg-slate-100 px-1 text-[9px] uppercase text-slate-600">
+                          {ev.label}
+                        </span>
+                        <p className="mt-0.5 text-slate-600">{ev.description}</p>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
       )}
     </div>
   );

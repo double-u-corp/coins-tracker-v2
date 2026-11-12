@@ -130,50 +130,71 @@ function scoreExtended(points: DailyBar[]): Omit<Hit, "symbol" | "name"> | null 
 
 function buildFastPumpWhyPrompt(hits: Hit[]): string {
   const lines: string[] = [];
-  lines.push("You are a neutral crypto research assistant for a Philippines spot LONG-only PHP trader (no shorting, no leverage).");
+  lines.push(
+    "You are a neutral crypto research assistant for a Philippines spot PHP trader (local exchanges — buy/sell only)."
+  );
   lines.push("");
   lines.push("## Task");
   lines.push(
-    "These coins just pumped above / through the daily 20 SMA (fast lift). Explain why they moved with verified crypto-specific news only. Cool-down / pullback watch — not a short and not a chase-buy."
+    "These coins appear on a **fast pump above 20 SMA** screen. Priority is **verified news and dated catalysts only** — not trading advice, not pullback/extension opinions, not buy/sell calls."
   );
+  lines.push("");
+  lines.push("## Research windows (required per coin)");
+  lines.push(
+    "1. **Past ~30 calendar days** — listings, delistings, unlocks, exploits, partnerships, governance, regulatory, product launches."
+  );
+  lines.push("2. **Present / last 72h** — why price may be moving now (if verifiable).");
+  lines.push(
+    "3. **Next ~30 calendar days** — scheduled unlocks, votes, launches, hardforks, court dates (dated + sourced only)."
+  );
+  lines.push("4. **Security ~90d** — exploit / bridge / protocol incidents for that project.");
   lines.push("");
   lines.push("## Rules");
   lines.push("- Neutral. Do not invent news. Do not use training-memory headlines.");
-  lines.push('- Prefer official posts and reputable outlets; say "none verified" if unsure.');
-  lines.push("- Spot only: never recommend shorting.");
+  lines.push(
+    '- Prefer official project posts and reputable outlets. After an explicit search, say "none verified" per window if empty.'
+  );
+  lines.push("- Do **not** recommend entries, pullbacks, shorts, or leverage.");
+  lines.push("- Search by project ticker/name — not the local PHP pair suffix.");
   lines.push("");
-  lines.push("## Fast pump above 20 SMA · top " + String(hits.length));
+  lines.push("## Coins (app screen · context only)");
   if (!hits.length) {
     lines.push("(none right now)");
   } else {
     hits.forEach((h, i) => {
-      const sma = Number(h.sma20);
-      const ext = Number(h.extensionPct);
-      const lift = Number(h.quickLiftPct);
+      const base = h.name || h.symbol.replace(/PHP$/i, "");
       lines.push(
         String(i + 1) +
           ". **" +
-          h.name +
+          base +
           "** (`" +
           h.symbol +
           "`) — price " +
           String(h.price) +
-          " · 20 SMA " +
-          (Number.isFinite(sma) ? sma.toFixed(2) : "n/a") +
-          " · ext " +
-          (Number.isFinite(ext) ? ext.toFixed(1) : "n/a") +
-          "% · lift " +
-          (Number.isFinite(lift) ? lift.toFixed(1) : "n/a") +
-          "% · " +
+          " · " +
           h.detail
       );
     });
   }
   lines.push("");
-  lines.push("## Answer");
-  lines.push('1. Per coin: verified driver or "none verified" (max 2 bullets each)');
-  lines.push("2. Which look extended / wait for pullback (if any)");
-  lines.push("3. Recheck by (Manila date)");
+  lines.push("## Answer format");
+  lines.push(
+    "1. **Per coin** — Past 30d / Present / Next 30d / Security 90d (verified bullets or none verified)."
+  );
+  lines.push("2. **Sources** — name + URL when available.");
+  lines.push(
+    "3. **Copy-ready Watch date lines** for Home **Coin watch dates** (machine-readable):"
+  );
+  lines.push(
+    "   For every dated catalyst: `- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration|listing|hardfork · short detail`"
+  );
+  lines.push(
+    "   Example: `- **Watch date:** 2026-11-23 · event · Stellar Protocol 30 validator vote`"
+  );
+  lines.push("   One line per date. Omit only if none verified — never invent.");
+  lines.push(
+    "4. End with a fenced markdown block that includes those **Watch date** lines (repeat per event)."
+  );
   return lines.join("\n");
 }
 

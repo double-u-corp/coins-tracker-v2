@@ -255,9 +255,9 @@ export function formatEntryReviewPrompt(
   lines.push(`- Bias: **${c.bias}** (score ${c.score >= 0 ? "+" : ""}${c.score}/±${c.maxPossibleScore}, ${(c.confidence * 100).toFixed(0)}% data)`);
   lines.push(`- Macro: ${c.macroTrend}${c.isCounterTrend ? " — short-term bias conflicts with macro" : ""}`);
   lines.push(`- Price now: ${c.currentPrice}`);
-  lines.push(`- Support: ${c.support} | Resistance: ${c.resistance}`);
+  // Support/resistance omitted — research focus is coin news, not S/R targets
   if (structureLevels && structureLevels.length > 0) {
-    lines.push(`- Structure key levels (poll/swing path — placement aids, confirm bias on Spot):`);
+    lines.push(`- Structure levels (optional context only — do not treat as entry advice):`);
     for (const lvl of structureLevels) {
       lines.push(`  - ${lvl.shortLabel || lvl.label}: ${lvl.price} (${lvl.label})`);
     }
@@ -315,8 +315,9 @@ export function formatEntryReviewPrompt(
   lines.push(`Silence is not "none verified." Each category: verified item OR **searched, none found**. Distinguish from not-searched.`);
   lines.push(`**A) Security/exploit (~90d) MANDATORY:** search project, ticker, exploit, hack, bridge, security incident. Verified hit → lean WAIT/SKIP/DO NOT ADD/TRIM.`);
   lines.push(`**B) Audit lines:** exploit | unlocks/supply | listing/delisting | partnership/launch | regulatory if asset-linked.`);
-  lines.push(`**C) Windows:** ~60d around last high; **forward 90d** dated unlocks/launches — none dated → searched, none found.`);
+  lines.push(`**C) Windows:** past ~30d · **present/~72h** · next ~30d dated catalysts; also ~60d around last high if supplied; forward unlocks — none dated → searched, none found.`);
   lines.push(`**D) Output:** news audit + ≤6 catalyst rows (date·URL·official vs reported·in-price?·uncertainty·spot implication). Then verdict.`);
+  lines.push(`**E) Watch dates:** for every dated catalyst emit \`- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration|listing|hardfork · short detail\` (scraped into Home Coin watch dates).`);
   lines.push(`Correlated indicators are not independent confirms. Structure + invalidation > green-flag count.`);
   lines.push(``);
   if (isAllocated) {
@@ -556,7 +557,7 @@ export function formatEntryReviewPromptForGoogle(
   });
 
   parts.push(
-    `Mandatory research BEFORE verdict: (A) past ~30 days verified news/events for ${base}; (B) next ~30 days dated catalysts (unlocks, listings, upgrades, governance) or "none verified"; (C) security/exploit last ~90d or "searched none found". Do not invent news. No training-memory headlines.`
+    `Mandatory research BEFORE verdict: (A) past ~30d news for ${base}; (B) present/~72h; (C) next ~30d dated catalysts or none verified; (D) security/exploit ~90d or searched none found. Emit Watch date lines for dated items. Do not invent news. No training-memory headlines. Goal is coin information — not S/R advice.`
   );
 
   if (isAllocated) {
