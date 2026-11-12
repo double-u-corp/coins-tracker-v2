@@ -25,7 +25,7 @@ const ManageCoinsView = dynamic(() => import("@/features/manage/ManageCoinsView"
 import { useHomeLogic } from "./useHomeLogic";
 import NewRecordModal from "./NewRecordModal";
 import HomeMacroWatch from "./HomeMacroWatch";
-import HomeTwoDayMovers from "./HomeTwoDayMovers";
+import HomeRsiOversold from "./HomeRsiOversold";
 import HomeWatchPlanCharts from "./HomeWatchPlanCharts";
 import HomeNearSupportCharts from "./HomeNearSupportCharts";
 import HomeExtendedAboveSma from "./HomeExtendedAboveSma";
@@ -1874,6 +1874,9 @@ export default function HomeTable() {
           <HomeExtendedAboveSma
             universe={allCoins.map((c) => ({ symbol: c.symbol, name: c.name }))}
           />
+          <HomeRsiOversold
+            universe={allCoins.map((c) => ({ symbol: c.symbol, name: c.name }))}
+          />
         </div>
       )}
 
@@ -1921,11 +1924,6 @@ export default function HomeTable() {
           </div>
         </>
       )}
-
-
-      {/* 1) 2d movers */}
-      <HomeTwoDayMovers />
-
 
       {/* 2a) Coin watch dates from journals */}
       <HomeCoinWatchDates journalEntries={journalEntries} allCoins={allCoins} />

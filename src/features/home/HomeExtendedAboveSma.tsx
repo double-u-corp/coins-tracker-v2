@@ -127,6 +127,56 @@ function scoreExtended(points: DailyBar[]): Omit<Hit, "symbol" | "name"> | null 
   return { price, sma20, extensionPct, freshCross, quickLiftPct, score, detail };
 }
 
+
+function buildFastPumpWhyPrompt(hits: Hit[]): string {
+  const lines: string[] = [];
+  lines.push("You are a neutral crypto research assistant for a Philippines spot LONG-only PHP trader (no shorting, no leverage).");
+  lines.push("");
+  lines.push("## Task");
+  lines.push(
+    "These coins just pumped above / through the daily 20 SMA (fast lift). Explain why they moved with verified crypto-specific news only. Cool-down / pullback watch — not a short and not a chase-buy."
+  );
+  lines.push("");
+  lines.push("## Rules");
+  lines.push("- Neutral. Do not invent news. Do not use training-memory headlines.");
+  lines.push('- Prefer official posts and reputable outlets; say "none verified" if unsure.');
+  lines.push("- Spot only: never recommend shorting.");
+  lines.push("");
+  lines.push("## Fast pump above 20 SMA · top " + String(hits.length));
+  if (!hits.length) {
+    lines.push("(none right now)");
+  } else {
+    hits.forEach((h, i) => {
+      const sma = Number(h.sma20);
+      const ext = Number(h.extensionPct);
+      const lift = Number(h.quickLiftPct);
+      lines.push(
+        String(i + 1) +
+          ". **" +
+          h.name +
+          "** (`" +
+          h.symbol +
+          "`) — price " +
+          String(h.price) +
+          " · 20 SMA " +
+          (Number.isFinite(sma) ? sma.toFixed(2) : "n/a") +
+          " · ext " +
+          (Number.isFinite(ext) ? ext.toFixed(1) : "n/a") +
+          "% · lift " +
+          (Number.isFinite(lift) ? lift.toFixed(1) : "n/a") +
+          "% · " +
+          h.detail
+      );
+    });
+  }
+  lines.push("");
+  lines.push("## Answer");
+  lines.push('1. Per coin: verified driver or "none verified" (max 2 bullets each)');
+  lines.push("2. Which look extended / wait for pullback (if any)");
+  lines.push("3. Recheck by (Manila date)");
+  return lines.join("\n");
+}
+
 /**
  * Top 3 coins that just pumped above 20 SMA — watch for cool-down / pullback.
  * Spot only (not a short signal).
@@ -143,6 +193,7 @@ export default function HomeExtendedAboveSma({
   const [series, setSeries] = useState<PollPoint[]>([]);
   const [dailyPoints, setDailyPoints] = useState<DailyPt[]>([]);
   const [seriesLoading, setSeriesLoading] = useState(false);
+  const [whyCopied, setWhyCopied] = useState(false);
 
   const scan = useCallback(async (force = false) => {
     const list = universe.filter((u) => u.symbol && !/^(BTC|ETH|XAUT)PHP$/i.test(u.symbol));
@@ -238,6 +289,23 @@ export default function HomeExtendedAboveSma({
           </p>
         </div>
         <div className="flex flex-wrap gap-1.5">
+          {hits.length > 0 && (
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(buildFastPumpWhyPrompt(hits));
+                  setWhyCopied(true);
+                  setTimeout(() => setWhyCopied(false), 2000);
+                } catch {
+                  /* ignore */
+                }
+              }}
+              className="rounded-md border border-orange-400 bg-orange-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-orange-700"
+            >
+              {whyCopied ? "✅ Copied" : "📋 Why moving"}
+            </button>
+          )}
           {active && (
             <Link
               href={`/chart?symbol=${encodeURIComponent(active.symbol)}`}
@@ -256,7 +324,7 @@ export default function HomeExtendedAboveSma({
         <p className="text-xs text-gray-500">No sharp pumps above 20 SMA right now.</p>
       ) : (
         <>
-<div className="mb-3 flex flex-wrap gap-1.5">
+<div className="mb-3 flex gap-2 overflow-x-auto snap-x snap-mandatory pb-1 -mx-1 px-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:snap-none sm:pb-0 sm:px-0">
             {hits.map((h, i) => {
               const on = h.symbol === selected;
               return (
@@ -264,7 +332,7 @@ export default function HomeExtendedAboveSma({
                   key={h.symbol}
                   type="button"
                   onClick={() => setSelected(h.symbol)}
-                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold transition ${
+                  className={`snap-center shrink-0 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-semibold transition sm:shrink ${
                     on
                       ? "border-orange-600 bg-orange-600 text-white shadow-sm"
                       : "border-orange-200 bg-white text-orange-950 hover:bg-orange-50"

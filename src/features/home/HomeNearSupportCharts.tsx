@@ -26,7 +26,8 @@ type DailyPtFull = DailyPt & { high?: number; low?: number };
 function buildNearSupportEntryPrompt(
   hits: RangeHit[],
   watchPlan: { symbol: string; name: string; currentPrice?: number | null }[] = [],
-  movers2d: { symbol: string; name?: string; netPct?: number; totalAbsPct?: number }[] = []
+  rsiOversold: { symbol: string; name?: string; rsi?: number; price?: number; detail?: string }[] = [],
+  fastPump: { symbol: string; name?: string; price?: number; detail?: string; extensionPct?: number }[] = []
 ): string {
   const lines: string[] = [];
   lines.push(
@@ -35,7 +36,7 @@ function buildNearSupportEntryPrompt(
   lines.push(``);
   lines.push(`## Task`);
   lines.push(
-    `Help the trader **monitor** and rank which coin is **better to stage a spot buy** from Lists A+B+C (not market-chase). One top pick or HOLD CASH. Do not force a bullish bias. Weak/unclear -> WAIT / SKIP and hold cash.`
+    `Help the trader **monitor** and rank which coin is **better to stage a spot buy** from Lists A-D (not market-chase). One top pick or HOLD CASH. Do not force a bullish bias. Weak/unclear -> WAIT / SKIP and hold cash.`
   );
   lines.push(``);
   lines.push(`## List A — Near 30-day support · top 8 (app ranking)`);
@@ -75,33 +76,51 @@ function buildNearSupportEntryPrompt(
     });
   }
   lines.push(``);
-  lines.push(`## List C — 2d · biggest movers (path |%| over ~2 days)`);
+  lines.push(`## List C — RSI oversold · top 8 (daily RSI-14 ≤ 40)`);
   lines.push(
-    `Most movement recently — may be news-driven. Rank for spot entry only if not extended chase; prefer pullbacks.`
+    `Leaning oversold / oversold on daily RSI. Monitor for pullback entries — not an automatic buy.`
   );
-  if (!movers2d.length) {
+  if (!rsiOversold.length) {
     lines.push(`(none loaded)`);
   } else {
-    movers2d.slice(0, 10).forEach((m, i) => {
+    rsiOversold.slice(0, 8).forEach((m, i) => {
       const sym = String(m.symbol).toUpperCase();
       const base = m.name || sym.replace(/PHP$/i, "");
-      const net =
-        m.netPct != null && Number.isFinite(Number(m.netPct))
-          ? `${Number(m.netPct) >= 0 ? "+" : ""}${Number(m.netPct).toFixed(1)}% net`
-          : "";
-      const abs =
-        m.totalAbsPct != null && Number.isFinite(Number(m.totalAbsPct))
-          ? `${Number(m.totalAbsPct).toFixed(1)}% path`
-          : "";
+      const rsi =
+        m.rsi != null && Number.isFinite(Number(m.rsi)) ? `RSI ${Number(m.rsi).toFixed(0)}` : "";
+      const px =
+        m.price != null && Number.isFinite(Number(m.price)) ? String(m.price) : "";
       lines.push(
-        `${i + 1}. **${base}** (\`${sym}\`) — ${[abs, net].filter(Boolean).join(" · ") || "mover"}`
+        `${i + 1}. **${base}** (\`${sym}\`) — ${[rsi, px && `price ${px}`, m.detail].filter(Boolean).join(" · ")}`
+      );
+    });
+  }
+  lines.push(``);
+  lines.push(`## List D — Fast pump above 20 SMA · top 3`);
+  lines.push(
+    `Just ran through / above daily 20 SMA. Prefer cool-down or pullback — do not chase. Not a short signal.`
+  );
+  if (!fastPump.length) {
+    lines.push(`(none loaded)`);
+  } else {
+    fastPump.slice(0, 3).forEach((m, i) => {
+      const sym = String(m.symbol).toUpperCase();
+      const base = m.name || sym.replace(/PHP$/i, "");
+      const ext =
+        m.extensionPct != null && Number.isFinite(Number(m.extensionPct))
+          ? `+${Number(m.extensionPct).toFixed(1)}% vs 20 SMA`
+          : "";
+      const px =
+        m.price != null && Number.isFinite(Number(m.price)) ? String(m.price) : "";
+      lines.push(
+        `${i + 1}. **${base}** (\`${sym}\`) — ${[px && `price ${px}`, ext, m.detail].filter(Boolean).join(" · ")}`
       );
     });
   }
   lines.push(``);
   lines.push(`## Mandatory research (before any ranking)`);
   lines.push(
-    `For **each** coin in List A, List B, and List C, search **verified** sources only (no training-memory headlines; do not invent events):`
+    `For **each** coin in Lists A–D, search **verified** sources only (no training-memory headlines; do not invent events):`
   );
   lines.push(
     `1. **Past ~30 calendar days** — news, listings/delistings, unlocks, exploits, hacks, governance, partnerships, regulatory hits tied to the **project ticker/name** (not the local PHP pair suffix).`
@@ -243,7 +262,6 @@ export default function HomeNearSupportCharts({
 }: {
   /** Prefer full watchlist symbols from Home (symbol + name). */
   universe: { symbol: string; name?: string }[];
-  /** Watch / plan coins (not held) for List B of the entry-monitor prompt. */
   watchPlanCoins?: { symbol: string; name: string; currentPrice?: number | null }[];
 }) {
   const [hits, setHits] = useState<RangeHit[]>([]);
@@ -254,44 +272,44 @@ export default function HomeNearSupportCharts({
   const [dailyPoints, setDailyPoints] = useState<DailyPt[]>([]);
   const [seriesLoading, setSeriesLoading] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
-  const [movers2d, setMovers2d] = useState<
-    { symbol: string; name?: string; netPct?: number; totalAbsPct?: number }[]
+  const [rsiOversold, setRsiOversold] = useState<
+    { symbol: string; name?: string; rsi?: number; price?: number; detail?: string }[]
+  >([]);
+  const [fastPump, setFastPump] = useState<
+    { symbol: string; name?: string; price?: number; detail?: string; extensionPct?: number }[]
   >([]);
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        let list: any[] = [];
-        for (const d of [14, 28, 7]) {
-          const res = await fetch(`/api/swing-timing?days=${d}&_=${Date.now()}`, {
-            cache: "no-store",
-          });
-          if (!res.ok) continue;
-          const data = await res.json();
-          if (Array.isArray(data.topMovers2d) && data.topMovers2d.length) {
-            list = data.topMovers2d;
-            break;
-          }
-        }
-        if (!cancelled) {
-          setMovers2d(
-            list.slice(0, 10).map((m: any) => ({
-              symbol: String(m.symbol),
-              name: m.name ? String(m.name) : undefined,
-              netPct: m.netPct != null ? Number(m.netPct) : undefined,
-              totalAbsPct: m.totalAbsPct != null ? Number(m.totalAbsPct) : undefined,
-            }))
-          );
-        }
-      } catch {
-        /* optional */
+    // Prefer cached scans from sibling Home blocks (same session / TTL cache)
+    try {
+      const rsi = readChartCache<any[]>("scan:rsiOversold:v1");
+      if (rsi && rsi.length) {
+        setRsiOversold(
+          rsi.slice(0, 8).map((m: any) => ({
+            symbol: String(m.symbol),
+            name: m.name ? String(m.name) : undefined,
+            rsi: m.rsi != null ? Number(m.rsi) : undefined,
+            price: m.price != null ? Number(m.price) : undefined,
+            detail: m.detail ? String(m.detail) : undefined,
+          }))
+        );
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+      const pump = readChartCache<any[]>("scan:fastPumpSma:v2");
+      if (pump && pump.length) {
+        setFastPump(
+          pump.slice(0, 3).map((m: any) => ({
+            symbol: String(m.symbol),
+            name: m.name ? String(m.name) : undefined,
+            price: m.price != null ? Number(m.price) : undefined,
+            detail: m.detail ? String(m.detail) : undefined,
+            extensionPct: m.extensionPct != null ? Number(m.extensionPct) : undefined,
+          }))
+        );
+      }
+    } catch {
+      /* optional */
+    }
+  }, [hits]);
 
 
   const scan = useCallback(async (force = false) => {
@@ -384,7 +402,7 @@ export default function HomeNearSupportCharts({
           <p className="mt-0.5 text-[11px] text-rose-900/80">
             Lowest % of the 30-day range first (near support / discount zone). Same 3h + 20 SMA
             chart. Use <span className="font-semibold">Entry monitor prompt</span> for agent research on this
-            top 8 <span className="font-semibold">+ Watch / plan + 2d movers</span> (±30d news/events,
+            top 8 <span className="font-semibold">+ Watch / plan + RSI oversold + Fast pump</span> (±30d news/events,
             X accounts, copy-ready markdown). Confirm on Spot — not a buy signal by itself.
           </p>
         </div>
@@ -401,7 +419,7 @@ export default function HomeNearSupportCharts({
             type="button"
             disabled={hits.length === 0}
             onClick={async () => {
-              const text = buildNearSupportEntryPrompt(hits, watchPlanCoins, movers2d);
+              const text = buildNearSupportEntryPrompt(hits, watchPlanCoins, rsiOversold, fastPump);
               try {
                 await navigator.clipboard.writeText(text);
                 setPromptCopied(true);
@@ -424,7 +442,7 @@ export default function HomeNearSupportCharts({
         <p className="text-xs text-gray-500">No range data yet.</p>
       ) : (
         <>
-<div className="mb-3 flex flex-wrap gap-1.5">
+<div className="mb-3 flex gap-2 overflow-x-auto snap-x snap-mandatory pb-1 -mx-1 px-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:snap-none sm:pb-0 sm:px-0">
             {hits.map((h, i) => {
               const on = h.symbol === selected;
               const near = h.positionPct <= 25;
@@ -433,7 +451,7 @@ export default function HomeNearSupportCharts({
                   key={h.symbol}
                   type="button"
                   onClick={() => setSelected(h.symbol)}
-                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold transition ${
+                  className={`snap-center shrink-0 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-semibold transition sm:shrink ${
                     on
                       ? "border-rose-600 bg-rose-600 text-white shadow-sm"
                       : "border-rose-200 bg-white text-rose-950 hover:bg-rose-50"
