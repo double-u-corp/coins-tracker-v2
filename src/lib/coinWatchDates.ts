@@ -1,7 +1,7 @@
 /**
  * Parse coin-specific shake dates from journal markdown (Spot, LONG-scan, general).
  * Labels: unlock | delisting | event | integration | listing | hardfork | other
- * No dedupe — every matched line is kept (user can delete journal rows).
+ * No dedupe — every matched line is kept (user can delete rows in Coin watch dates).
  */
 
 export type CoinWatchLabel =
@@ -25,17 +25,40 @@ export type CoinWatchEvent = {
 };
 
 const LABEL_RE =
-  /\b(unlock|delisting|delist|event|integration|listing|list|hardfork|hard\s*fork|conference|token\s*unlock|governance|vote|validator|proposal)\b/i;
+  /\b(unlock|delisting|delist|event|integration|listing|list|hardfork|hard\s*fork|conference|token\s*unlock|governance|vote|validator|proposal|webinar|upgrade|mainnet|airdrop)\b/i;
 
 function normalizeLabel(raw: string): CoinWatchLabel {
   const s = raw.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!s || s === "-" || s === "—" || s === "–") return "event";
   if (/delist/.test(s)) return "delisting";
   if (/unlock|token unlock/.test(s)) return "unlock";
   if (/integrat/.test(s)) return "integration";
   if (/list/.test(s) && !/delist/.test(s)) return "listing";
   if (/hard\s*fork|hardfork/.test(s)) return "hardfork";
-  if (/event|conference/.test(s)) return "event";
+  if (/event|conference|webinar|governance|vote|validator|proposal|upgrade|mainnet|airdrop/.test(s))
+    return "event";
   return "other";
+}
+
+function cleanDesc(s: string): string {
+  return s
+    .replace(/\*+/g, "")
+    .replace(/^[\s·•|—–\-]+/, "")
+    .replace(/[\s·•|—–\-]+$/, "")
+    .trim()
+    .slice(0, 240);
+}
+
+/** Split "event — detail" or "unlock - detail" into label + desc. */
+function splitLabelDesc(chunk: string): { labelRaw: string; descRest: string } {
+  const t = chunk.trim();
+  const m = t.match(
+    /^(unlock|delisting|delist|event|integration|listing|hardfork|hard\s*fork|other|conference|webinar|governance)\s*[—–\-:]\s*(.+)$/i
+  );
+  if (m) return { labelRaw: m[1], descRest: m[2].trim() };
+  // "event · rest" already handled by outer split; lone dash
+  if (/^[—–\-]+$/.test(t)) return { labelRaw: "event", descRest: "" };
+  return { labelRaw: t, descRest: "" };
 }
 
 function isoDate(y: number, m: number, d: number): string | null {
@@ -55,9 +78,9 @@ function parseDateToken(s: string): string | null {
 /**
  * Preferred formats (agent journal):
  * - **Watch date:** 2026-12-08 · unlock · Jenner hardfork on BNB Chain
+ * - **Watch date:** 2026-11-19 · event · XLM Q3 webinar · Stellar update
+ * - Also accepts em dash: Watch date: 2026-11-19 · event — XLM Q3 webinar
  * - **Coin watch:** BNBPHP | 2026-12-08 | unlock | short description
- * - Watch date: 2026-11-15 · delisting · …
- * Fallback: any line with a date + unlock/delisting/event/integration nearby.
  */
 export function extractCoinWatchEventsFromNotes(
   notes: string,
@@ -79,12 +102,13 @@ export function extractCoinWatchEventsFromNotes(
     sourceLine: string,
     symbol: string | null = ctx.symbol ?? null
   ) => {
+    const desc = cleanDesc(description) || label;
     out.push({
       symbol,
       coinId: ctx.coinId ?? null,
       date,
-      label,
-      description: description.replace(/\*+/g, "").trim().slice(0, 240) || label,
+      label: label || "event",
+      description: desc,
       journalEntryId: ctx.journalEntryId,
       journalTitle: (ctx.journalTitle || "").slice(0, 120),
       sourceLine: sourceLine.slice(0, 280),
@@ -119,23 +143,33 @@ export function extractCoinWatchEventsFromNotes(
           desc = parts.slice(3).join(" · ");
         }
         if (dateStr) {
-          push(dateStr, normalizeLabel(labelRaw || "event"), desc, line, sym || ctx.symbol || null);
+          const { labelRaw: lr, descRest } = splitLabelDesc(labelRaw);
+          push(
+            dateStr,
+            normalizeLabel(lr || "event"),
+            cleanDesc([descRest, desc].filter(Boolean).join(" · ")),
+            line,
+            sym || ctx.symbol || null
+          );
           continue;
         }
       }
-      // DATE · label · desc
+      // DATE · label · desc  (also · or —)
       parts = rest.split(/[·•|]/).map((p) => p.trim()).filter(Boolean);
       if (parts.length >= 1) {
         const dateStr = parseDateToken(parts[0]);
         if (dateStr) {
-          const labelRaw = parts[1] || "event";
-          const desc = parts.slice(2).join(" · ") || parts[1] || "";
-          push(
-            dateStr,
-            normalizeLabel(LABEL_RE.test(labelRaw) ? labelRaw : "event"),
-            LABEL_RE.test(labelRaw) ? desc : parts.slice(1).join(" · "),
-            line
-          );
+          if (parts.length === 1) {
+            push(dateStr, "event", "Watch date", line);
+            continue;
+          }
+          const { labelRaw, descRest } = splitLabelDesc(parts[1]);
+          const known = LABEL_RE.test(labelRaw);
+          const label = normalizeLabel(known ? labelRaw : "event");
+          const desc = known
+            ? [descRest, ...parts.slice(2)].filter(Boolean).join(" · ")
+            : [parts[1], ...parts.slice(2)].filter(Boolean).join(" · ");
+          push(dateStr, label, cleanDesc(desc), line);
           continue;
         }
       }
@@ -143,34 +177,29 @@ export function extractCoinWatchEventsFromNotes(
 
     // **Unlock:** 2026-12-08 — desc
     m = line.match(
-      /\*{0,2}\s*(Unlock|Delisting|Listing|Integration|Hardfork|Event)\s*\*{0,2}\s*[:：]\s*(.+)$/i
+      /\*{0,2}\s*(Unlock|Delisting|Listing|Integration|Hardfork|Event|Webinar|Governance)\*{0,2}\s*[:：]?\s*(\d{4}-\d{2}-\d{2})\s*[—–\-:·]?\s*(.*)$/i
     );
     if (m) {
-      const label = normalizeLabel(m[1]);
-      const rest = m[2].trim();
-      const dm = rest.match(/(\d{4}-\d{2}-\d{2}|\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{4})/);
-      if (dm) {
-        const dateStr = parseDateToken(dm[1]);
-        if (dateStr) {
-          const desc = rest.replace(dm[1], "").replace(/^[\s·\-|—–]+/, "").trim();
-          push(dateStr, label, desc, line);
-          continue;
-        }
+      const dateStr = parseDateToken(m[2]);
+      if (dateStr) {
+        push(dateStr, normalizeLabel(m[1]), cleanDesc(m[3] || line), line);
+        continue;
       }
     }
 
-    // Fallback: line has ISO date and a known keyword
-    if (LABEL_RE.test(line)) {
-      const dm = line.match(/(\d{4}-\d{2}-\d{2})/);
-      if (dm) {
-        const dateStr = dm[1];
+    // Loose: line contains YYYY-MM-DD + keyword
+    const dm = line.match(/(\d{4}-\d{2}-\d{2})/);
+    if (dm && LABEL_RE.test(line)) {
+      const dateStr = parseDateToken(dm[1]);
+      if (dateStr) {
         const lm = line.match(LABEL_RE);
         const label = normalizeLabel(lm?.[1] || "event");
-        const desc = line
-          .replace(dm[1], "")
-          .replace(LABEL_RE, "")
-          .replace(/^[\s\-*:·|•]+/, "")
-          .trim();
+        const desc = cleanDesc(
+          line
+            .replace(dm[1], "")
+            .replace(/(?:Watch\s*date|Coin\s*watch)\s*[:：]?/i, "")
+            .replace(LABEL_RE, "")
+        );
         push(dateStr, label, desc || line.slice(0, 120), line);
       }
     }
@@ -180,13 +209,13 @@ export function extractCoinWatchEventsFromNotes(
 }
 
 export function extractAllCoinWatchEvents(
-  entries: Array<{
+  entries: {
     id: number;
-    title?: string | null;
     notes?: string | null;
+    title?: string | null;
     symbol?: string | null;
     coinId?: number | null;
-  }>
+  }[]
 ): CoinWatchEvent[] {
   const all: CoinWatchEvent[] = [];
   for (const e of entries) {
@@ -194,18 +223,11 @@ export function extractAllCoinWatchEvents(
       ...extractCoinWatchEventsFromNotes(e.notes || "", {
         journalEntryId: e.id,
         journalTitle: e.title,
-        symbol: e.symbol ?? null,
+        symbol: e.symbol,
         coinId: e.coinId ?? null,
       })
     );
   }
-  // Sort: today first, then date asc
-  const manilaToday = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
-  all.sort((a, b) => {
-    const aT = a.date === manilaToday ? 0 : a.date < manilaToday ? 2 : 1;
-    const bT = b.date === manilaToday ? 0 : b.date < manilaToday ? 2 : 1;
-    if (aT !== bT) return aT - bT;
-    return a.date.localeCompare(b.date) || a.label.localeCompare(b.label);
-  });
+  all.sort((a, b) => a.date.localeCompare(b.date) || a.label.localeCompare(b.label));
   return all;
 }

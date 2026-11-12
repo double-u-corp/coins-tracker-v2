@@ -7,6 +7,7 @@ import FormattedAiResponse from "@/components/FormattedAiResponse";
 import JournalSidebar from "@/features/chart/JournalSidebar";
 import dynamic from "next/dynamic";
 import LongScanPollChart from "./LongScanPollChart";
+import HomeCoinWatchDates from "@/features/home/HomeCoinWatchDates";
 
 const ManageCoinsView = dynamic(() => import("@/features/manage/ManageCoinsView"), {
   ssr: false,
@@ -967,6 +968,14 @@ export default function LongScanView({
             </div>
           )}
 
+          {!modalMode && (
+            <HomeCoinWatchDates
+              compact
+              filterSymbols={displayedGroups.map((g) => g.symbol)}
+              allCoins={displayedGroups.map((g) => ({ symbol: g.symbol, name: g.name }))}
+            />
+          )}
+
           {displayedGroups.length === 0 && coinGroups.length > 0 ? (
             <p className="text-sm text-gray-500">No coins match the current filters.</p>
           ) : null}
@@ -977,56 +986,70 @@ export default function LongScanView({
                 key={g.symbol}
                 className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden"
               >
-                <div className="flex flex-col gap-2 border-b border-gray-100 bg-gradient-to-r from-indigo-50/80 to-white px-3 py-2 sm:flex-row sm:flex-nowrap sm:items-center sm:gap-2 sm:overflow-x-auto">
-                  <h2 className="min-w-0 w-full sm:w-auto sm:shrink text-base font-extrabold text-slate-900">
-                    <span className="block truncate sm:inline">
-                      {g.name}{" "}
-                      <span className="font-mono text-sm font-bold text-indigo-700">
-                        {g.symbol}
-                      </span>
-                    </span>
-                    {priceBySymbol[g.symbol.toUpperCase()] != null ? (
-                      <span className="mt-0.5 block font-bold tabular-nums text-sky-800 sm:mt-0 sm:ml-2 sm:inline">
-                        {formatPhp(priceBySymbol[g.symbol.toUpperCase()])}
-                      </span>
-                    ) : null}
-                  </h2>
-                  <div className="flex w-full flex-wrap items-center justify-end gap-1.5 sm:w-auto sm:flex-1">
-                    <button
-                      type="button"
-                      onClick={() => openJournal(g.symbol, { name: g.name })}
-                      className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-800 hover:bg-slate-50"
-                      title={`Journal notes for ${g.symbol}`}
-                    >
-                      📓 Journal
-                      {(journalCountBySymbol[g.symbol.toUpperCase()] ?? 0) > 0 ? (
-                        <span className="ml-1 rounded-full bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                          {journalCountBySymbol[g.symbol.toUpperCase()]}
+                <div className="border-b border-gray-100 bg-gradient-to-r from-indigo-50/80 to-white px-3 py-2.5">
+                  {/* Line 1: name + price (always); Line 2: actions on mobile */}
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                    <h2 className="min-w-0 text-base font-extrabold text-slate-900">
+                      <span className="inline-flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                        <span className="truncate">
+                          {g.name}{" "}
+                          <span className="font-mono text-sm font-bold text-indigo-700">
+                            {g.symbol}
+                          </span>
                         </span>
-                      ) : (
-                        <span className="ml-1 text-[10px] font-semibold text-slate-400">0</span>
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setManageSymbol(g.symbol);
-                        setManageName(g.name);
-                        setManageOpen(true);
-                      }}
-                      className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-900 hover:bg-emerald-100"
-                      title={`Manage targets for ${g.symbol}`}
-                    >
-                      ⚙️ Manage
-                    </button>
-                    <Link
-                      href={`/chart?symbol=${encodeURIComponent(g.symbol)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-indigo-700"
-                    >
-                      Spot →
-                    </Link>
+                        {priceBySymbol[g.symbol.toUpperCase()] != null ? (
+                          <span className="font-bold tabular-nums text-sky-800">
+                            {formatPhp(priceBySymbol[g.symbol.toUpperCase()])}
+                          </span>
+                        ) : null}
+                      </span>
+                    </h2>
+                    <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto sm:justify-end">
+                      <button
+                        type="button"
+                        onClick={() => openJournal(g.symbol, { name: g.name })}
+                        className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-800 hover:bg-slate-50"
+                        title={`Journal notes for ${g.symbol}`}
+                      >
+                        📓 Journal
+                        {(journalCountBySymbol[g.symbol.toUpperCase()] ?? 0) > 0 ? (
+                          <span className="ml-1 rounded-full bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                            {journalCountBySymbol[g.symbol.toUpperCase()]}
+                          </span>
+                        ) : (
+                          <span className="ml-1 text-[10px] font-semibold text-slate-400">0</span>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setManageSymbol(g.symbol);
+                          setManageName(g.name);
+                          setManageOpen(true);
+                        }}
+                        className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-900 hover:bg-emerald-100"
+                        title={`Manage targets for ${g.symbol}`}
+                      >
+                        ⚙️ Manage
+                      </button>
+                      <Link
+                        href={`/chart?symbol=${encodeURIComponent(g.symbol)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-indigo-700"
+                      >
+                        Spot →
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => void removeCoin(g.symbol)}
+                        disabled={deletingKey === `coin:${g.symbol.toUpperCase()}`}
+                        className="rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                        title={`Remove ${g.symbol} and all scan rows`}
+                      >
+                        {deletingKey === `coin:${g.symbol.toUpperCase()}` ? "…" : "🗑 Delete"}
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -1127,54 +1150,7 @@ export default function LongScanView({
                     );
                   })}
                 </div>
-                <div className="flex flex-wrap items-center gap-1.5 border-t border-gray-100 bg-slate-50/80 px-3 py-2 justify-start sm:justify-end">
-                  <button
-                    type="button"
-                    onClick={() => void removeCoin(g.symbol)}
-                    disabled={deletingKey === `coin:${g.symbol.toUpperCase()}`}
-                    className="rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
-                    title={`Remove ${g.symbol} and all scan rows`}
-                  >
-                    {deletingKey === `coin:${g.symbol.toUpperCase()}` ? "…" : "🗑 Remove coin"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openJournal(g.symbol, { name: g.name })}
-                    className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-800 hover:bg-slate-50"
-                    title={`Journal notes for ${g.symbol}`}
-                  >
-                    📓 Journal
-                    {(journalCountBySymbol[g.symbol.toUpperCase()] ?? 0) > 0 ? (
-                      <span className="ml-1 rounded-full bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                        {journalCountBySymbol[g.symbol.toUpperCase()]}
-                      </span>
-                    ) : (
-                      <span className="ml-1 text-[10px] font-semibold text-slate-400">0</span>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setManageSymbol(g.symbol);
-                      setManageName(g.name);
-                      setManageOpen(true);
-                    }}
-                    className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-900 hover:bg-emerald-100"
-                    title={`Manage targets for ${g.symbol}`}
-                  >
-                    ⚙️ Manage
-                  </button>
-                  <Link
-                    href={`/chart?symbol=${encodeURIComponent(g.symbol)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-indigo-700"
-                  >
-                    Spot →
-                  </Link>
-                </div>
-
-              </section>
+                </section>
             );
           })}
         </div>

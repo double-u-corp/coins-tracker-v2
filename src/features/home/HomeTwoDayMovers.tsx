@@ -390,6 +390,8 @@ export function HomeCoinChartCarousel({
 }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const scrollLock = useRef(false);
+  /** Carousel only below Tailwind `sm` (640px). Desktop shows one chart — no snap / no scrollIntoView. */
+  const [isMobile, setIsMobile] = useState(false);
   const [bundle, setBundle] = useState<
     Record<string, { series: PollPoint[]; daily: DailyPt[] }>
   >({});
@@ -398,16 +400,20 @@ export function HomeCoinChartCarousel({
   const key = items.map((i) => i.symbol).join(",");
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(max-width: 639px)");
+    const apply = () => setIsMobile(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     void (async () => {
       for (const it of items) {
         if (cancelled) return;
         const sym = it.symbol.toUpperCase();
-        setBundle((prev) => {
-          if (prev[sym]) return prev;
-          return prev;
-        });
-        // load if missing
         setLoadingSym(sym);
         try {
           const [series, daily] = await Promise.all([
@@ -431,8 +437,9 @@ export function HomeCoinChartCarousel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
-  // Scroll active slide into view when pill clicked
+  // Mobile only: scroll active slide into view when pill clicked
   useEffect(() => {
+    if (!isMobile) return;
     const root = scrollerRef.current;
     if (!root || !selected) return;
     const idx = items.findIndex((i) => i.symbol.toUpperCase() === selected.toUpperCase());
@@ -445,10 +452,10 @@ export function HomeCoinChartCarousel({
       scrollLock.current = false;
     }, 400);
     return () => window.clearTimeout(t);
-  }, [selected, key, items]);
+  }, [selected, key, items, isMobile]);
 
   const onScroll = () => {
-    if (scrollLock.current) return;
+    if (!isMobile || scrollLock.current) return;
     const root = scrollerRef.current;
     if (!root || items.length === 0) return;
     const mid = root.scrollLeft + root.clientWidth / 2;
@@ -469,6 +476,50 @@ export function HomeCoinChartCarousel({
 
   if (items.length === 0) return null;
 
+  const renderSlide = (it: { symbol: string; name: string; caption?: string }) => {
+    const sym = it.symbol.toUpperCase();
+    const data = bundle[sym];
+    const active = sym === selected.toUpperCase();
+    return (
+      <div
+        key={sym}
+        className={
+          isMobile
+            ? `snap-center shrink-0 w-full min-w-full rounded-lg border px-2 py-2 ${
+                active ? "border-slate-300 bg-white shadow-sm" : "border-slate-100 bg-white/80"
+              }`
+            : "w-full rounded-lg border border-slate-200 bg-white px-2 py-2 shadow-sm"
+        }
+      >
+        <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
+          <span className="font-bold text-slate-900">{it.name}</span>
+          <span className="font-mono text-[10px] text-slate-500">{sym}</span>
+          {it.caption ? (
+            <span className="text-[11px] font-semibold text-slate-600">{it.caption}</span>
+          ) : null}
+        </div>
+        {!data ? (
+          <p className="text-xs text-gray-500 py-6 text-center">
+            {loadingSym === sym ? "Loading 3h path…" : "Loading…"}
+          </p>
+        ) : (
+          <MoverLineChart
+            points={data.series}
+            symbol={sym}
+            dailyPoints={data.daily}
+          />
+        )}
+      </div>
+    );
+  };
+
+  // Desktop / tablet: one chart for the selected pill — no horizontal snap (avoids page jump on load)
+  if (!isMobile) {
+    const sel =
+      items.find((i) => i.symbol.toUpperCase() === selected.toUpperCase()) || items[0];
+    return <div className="w-full">{sel ? renderSlide(sel) : null}</div>;
+  }
+
   return (
     <div
       ref={scrollerRef}
@@ -476,38 +527,7 @@ export function HomeCoinChartCarousel({
       className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-1 -mx-1 px-1 scroll-smooth"
       style={{ WebkitOverflowScrolling: "touch" }}
     >
-      {items.map((it) => {
-        const sym = it.symbol.toUpperCase();
-        const data = bundle[sym];
-        const active = sym === selected.toUpperCase();
-        return (
-          <div
-            key={sym}
-            className={`snap-center shrink-0 w-[min(100%,100%)] min-w-full rounded-lg border px-2 py-2 ${
-              active ? "border-slate-300 bg-white shadow-sm" : "border-slate-100 bg-white/80"
-            }`}
-          >
-            <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
-              <span className="font-bold text-slate-900">{it.name}</span>
-              <span className="font-mono text-[10px] text-slate-500">{sym}</span>
-              {it.caption ? (
-                <span className="text-[11px] font-semibold text-slate-600">{it.caption}</span>
-              ) : null}
-            </div>
-            {!data ? (
-              <p className="text-xs text-gray-500 py-6 text-center">
-                {loadingSym === sym ? "Loading 3h path…" : "Loading…"}
-              </p>
-            ) : (
-              <MoverLineChart
-                points={data.series}
-                symbol={sym}
-                dailyPoints={data.daily}
-              />
-            )}
-          </div>
-        );
-      })}
+      {items.map((it) => renderSlide(it))}
     </div>
   );
 }

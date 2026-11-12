@@ -38,9 +38,15 @@ function labelBadge(label: string): string {
 
 export default function HomeCoinWatchDates({
   allCoins,
+  filterSymbols,
+  compact = false,
 }: {
   journalEntries?: unknown;
   allCoins?: CoinMini[] | null;
+  /** When set, only show rows for these symbols (e.g. LONG-scan board). */
+  filterSymbols?: string[] | null;
+  /** Smaller chrome for embedding under LONG-scan. */
+  compact?: boolean;
 }) {
   const [events, setEvents] = useState<StoredEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,9 +77,15 @@ export default function HomeCoinWatchDates({
     void load();
   }, [load]);
 
+  const filteredEvents = useMemo(() => {
+    if (!filterSymbols?.length) return events;
+    const set = new Set(filterSymbols.map((s) => s.toUpperCase()));
+    return events.filter((e) => e.symbol && set.has(String(e.symbol).toUpperCase()));
+  }, [events, filterSymbols]);
+
   const byDate = useMemo(() => {
     const map = new Map<string, StoredEvent[]>();
-    for (const e of events) {
+    for (const e of filteredEvents) {
       const d = String(e.date).slice(0, 10);
       if (!map.has(d)) map.set(d, []);
       map.get(d)!.push(e);
@@ -246,63 +258,64 @@ export default function HomeCoinWatchDates({
                   {items.map((ev) => (
                     <li
                       key={ev.id}
-                      className="rounded-md border border-white/80 bg-white/90 px-2 py-1.5 shadow-sm"
+                      className="relative rounded-md border border-white/80 bg-white/90 px-2 py-1.5 pr-8 shadow-sm"
                     >
-                      <div className="flex flex-wrap items-start justify-between gap-1">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-1">
-                            <span
-                              className={`rounded border px-1 py-0.5 text-[9px] font-bold uppercase ${labelBadge(
-                                String(ev.label)
-                              )}`}
-                            >
-                              {ev.label}
-                            </span>
-                            <span className="text-xs font-bold text-slate-900">
-                              {nameFor(ev.symbol)}{" "}
-                              {ev.symbol ? (
-                                <span className="font-mono text-[10px] text-violet-700">
-                                  {ev.symbol}
-                                </span>
-                              ) : null}
-                            </span>
-                          </div>
-                          <p className="mt-0.5 text-[11px] leading-snug text-slate-700">
-                            {ev.description}
-                          </p>
-                          <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-slate-500">
-                            <span>Journal #{ev.journalEntryId}</span>
+                      <button
+                        type="button"
+                        disabled={busy === ev.id}
+                        onClick={() => void delId(ev.id)}
+                        className="absolute right-1.5 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-md border border-slate-200 bg-white text-xs font-bold text-slate-600 shadow-sm hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50"
+                        title="Delete this row only"
+                        aria-label="Delete watch date row"
+                      >
+                        ✕
+                      </button>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1 pr-1">
+                          <span
+                            className={`rounded border px-1 py-0.5 text-[9px] font-bold uppercase ${labelBadge(
+                              String(ev.label || "event")
+                            )}`}
+                          >
+                            {!ev.label || String(ev.label).trim() === "-" || String(ev.label).trim() === "—"
+                              ? "event"
+                              : ev.label}
+                          </span>
+                          <span className="text-xs font-bold text-slate-900">
+                            {nameFor(ev.symbol)}{" "}
                             {ev.symbol ? (
-                              <Link
-                                href={`/chart?symbol=${encodeURIComponent(ev.symbol)}`}
-                                className="font-bold text-violet-700 hover:underline"
-                              >
-                                Spot →
-                              </Link>
+                              <span className="font-mono text-[10px] text-violet-700">
+                                {ev.symbol}
+                              </span>
                             ) : null}
-                          </div>
+                          </span>
                         </div>
-                        <div className="flex shrink-0 flex-col gap-1">
+                        <p className="mt-0.5 text-[11px] leading-snug text-slate-700">
+                          {String(ev.description || "")
+                            .replace(/^[\s·•|—–\-]+/, "")
+                            .trim() || "—"}
+                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
+                          <span>Journal #{ev.journalEntryId}</span>
+                          {ev.symbol ? (
+                            <Link
+                              href={`/chart?symbol=${encodeURIComponent(ev.symbol)}`}
+                              className="font-bold text-violet-700 hover:underline"
+                            >
+                              Spot →
+                            </Link>
+                          ) : null}
                           {ev.symbol ? (
                             <button
                               type="button"
                               disabled={busy === `${date}-${ev.symbol}`}
                               onClick={() => void delDateSymbol(date, ev.symbol!)}
-                              className="rounded border border-rose-100 px-1 py-0.5 text-[9px] font-bold text-rose-600 hover:bg-rose-50"
-                              title="Delete this coin on this date"
+                              className="font-bold text-rose-600 hover:underline disabled:opacity-50"
+                              title="Delete all rows for this coin on this date"
                             >
                               Del coin
                             </button>
                           ) : null}
-                          <button
-                            type="button"
-                            disabled={busy === ev.id}
-                            onClick={() => void delId(ev.id)}
-                            className="rounded border border-slate-200 px-1 py-0.5 text-[9px] font-bold text-slate-600 hover:bg-slate-50"
-                            title="Delete this row only"
-                          >
-                            ✕
-                          </button>
                         </div>
                       </div>
                     </li>
