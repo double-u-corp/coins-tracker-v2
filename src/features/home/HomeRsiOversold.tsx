@@ -4,7 +4,7 @@ import Link from "next/link";
 import { formatPhp } from "@/lib/format";
 import { calculateRSIAt, calculateSMAAt } from "@/features/chart/Technicals";
 import {
-  MoverLineChart,
+  HomeCoinChartCarousel,
   fetchPollSeries,
   fetchDailyForSma,
   type PollPoint,
@@ -228,7 +228,7 @@ export default function HomeRsiOversold({
       ) : (
         <>
           {/* Mobile carousel · desktop wrap pills */}
-          <div className="mb-3 flex gap-2 overflow-x-auto snap-x snap-mandatory pb-1 -mx-1 px-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:snap-none sm:pb-0 sm:px-0">
+          <div className="mb-3 flex flex-wrap gap-1.5">
             {hits.map((h, i) => {
               const on = h.symbol === selected;
               return (
@@ -236,7 +236,7 @@ export default function HomeRsiOversold({
                   key={h.symbol}
                   type="button"
                   onClick={() => setSelected(h.symbol)}
-                  className={`snap-center shrink-0 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-semibold transition sm:shrink ${
+                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold transition ${
                     on
                       ? "border-cyan-700 bg-cyan-700 text-white shadow-sm"
                       : "border-cyan-200 bg-white text-cyan-950 hover:bg-cyan-50"
@@ -252,20 +252,15 @@ export default function HomeRsiOversold({
             })}
           </div>
 
-          {active && (
-            <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs text-cyan-950">
-              <span className="font-bold">{active.name}</span>
-              <span className="font-mono text-[10px] text-cyan-800/80">{active.symbol}</span>
-              <span className="font-semibold text-slate-700">{active.detail}</span>
-              <span className="tabular-nums text-slate-600">now {formatPhp(active.price)}</span>
-            </div>
-          )}
-
-          {seriesLoading ? (
-            <p className="text-xs text-gray-500">Loading 3h path…</p>
-          ) : (
-            <MoverLineChart points={series} symbol={selected} dailyPoints={dailyPoints} />
-          )}
+          <HomeCoinChartCarousel
+            items={hits.map((h) => ({
+              symbol: h.symbol,
+              name: h.name,
+              caption: h.detail,
+            }))}
+            selected={selected}
+            onSelect={setSelected}
+          />
         </>
       )}
     </section>

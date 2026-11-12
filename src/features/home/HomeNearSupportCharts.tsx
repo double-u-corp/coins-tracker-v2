@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { formatPhp } from "@/lib/format";
 import {
-  MoverLineChart,
+  HomeCoinChartCarousel,
   fetchPollSeries,
   fetchDailyForSma,
   type PollPoint,
@@ -442,7 +442,7 @@ export default function HomeNearSupportCharts({
         <p className="text-xs text-gray-500">No range data yet.</p>
       ) : (
         <>
-<div className="mb-3 flex gap-2 overflow-x-auto snap-x snap-mandatory pb-1 -mx-1 px-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:snap-none sm:pb-0 sm:px-0">
+<div className="mb-3 flex flex-wrap gap-1.5">
             {hits.map((h, i) => {
               const on = h.symbol === selected;
               const near = h.positionPct <= 25;
@@ -451,7 +451,7 @@ export default function HomeNearSupportCharts({
                   key={h.symbol}
                   type="button"
                   onClick={() => setSelected(h.symbol)}
-                  className={`snap-center shrink-0 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-semibold transition sm:shrink ${
+                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold transition ${
                     on
                       ? "border-rose-600 bg-rose-600 text-white shadow-sm"
                       : "border-rose-200 bg-white text-rose-950 hover:bg-rose-50"
@@ -467,23 +467,15 @@ export default function HomeNearSupportCharts({
             })}
           </div>
 
-          {active && (
-            <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs text-rose-950">
-              <span className="font-bold">{active.name}</span>
-              <span className="font-mono text-[10px] text-rose-800/80">{active.symbol}</span>
-              <span className="font-semibold text-slate-700">{active.detail}</span>
-              <span className="tabular-nums text-slate-600">
-                now {formatPhp(active.price)} · S {formatPhp(active.support)} · R{" "}
-                {formatPhp(active.resistance)}
-              </span>
-            </div>
-          )}
-
-          {seriesLoading ? (
-            <p className="text-xs text-gray-500">Loading 3h path…</p>
-          ) : (
-            <MoverLineChart points={series} symbol={selected} dailyPoints={dailyPoints} />
-          )}
+          <HomeCoinChartCarousel
+            items={hits.map((h) => ({
+              symbol: h.symbol,
+              name: h.name,
+              caption: `${h.detail} · now ${formatPhp(h.price)}`,
+            }))}
+            selected={selected}
+            onSelect={setSelected}
+          />
         </>
       )}
     </section>

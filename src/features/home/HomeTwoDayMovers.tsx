@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { formatPhp } from "@/lib/format";
 import { calculateSMASeries } from "@/features/chart/Technicals";
@@ -376,6 +376,142 @@ export function MoverLineChart({
     </div>
   );
 }
+
+
+/** Horizontal snap carousel of 3h+SMA charts; parent syncs `selected` with pills. */
+export function HomeCoinChartCarousel({
+  items,
+  selected,
+  onSelect,
+}: {
+  items: { symbol: string; name: string; caption?: string }[];
+  selected: string;
+  onSelect: (symbol: string) => void;
+}) {
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const scrollLock = useRef(false);
+  const [bundle, setBundle] = useState<
+    Record<string, { series: PollPoint[]; daily: DailyPt[] }>
+  >({});
+  const [loadingSym, setLoadingSym] = useState<string | null>(null);
+
+  const key = items.map((i) => i.symbol).join(",");
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      for (const it of items) {
+        if (cancelled) return;
+        const sym = it.symbol.toUpperCase();
+        setBundle((prev) => {
+          if (prev[sym]) return prev;
+          return prev;
+        });
+        // load if missing
+        setLoadingSym(sym);
+        try {
+          const [series, daily] = await Promise.all([
+            fetchPollSeries(sym),
+            fetchDailyForSma(sym),
+          ]);
+          if (!cancelled) {
+            setBundle((prev) =>
+              prev[sym] ? prev : { ...prev, [sym]: { series, daily } }
+            );
+          }
+        } catch {
+          /* ignore one coin */
+        }
+      }
+      if (!cancelled) setLoadingSym(null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  // Scroll active slide into view when pill clicked
+  useEffect(() => {
+    const root = scrollerRef.current;
+    if (!root || !selected) return;
+    const idx = items.findIndex((i) => i.symbol.toUpperCase() === selected.toUpperCase());
+    if (idx < 0) return;
+    const child = root.children[idx] as HTMLElement | undefined;
+    if (!child) return;
+    scrollLock.current = true;
+    child.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    const t = window.setTimeout(() => {
+      scrollLock.current = false;
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, [selected, key, items]);
+
+  const onScroll = () => {
+    if (scrollLock.current) return;
+    const root = scrollerRef.current;
+    if (!root || items.length === 0) return;
+    const mid = root.scrollLeft + root.clientWidth / 2;
+    let best = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < root.children.length; i++) {
+      const el = root.children[i] as HTMLElement;
+      const c = el.offsetLeft + el.offsetWidth / 2;
+      const d = Math.abs(c - mid);
+      if (d < bestDist) {
+        bestDist = d;
+        best = i;
+      }
+    }
+    const sym = items[best]?.symbol;
+    if (sym && sym.toUpperCase() !== selected.toUpperCase()) onSelect(sym);
+  };
+
+  if (items.length === 0) return null;
+
+  return (
+    <div
+      ref={scrollerRef}
+      onScroll={onScroll}
+      className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-1 -mx-1 px-1 scroll-smooth"
+      style={{ WebkitOverflowScrolling: "touch" }}
+    >
+      {items.map((it) => {
+        const sym = it.symbol.toUpperCase();
+        const data = bundle[sym];
+        const active = sym === selected.toUpperCase();
+        return (
+          <div
+            key={sym}
+            className={`snap-center shrink-0 w-[min(100%,100%)] min-w-full rounded-lg border px-2 py-2 ${
+              active ? "border-slate-300 bg-white shadow-sm" : "border-slate-100 bg-white/80"
+            }`}
+          >
+            <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
+              <span className="font-bold text-slate-900">{it.name}</span>
+              <span className="font-mono text-[10px] text-slate-500">{sym}</span>
+              {it.caption ? (
+                <span className="text-[11px] font-semibold text-slate-600">{it.caption}</span>
+              ) : null}
+            </div>
+            {!data ? (
+              <p className="text-xs text-gray-500 py-6 text-center">
+                {loadingSym === sym ? "Loading 3h path…" : "Loading…"}
+              </p>
+            ) : (
+              <MoverLineChart
+                points={data.series}
+                symbol={sym}
+                dailyPoints={data.daily}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 
 
 function buildWhyMovingPrompt(movers: Mover[], series: PollPoint[], selected: string): string {
