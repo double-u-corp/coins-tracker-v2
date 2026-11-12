@@ -206,6 +206,7 @@ export default function HomeCoinWatchDates({
           line and it will appear here after save.
         </p>
       ) : (
+        <>
         <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-2 -mx-1 px-1 sm:mx-0 sm:grid sm:grid-cols-2 lg:grid-cols-3 sm:overflow-visible sm:snap-none sm:pb-0 sm:px-0">
           {upcomingDates.map(({ date, items }) => {
             const isToday = date === manilaToday;
@@ -352,6 +353,7 @@ export default function HomeCoinWatchDates({
             </div>
           </details>
         )}
+        </>
       )}
     </div>
   );

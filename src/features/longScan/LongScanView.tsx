@@ -66,17 +66,6 @@ function biasRank(bias: string): number {
   return 4;
 }
 
-type CoinFlag = "bad" | "monitor" | "nochase" | "neutral" | "revisit" | "special" | "";
-
-const FLAG_LABELS: Record<Exclude<CoinFlag, "">, string> = {
-  bad: "Bad news",
-  monitor: "Monitor",
-  nochase: "Don't chase",
-  neutral: "Neutral",
-  revisit: "Revisit later",
-  special: "Special watch",
-};
-
 function isLongScanJournalTitle(title: string | null | undefined): boolean {
   const t = (title || "").trim();
   return /^LONG-SCAN\b/i.test(t) || t.startsWith("[LONG-SCAN]");
@@ -103,7 +92,6 @@ function buildLongScanRankPrompt(
       target: number | null;
     }[];
   }[],
-  flags: Record<string, CoinFlag>,
   livePriceBySymbol?: Record<string, number | null>
 ): string {
   const lines: string[] = [];
@@ -118,26 +106,19 @@ function buildLongScanRankPrompt(
   lines.push(`Ranking is a decision aid for that ₱10k question, not a prediction or guarantee.`);
   lines.push(``);
   lines.push(`## Research rules`);
-  lines.push(`- **Mandatory security scan first** (every coin, before ranking or "special"): search last ~90 days for **exploit, hack, bridge hack, outage, pause withdrawals, validator failure, chain halt, security incident** + project name / chain name (e.g. BNB + "BNB Chain" / BSC).`);
-  lines.push(`- If a **verified** security incident is material to the coin or its chain, you must **not** treat a roadmap/hardfork alone as bullish. Prefer flag **bad** or **monitor**; ₱10k verdict leans **HOLD CASH** unless the incident is clearly resolved and priced.`);
+  lines.push(`- **Mandatory security scan first** (every coin, before ranking): search last ~90 days for **exploit, hack, bridge hack, outage, pause withdrawals, validator failure, chain halt, security incident** + project name / chain name (e.g. BNB + "BNB Chain" / BSC).`);
+  lines.push(`- If a **verified** security incident is material to the coin or its chain, you must **not** treat a roadmap/hardfork alone as bullish. ₱10k verdict leans **HOLD CASH** unless the incident is clearly resolved and priced.`);
   lines.push(`- Then for each coin: official/project calendar, unlocks/supply, listings/delistings, regulatory/political only if asset-linked. **Rank primarily by this news quality**, not by scan score or support/resistance numbers.`);
   lines.push(`- Past ~30d, present/~72h, and forward ~30d for non-security catalysts. No dated item after search → **none verified** (never silent skip).`);
   lines.push(`- **"None verified" is only valid after an explicit search** for that category — not when you skipped the scan.`);
   lines.push(`- Do **not** invent news. Do **not** use training-memory headlines.`);
   lines.push(`- Hardfork / upgrade = operational catalyst, **not** proof of price-up. Do not rank a coin top for ₱10k only because an upgrade date is near.`);
-  lines.push(`- Neutral: weak/bearish evidence → cash / monitor / bad / nochase over forcing a buy.`);
+  lines.push(`- Neutral: weak/bearish evidence → **HOLD CASH** over forcing a buy.`);
   lines.push(`- Spot only: never recommend shorting or leverage.`);
   lines.push(`- In the per-coin section include a line: **Security (90d):** verified items or "searched, none found".`);
   lines.push(``);
-  lines.push(`## Prior board flags (must compare)`);
-  lines.push(`Each coin may already have a flag from a previous LONG-scan review. Report **prior → new** and **CHANGED** or **UNCHANGED**.`);
-  lines.push(`Allowed new flags (exactly one per coin):`);
-  lines.push(`1. **bad** — Bad news / avoid`);
-  lines.push(`2. **monitor** — Watch; not ready to stage`);
-  lines.push(`3. **nochase** — Don't chase; wait pullback`);
-  lines.push(`4. **neutral** — No edge`);
-  lines.push(`5. **revisit** — Revisit later (give a date if possible)`);
-  lines.push(`6. **special** — Special watch (idiosyncratic catalyst)`);
+  lines.push(`## Ranking basis`);
+  lines.push(`Rank by **verified news quality** only (security + past 30d + present + next 30d). Do not assign board color labels or status flags — those were removed from the app.`);
   lines.push(``);
   lines.push(`## Coins on screen now (${groups.length}) — LONG-scan filter result`);
   if (!groups.length) {
@@ -146,15 +127,12 @@ function buildLongScanRankPrompt(
   groups.forEach((g, i) => {
     const best = g.rows[0];
     const key = g.symbol.toUpperCase();
-    const prior = flags[key] || "";
-    const priorLabel = prior ? FLAG_LABELS[prior as Exclude<CoinFlag, "">] || prior : "none (empty)";
     const live = livePriceBySymbol?.[key];
     const px =
       live != null && Number.isFinite(live) ? live : best?.currentPrice;
     const base = g.symbol.replace(/PHP$/i, "") || g.name;
     lines.push(``);
     lines.push(`### ${i + 1}. ${g.name} (${g.symbol})`);
-    lines.push(`- Prior board flag: **${priorLabel}**`);
     lines.push(`- Latest scan bias: **${best?.bias || "?"}** (score ${best?.score ?? "?"}/${best?.maxScore ?? "?"}, conf ${best != null ? Math.round((best.confidence || 0) * 100) : "?"}%)`);
     lines.push(`- Tier: ${best?.tier || "—"} · Extended: ${best?.isExtended ? "yes" : "no"}`);
     lines.push(`- Price (scan): ${best?.currentPrice ?? "—"} · Live: ${px ?? "—"}`);
@@ -175,7 +153,7 @@ function buildLongScanRankPrompt(
   lines.push(``);
   lines.push(`## Answer format`);
   lines.push(`1. **₱10k verdict:** BUY candidate **SYMBOL** | or **HOLD CASH** (one line + why).`);
-  lines.push(`2. **Ranked table** (best → worst for deploying ₱10k as spot): Rank | Coin | New flag | Prior | Changed? | 1-line why`);
+  lines.push(`2. **Ranked table** (best → worst for deploying ₱10k as spot): Rank | Coin | News posture (strong catalyst / thin / adverse) | 1-line why`);
   lines.push(`3. **Per coin:** **Security (90d)** first; then past 30d / present / next 30d catalysts (or none verified). Include **Watch date** lines for every dated item.`);
   lines.push(`4. **Flag change summary** — only coins where prior → new differs.`);
   lines.push(`5. **Required copy-paste markdown** for the next agent check / LONG-scan journal (exact labels):`);
@@ -191,7 +169,7 @@ function buildLongScanRankPrompt(
   lines.push(`- **Invalidation:** …`);
   lines.push(`- **Review by:** YYYY-MM-DD`);
     lines.push(`- **Watch date:** YYYY-MM-DD · event · short detail (repeat once per dated catalyst; omit only if none verified)`);
-  lines.push(`- **Rank (best→worst):** SYMBOL (flag) > …`);
+  lines.push(`- **Rank (best→worst):** SYMBOL > …`);
   lines.push(`- **Flag changes:** SYMBOL prior→new; … or none`);
   lines.push(`- **Security (90d):** searched, none found | or brief verified items`);
   lines.push(`- **News (verified):** …`);
@@ -305,79 +283,14 @@ export default function LongScanView({
 
   const [journalSaving, setJournalSaving] = useState(false);
 
-  const [coinFlags, setCoinFlags] = useState<Record<string, CoinFlag>>({});
   const [manageOpen, setManageOpen] = useState(false);
   const [manageSymbol, setManageSymbol] = useState<string | null>(null);
   const [manageName, setManageName] = useState<string | null>(null);
-  const [filterFlags, setFilterFlags] = useState<{
-    bad: boolean;
-    monitor: boolean;
-    nochase: boolean;
-    neutral: boolean;
-    revisit: boolean;
-    special: boolean;
-  }>({
-    bad: false,
-    monitor: false,
-    nochase: false,
-    neutral: false,
-    revisit: false,
-    special: false,
-  });
   const [filterBias, setFilterBias] = useState<string>("all"); // all | strong_long | long | neutral | short
   const [filterPriceVs20, setFilterPriceVs20] = useState<string>("all"); // all | below | above
   const [filterSma20v50, setFilterSma20v50] = useState<string>("all"); // all | below | above
   const [filterRangeNear, setFilterRangeNear] = useState(false); // near support in note
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/coin-flags");
-        if (!res.ok) return;
-        const data = (await res.json()) as { flags?: Record<string, string> };
-        if (cancelled || !data.flags) return;
-        const mapped: Record<string, CoinFlag> = {};
-        for (const [k, v] of Object.entries(data.flags)) {
-          if (
-            v === "bad" ||
-            v === "monitor" ||
-            v === "nochase" ||
-            v === "neutral" ||
-            v === "revisit" ||
-            v === "special"
-          ) {
-            mapped[k.toUpperCase()] = v as CoinFlag;
-          }
-        }
-        setCoinFlags(mapped);
-      } catch {
-        /* offline — leave empty */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const setCoinFlag = (symbol: string, flag: CoinFlag) => {
-    const key = symbol.toUpperCase();
-    setCoinFlags((prev) => {
-      const next = { ...prev };
-      const clearing = next[key] === flag;
-      if (clearing) delete next[key];
-      else next[key] = flag;
-      const payloadFlag = clearing ? "" : flag;
-      void fetch("/api/coin-flags", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol: key, flag: payloadFlag }),
-      }).catch(() => {
-        /* keep optimistic UI */
-      });
-      return next;
-    });
-  };
 
 
 
@@ -443,50 +356,25 @@ export default function LongScanView({
   }, [runs, focusSymbol]);
 
   const displayedGroups = useMemo(() => {
-    const flagActive = (Object.entries(filterFlags) as [Exclude<CoinFlag, "">, boolean][]).filter(
-      ([, v]) => v
-    );
     return coinGroups.filter((g) => {
-      const flag = coinFlags[g.symbol.toUpperCase()] || "";
-      if (flagActive.length > 0) {
-        if (!flagActive.some(([k]) => k === flag)) return false;
-      }
       const best = g.rows[0];
-      const bias = (best?.bias || "").toUpperCase();
-      if (filterBias === "strong_long" && !bias.includes("STRONG LONG")) return false;
-      if (filterBias === "long" && !(bias.includes("LONG") && !bias.includes("SHORT"))) return false;
-      if (filterBias === "neutral" && !bias.includes("NEUTRAL")) return false;
-      if (filterBias === "short" && !bias.includes("SHORT")) return false;
-
-      const note = best?.signalsNote || null;
-      if (filterPriceVs20 === "below") {
-        const v = noteHasPriceBelow20(note);
-        if (v !== true) return false;
+      const note = best?.signalsNote || "";
+      if (filterBias !== "all") {
+        const b = (best?.bias || "").toUpperCase();
+        if (filterBias === "strong_long" && !b.includes("STRONG LONG")) return false;
+        if (filterBias === "long" && !(b.includes("LONG") && !b.includes("SHORT") && !b.includes("STRONG")))
+          return false;
+        if (filterBias === "neutral" && !b.includes("NEUTRAL")) return false;
+        if (filterBias === "short" && !b.includes("SHORT")) return false;
       }
-      if (filterPriceVs20 === "above") {
-        const v = noteHasPriceBelow20(note);
-        if (v !== false) return false;
-      }
-      if (filterSma20v50 === "below") {
-        const v = noteHas20Below50(note);
-        if (v !== true) return false;
-      }
-      if (filterSma20v50 === "above") {
-        const v = noteHas20Below50(note);
-        if (v !== false) return false;
-      }
-      if (filterRangeNear && !noteNearRangeSupport(note)) return false;
+      if (filterPriceVs20 === "below" && !/Price below 20 SMA/i.test(note)) return false;
+      if (filterPriceVs20 === "above" && !/Price above 20 SMA/i.test(note)) return false;
+      if (filterSma20v50 === "below" && !/20 SMA below 50 SMA/i.test(note)) return false;
+      if (filterSma20v50 === "above" && !/20 SMA above 50 SMA/i.test(note)) return false;
+      if (filterRangeNear && !/Near range support|Near support|% of range/i.test(note)) return false;
       return true;
     });
-  }, [
-    coinGroups,
-    coinFlags,
-    filterFlags,
-    filterBias,
-    filterPriceVs20,
-    filterSma20v50,
-    filterRangeNear,
-  ]);
+  }, [coinGroups, filterBias, filterPriceVs20, filterSma20v50, filterRangeNear]);
 
 
   const emptyRunCount = useMemo(
@@ -932,11 +820,7 @@ export default function LongScanView({
   );
 
   const copyRankPrompt = useCallback(async () => {
-    const text = buildLongScanRankPrompt(
-      displayedGroups,
-      coinFlags,
-      priceBySymbol
-    );
+    const text = buildLongScanRankPrompt(displayedGroups, priceBySymbol);
     try {
       await navigator.clipboard.writeText(text);
       setRankPromptCopied(true);
@@ -944,7 +828,7 @@ export default function LongScanView({
     } catch {
       setError("Could not copy rank prompt");
     }
-  }, [displayedGroups, coinFlags, priceBySymbol]);
+  }, [displayedGroups, priceBySymbol]);
 
   return (
     <div className={`mx-auto max-w-6xl ${modalMode ? "px-2 py-2" : "px-4 py-6"}`}>
@@ -1037,37 +921,7 @@ export default function LongScanView({
           {!modalMode && !focusSymbol && (
             <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3 space-y-2.5 text-xs">
               <div className="font-bold text-slate-700">Filters</div>
-              <div className="flex flex-wrap gap-1.5 items-center">
-                <span className="text-slate-500 font-semibold">Flag:</span>
-                {(
-                  [
-                    ["bad", "Bad news", "bg-red-100 text-red-800 border-red-200"],
-                    ["monitor", "Monitor", "bg-amber-100 text-amber-900 border-amber-300"],
-                    ["nochase", "Don't chase", "bg-purple-100 text-purple-900 border-purple-200"],
-                    ["neutral", "Neutral", "bg-slate-200 text-slate-800 border-slate-300"],
-                    ["revisit", "Revisit", "bg-sky-100 text-sky-900 border-sky-300"],
-                    ["special", "Special", "bg-fuchsia-100 text-fuchsia-900 border-fuchsia-300"],
-                  ] as const
-                ).map(([id, label, cls]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() =>
-                      setFilterFlags((prev) => ({
-                        ...prev,
-                        [id]: !prev[id as keyof typeof prev],
-                      }))
-                    }
-                    className={`rounded-full border px-2 py-0.5 font-semibold ${cls} ${
-                      filterFlags[id as keyof typeof filterFlags]
-                        ? "ring-2 ring-offset-1 ring-slate-400"
-                        : "opacity-60"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              
               <div className="flex flex-wrap gap-2 items-center">
                 <label className="text-slate-500 font-semibold">Bias</label>
                 <select
@@ -1137,41 +991,42 @@ export default function LongScanView({
                       </span>
                     ) : null}
                   </h2>
-                  <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:w-auto sm:flex-1 sm:justify-end">
-                  <span
-                    className="inline-flex shrink-0 items-center justify-center gap-1"
-                    role="group"
-                    aria-label="Coin status flag"
-                  >
-                    {(
-                      [
-                        { id: "bad" as const, label: "Bad", title: "Bad news", cls: "bg-red-600 border-red-700", idle: "bg-red-200 border-red-300" },
-                        { id: "monitor" as const, label: "Monitor", title: "Monitor", cls: "bg-amber-400 border-amber-500", idle: "bg-amber-100 border-amber-300" },
-                        { id: "nochase" as const, label: "No chase", title: "Don't chase", cls: "bg-purple-500 border-purple-600", idle: "bg-purple-200 border-purple-300" },
-                        { id: "neutral" as const, label: "Neutral", title: "Neutral", cls: "bg-slate-500 border-slate-600", idle: "bg-slate-300 border-slate-400" },
-                        { id: "revisit" as const, label: "Revisit", title: "Revisit later", cls: "bg-sky-500 border-sky-600", idle: "bg-sky-200 border-sky-300" },
-                        { id: "special" as const, label: "Special", title: "Special watch", cls: "bg-fuchsia-500 border-fuchsia-600", idle: "bg-fuchsia-200 border-fuchsia-300" },
-                      ] as const
-                    ).map((f) => {
-                      const active = (coinFlags[g.symbol.toUpperCase()] || "") === f.id;
-                      return (
-                        <button
-                          key={f.id}
-                          type="button"
-                          title={f.title}
-                          aria-pressed={active}
-                          onClick={() => setCoinFlag(g.symbol, f.id)}
-                          className={`h-3.5 w-3.5 sm:h-4 sm:w-4 rounded-full border transition ${
-                            active
-                              ? `${f.cls} ring-1 ring-offset-1 ring-slate-400 opacity-100`
-                              : `${f.idle} opacity-45 hover:opacity-75`
-                          }`}
-                        >
-                          <span className="sr-only">{f.label}</span>
-                        </button>
-                      );
-                    })}
-                  </span>
+                  <div className="flex w-full flex-wrap items-center justify-end gap-1.5 sm:w-auto sm:flex-1">
+                    <button
+                      type="button"
+                      onClick={() => openJournal(g.symbol, { name: g.name })}
+                      className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-800 hover:bg-slate-50"
+                      title={`Journal notes for ${g.symbol}`}
+                    >
+                      📓 Journal
+                      {(journalCountBySymbol[g.symbol.toUpperCase()] ?? 0) > 0 ? (
+                        <span className="ml-1 rounded-full bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                          {journalCountBySymbol[g.symbol.toUpperCase()]}
+                        </span>
+                      ) : (
+                        <span className="ml-1 text-[10px] font-semibold text-slate-400">0</span>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManageSymbol(g.symbol);
+                        setManageName(g.name);
+                        setManageOpen(true);
+                      }}
+                      className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-900 hover:bg-emerald-100"
+                      title={`Manage targets for ${g.symbol}`}
+                    >
+                      ⚙️ Manage
+                    </button>
+                    <Link
+                      href={`/chart?symbol=${encodeURIComponent(g.symbol)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-indigo-700"
+                    >
+                      Spot →
+                    </Link>
                   </div>
                 </div>
 
@@ -1193,9 +1048,7 @@ export default function LongScanView({
                             🕒 {formatWhen(h.scannedAt)}
                           </time>
                           <div className="flex items-center gap-1.5">
-                            <span
-                              className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${tlab.cls}`}
-                            >
+                            <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${tlab.cls}`}>
                               {tlab.text}
                             </span>
                             <span
@@ -1205,55 +1058,54 @@ export default function LongScanView({
                                   : "bg-slate-100 text-slate-700"
                               }`}
                             >
-                              {h.bias} · {h.score >= 0 ? "+" : ""}
-                              {h.score}/±{h.maxScore}
+                              {h.bias}
+                              {h.score != null ? ` · ${h.score >= 0 ? "+" : ""}${h.score}/±${h.maxScore}` : ""}
                             </span>
+                            {h.isExtended ? (
+                              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900">
+                                Extended
+                              </span>
+                            ) : null}
                             <button
                               type="button"
+                              disabled={deletingKey === `hit:${h.runId}:${h.symbol}`}
                               onClick={() => void removeHit(h.runId, h.symbol)}
-                              disabled={deletingKey === `${h.runId}:${h.symbol}`}
-                              className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-bold text-rose-700 shadow-sm hover:bg-rose-100 disabled:opacity-50"
-                              title="Remove this hit"
+                              className="rounded border border-rose-200 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                              title="Delete this scan row"
                             >
-                              {deletingKey === `${h.runId}:${h.symbol}` ? "…" : "🗑 Delete"}
+                              🗑
                             </button>
                           </div>
                         </div>
-
-                        <div className="text-sm font-bold text-slate-900 mb-1">
+                        <div className="text-sm font-semibold text-slate-800 tabular-nums">
                           {formatPhp(h.currentPrice)}
-                          {h.support != null && (
-                            <span className="text-xs font-normal text-gray-500">
-                              {" "}
-                              · S {formatPhp(h.support)}
+                          {h.support != null ? (
+                            <span className="ml-2 text-[11px] font-medium text-slate-500">
+                              S {formatPhp(h.support)}
                             </span>
-                          )}
-                          {h.resistance != null && (
-                            <span className="text-xs font-normal text-gray-500">
-                              {" "}
+                          ) : null}
+                          {h.resistance != null ? (
+                            <span className="ml-1 text-[11px] font-medium text-slate-500">
                               · R {formatPhp(h.resistance)}
                             </span>
-                          )}
+                          ) : null}
                         </div>
-
-                        {h.ladder?.length > 0 && (
-                          <ul className="mb-1 space-y-0.5 text-xs text-gray-800">
+                        {h.ladder && h.ladder.length > 0 ? (
+                          <ul className="mt-1.5 space-y-0.5 text-[11px] text-slate-700">
                             {h.ladder.map((lvl, i) => (
-                              <li key={i} className="flex justify-between gap-2 font-mono">
-                                <span>
-                                  ~{formatPhp(lvl.price)}{" "}
-                                  <span className="text-gray-500 font-sans">({lvl.basis})</span>
-                                </span>
-                                <span className="text-gray-600">{lvl.allocationPct}%</span>
+                              <li key={i}>
+                                ~{formatPhp(lvl.price)}{" "}
+                                <span className="text-slate-500">({lvl.basis})</span>{" "}
+                                <span className="font-bold text-indigo-800">{lvl.allocationPct}%</span>
                               </li>
                             ))}
                           </ul>
-                        )}
-
-                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
+                        ) : null}
+                        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-600">
                           {h.invalidation != null && (
-                            <span className="text-rose-800">
-                              <span className="font-bold">Stop</span> ~{formatPhp(h.invalidation)}
+                            <span>
+                              <span className="font-bold text-rose-800">Stop</span> ~
+                              {formatPhp(h.invalidation)}
                             </span>
                           )}
                           {h.target != null && (
