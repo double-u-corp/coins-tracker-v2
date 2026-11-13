@@ -6,7 +6,6 @@ import { createJournalEntrySchema, deleteJournalEntrySchema } from "@/validators
 import type { JournalEntryView } from "@/validators/journalSchema";
 import {
   ingestJournalForCoinWatch,
-  removeCoinWatchForJournal,
 } from "@/lib/coinWatchStore";
 
 type ListResponse = { entries: JournalEntryView[] };
@@ -185,11 +184,7 @@ async function handleDelete(req: NextApiRequest, res: NextApiResponse<DeleteResp
 
   const jid = parsed.data.id;
   await prisma.journalEntry.delete({ where: { id: jid } });
-  try {
-    await removeCoinWatchForJournal(jid);
-  } catch {
-    /* non-fatal */
-  }
+  // Coin watch dates live in their own store — deleting a journal must NOT remove calendar rows.
   return res.status(200).json({ ok: true });
 }
 

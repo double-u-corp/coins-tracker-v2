@@ -27,39 +27,39 @@ function buildNearSupportEntryPrompt(
   hits: RangeHit[],
   watchPlan: { symbol: string; name: string; currentPrice?: number | null }[] = [],
   rsiOversold: { symbol: string; name?: string; rsi?: number; price?: number; detail?: string }[] = [],
-  fastPump: { symbol: string; name?: string; price?: number; detail?: string; extensionPct?: number }[] = []
+  _fastPump: { symbol: string; name?: string; price?: number; detail?: string; extensionPct?: number }[] = []
 ): string {
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
   const lines: string[] = [];
   lines.push(
-    `You are a neutral research assistant for a Philippines **spot LONG-only** PHP crypto trader (buy/sell coins only — no shorting, no leverage, no margin).`
+    `You are a neutral crypto research assistant (Philippines PHP spot context — research only).`
   );
+  lines.push(`Analysis date (Manila): **${today}**.`);
   lines.push(``);
   lines.push(`## Task`);
   lines.push(
-    `Rank coins on Lists A–D using **verified news only** (past ~30d, present/72h, next ~30d, security ~90d). Chart labels are context — not the ranking basis. One top pick or HOLD CASH when news is thin/adverse. No shorting/leverage.`
+    `Gather **verified news, events, unlocks, listings/delistings, upgrades, and security items** for the coins below.`
+  );
+  lines.push(
+    `Windows: **past ~30 days**, **present / ~72h**, and **next ~30 days**. Security incidents: last ~90 days if still relevant.`
+  );
+  lines.push(
+    `Do **not** recommend buy, sell, hold, add, average down, or size. Do **not** rank for entry. Lists are only which tickers to research.`
   );
   lines.push(``);
-  lines.push(`## List A — Near 30-day support · top 8 (app ranking)`);
-  lines.push(
-    `Lowest % of 30-day range first. Technical discount zone only — not an automatic buy.`
-  );
+  lines.push(`## List A — Near 30-day support · top 8 (app context only)`);
   if (hits.length === 0) {
     lines.push(`(none in list right now)`);
   } else {
     hits.forEach((h, i) => {
       const base = h.name || h.symbol.replace(/PHP$/i, "");
       lines.push(
-        `${i + 1}. **${base}** (\`${h.symbol}\`) — price ${h.price} · support ~${h.support} · resistance ~${h.resistance} · **${h.positionPct.toFixed(1)}%** of 30d range · ${h.detail}`
+        `${i + 1}. **${base}** (\`${h.symbol}\`) — price ${h.price} · ~${h.positionPct.toFixed(1)}% of 30d range`
       );
     });
   }
   lines.push(``);
-  lines.push(`## List B — Watch / plan · not held (monitored, no open bag)`);
-  lines.push(
-    `Coins on the trader's watchlist that are **not currently held**. Include these in research even if they are not in List A.`
-  );
-  const hitSyms = new Set(hits.map((h) => h.symbol.toUpperCase()));
-  const planOnly = watchPlan.filter((c) => c.symbol && !hitSyms.has(c.symbol.toUpperCase()));
+  lines.push(`## List B — Watch / plan · not held`);
   const planAll = watchPlan.filter((c) => c.symbol);
   if (planAll.length === 0) {
     lines.push(`(none on watch/plan right now)`);
@@ -67,126 +67,54 @@ function buildNearSupportEntryPrompt(
     planAll.forEach((c, i) => {
       const sym = c.symbol.toUpperCase();
       const base = c.name || sym.replace(/PHP$/i, "");
-      const px =
-        c.currentPrice != null && Number.isFinite(Number(c.currentPrice))
-          ? String(c.currentPrice)
-          : "n/a";
-      const alsoNear = hitSyms.has(sym) ? " · also on List A" : "";
-      lines.push(`${i + 1}. **${base}** (\`${sym}\`) — price ${px}${alsoNear}`);
+      lines.push(`${i + 1}. **${base}** (\`${sym}\`)`);
     });
   }
   lines.push(``);
-  lines.push(`## List C — RSI oversold · top 8 (daily RSI-14 ≤ 40)`);
-  lines.push(
-    `Leaning oversold / oversold on daily RSI. Monitor for pullback entries — not an automatic buy.`
-  );
+  lines.push(`## List C — RSI oversold (app context only)`);
   if (!rsiOversold.length) {
     lines.push(`(none loaded)`);
   } else {
-    rsiOversold.slice(0, 8).forEach((m, i) => {
-      const sym = String(m.symbol).toUpperCase();
-      const base = m.name || sym.replace(/PHP$/i, "");
+    rsiOversold.forEach((r, i) => {
+      const sym = (r.symbol || "").toUpperCase();
+      const base = r.name || sym.replace(/PHP$/i, "");
       const rsi =
-        m.rsi != null && Number.isFinite(Number(m.rsi)) ? `RSI ${Number(m.rsi).toFixed(0)}` : "";
-      const px =
-        m.price != null && Number.isFinite(Number(m.price)) ? String(m.price) : "";
-      lines.push(
-        `${i + 1}. **${base}** (\`${sym}\`) — ${[rsi, px && `price ${px}`, m.detail].filter(Boolean).join(" · ")}`
-      );
+        r.rsi != null && Number.isFinite(Number(r.rsi))
+          ? `RSI ~${Number(r.rsi).toFixed(1)}`
+          : "RSI n/a";
+      lines.push(`${i + 1}. **${base}** (\`${sym}\`) — ${rsi}`);
     });
   }
-  lines.push(``);
-  lines.push(`## List D — Fast pump above 20 SMA · top 3`);
-  lines.push(
-    `Just ran through / above daily 20 SMA. Prefer cool-down or pullback — do not chase. Not a short signal.`
-  );
-  if (!fastPump.length) {
-    lines.push(`(none loaded)`);
-  } else {
-    fastPump.slice(0, 3).forEach((m, i) => {
-      const sym = String(m.symbol).toUpperCase();
-      const base = m.name || sym.replace(/PHP$/i, "");
-      const ext =
-        m.extensionPct != null && Number.isFinite(Number(m.extensionPct))
-          ? `+${Number(m.extensionPct).toFixed(1)}% vs 20 SMA`
-          : "";
-      const px =
-        m.price != null && Number.isFinite(Number(m.price)) ? String(m.price) : "";
-      lines.push(
-        `${i + 1}. **${base}** (\`${sym}\`) — ${[px && `price ${px}`, ext, m.detail].filter(Boolean).join(" · ")}`
-      );
-    });
-  }
-  lines.push(``);
-  lines.push(`## Mandatory research (before any ranking)`);
-  lines.push(
-    `For **each** coin in Lists A–D, search **verified** sources only (no training-memory headlines; do not invent events):`
-  );
-  lines.push(
-    `1. **Past ~30 calendar days** — listings/delistings, unlocks, exploits, hacks, governance, partnerships, regulatory (project ticker/name — not PHP suffix).`
-  );
-  lines.push(
-    `2. **Present / last ~72h** — verified items that could explain current moves.`
-  );
-  lines.push(
-    `3. **Next ~30 calendar days** — scheduled unlocks, launches, votes, hardforks, conferences, court/regulatory dates (dated + sourced).`
-  );
-  lines.push(
-    `4. **Security ~90d** — exploit / bridge / protocol incidents for that project.`
-  );
-  lines.push(
-    `If a category has nothing verifiable after search, write **none verified** for that coin/category — never silent omission.`
-  );
-  lines.push(``);
-  lines.push(`## X (Twitter) follows`);
-  lines.push(
-    `For each coin, suggest **1–3 official or high-signal X accounts** to follow (project official, lead/dev if known, or one reputable research/on-chain desk). Label **official vs community**. Prefer handles you can verify; if unsure, say **none verified** rather than guessing.`
-  );
   lines.push(``);
   lines.push(`## Rules`);
-  lines.push(`- Neutral. Weak or unclear → **WAIT / SKIP** and hold cash — never recommend shorting.`);
-  lines.push(`- Prefer pullbacks / staged limit buys over chasing.`);
-  lines.push(`- Near support is **not** an automatic buy; catalysts and risk can override.`);
-  lines.push(`- Use project names for search (e.g. SUI not SUIPHP; TRUMP the token not politics noise unless token-linked).`);
+  lines.push(`- Neutral research only — no trading verdicts.`);
+  lines.push(`- Verified sources only; no training-memory headlines; no invented dates.`);
+  lines.push(`- Search by **project name / base ticker** (e.g. XLM not XLMPHP).`);
+  lines.push(`- Nothing found after search for a category → **none verified** (do not stay silent).`);
   lines.push(``);
-  lines.push(`## Answer format`);
+  lines.push(`## Output (required)`);
+  lines.push(`1. Short bullets or table: Coin | Past 30d | Present | Next 30d | Security`);
+  lines.push(`2. **Watch date lines — critical.** For **every** dated catalyst, emit exactly:`);
   lines.push(
-    `1. **Ranked table** (A∪B∪C∪D): Rank | Coin | Lists | News posture (PRIORITY / WATCH / WAIT / SKIP) | strongest verified catalyst or "none verified" | X accounts`
+    `   \`- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration|listing|hardfork · short detail\``
   );
   lines.push(
-    `2. **Best news-backed candidates** (max 3) — only if catalysts support monitoring; else none / HOLD CASH.`
-  );
-  lines.push(`3. **Avoid / deprioritize** (if any) with verified reason.`);
-  lines.push(`4. **Recheck by** (Manila date, within ~7 days).`);
-  lines.push(
-    `5. **Watch date lines** — for every dated catalyst: \`- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration|listing|hardfork · short detail\``
-  );
-  lines.push(``);
-  lines.push(`## Final journal note (REQUIRED — pure markdown, copy-paste ready)`);
-  lines.push(
-    `End with ONLY a fenced markdown block. For every dated catalyst on any listed coin, add a **Watch date** bullet (Home **Coin watch dates** scrapes these).`
+    `   Example: \`- **Watch date:** 2026-11-19 · event · SKY governance executive vote (Nov 9 proposal)\``
   );
   lines.push(
-    `Shape: \`- **Watch date:** YYYY-MM-DD · event · short detail\` — one line per date. Labels: unlock | delisting | event | integration | listing | hardfork.`
+    `   Our app saves these into **Coin watch dates**. Missing this format means the calendar will not update.`
   );
-  lines.push(
-    `Examples: \`- **Watch date:** 2026-11-19 · event · SKY governance executive vote (Nov 9 proposal)\` then \`- **Watch date:** 2026-11-23 · event · Stellar Protocol 30 validator vote\`.`
-  );
+  lines.push(`3. Omit a coin's Watch date lines only when no dated item was verified.`);
+  lines.push(`4. End with a fenced markdown block the trader can paste to journal:`);
   lines.push(``);
   lines.push("```markdown");
-  lines.push(`## Entry monitor · YYYY-MM-DD (Manila)`);
-  lines.push(`- **Agent:** Spot Trading Desk AI (ChatGPT / Grok / Gemini — name model)`);
-  lines.push(`- **Prompt:** Home · Near support + Watch/plan entry monitor`);
-  lines.push(`- **Priority watch:** …`);
-  lines.push(`- **Candidates to stage (max 3):** … or none`);
-  lines.push(`- **Avoid:** … or none`);
-  lines.push(`- **X accounts to follow:** coin — @handles`);
-  lines.push(`- **Recheck by:** YYYY-MM-DD`);
-  lines.push(`- **Watch date:** YYYY-MM-DD · event · short detail (repeat per catalyst; omit only if none)`);
+  lines.push(`## Entry monitor research · ${today} (Manila)`);
+  lines.push(`- **Agent:** Spot Trading Desk AI (name model)`);
+  lines.push(`- **Prompt:** Home · Entry monitor · news/events only`);
+  lines.push(`- **Coins covered:** …`);
+  lines.push(`- **Watch date:** YYYY-MM-DD · event · short detail`);
   lines.push(`- **Notes:** …`);
   lines.push("```");
-  lines.push(``);
-  lines.push(`Keep the prose above the fence practical. No price prediction guarantees.`);
   return lines.join("\n");
 }
 

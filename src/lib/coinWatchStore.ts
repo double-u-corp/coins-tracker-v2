@@ -92,7 +92,10 @@ export async function ingestJournalForCoinWatch(args: {
   return added.length;
 }
 
-/** Remove scrapes tied to a deleted journal entry. */
+/**
+ * Optional helper — **not** called on journal delete.
+ * Coin watch dates are independent of journal lifetime; delete only via Coin watch dates UI / API.
+ */
 export async function removeCoinWatchForJournal(journalEntryId: number): Promise<number> {
   const store = await readStore();
   const next = store.events.filter((e) => e.journalEntryId !== journalEntryId);
