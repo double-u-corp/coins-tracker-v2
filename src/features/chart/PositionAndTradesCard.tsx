@@ -138,12 +138,19 @@ function buildAgentPrompt(args: {
     lines.push(``);
     lines.push(`## Question`);
     lines.push(
-      `Primary question: is it reasonable to **add / buy more** of ${base} now, or only on a deeper pullback, or **not add** at all?`
+      `Research **current / ~72h events** and **next ~30 days** only for ${base} (already holding — skip deep past history).`
     );
     lines.push(
-      `This is an **add / size** decision, not a default hold/exit review. Mention trim/exit only if the existing bag's thesis is clearly broken. Cover: levels for any add, size vs current holdings, invalidation, and risk if support fails. Stay neutral.`
+      `Do **not** push ADD / average-down / size advice. Surface catalysts so the trader can decide later whether to add or sell.`
+    );
+    lines.push(
+      `**Critical:** for every dated catalyst emit \`- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration|listing|hardfork · short detail\` (Coin watch dates).`
     );
   } else {
+    lines.push(``);
+    lines.push(`## Research windows`);
+    lines.push(`- **Past ~30 days** + **present/~72h** + **next ~30 days** (not holding — include recent history).`);
+    lines.push(`- Emit **Watch date** lines for every dated catalyst (Coin watch dates format).`);
     lines.push(``);
     lines.push(`## Position`);
     if (args.rebuy) {

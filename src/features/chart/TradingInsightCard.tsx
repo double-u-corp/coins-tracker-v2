@@ -160,13 +160,13 @@ export function formatEntryReviewPrompt(
   const lines: string[] = [];
 
   if (isAllocated) {
-    lines.push(`You are reviewing an **open spot LONG** in **${label}** for a possible **add (buy more)**.`);
-    lines.push(`Local PHP spot pair symbol in the app: **${pair}** (underlying asset ticker: **${base}**). When searching news, use **${base}** / the crypto project name — not “${pair}” and not non-crypto meanings of “${base}”.`);
-    lines.push(`The trader **already holds** this coin. **No shorting. No leverage.** Primary question: is it reasonable to **add / buy more** at current levels (or only on a deeper pullback) — not a fresh bag from zero, and **not** primarily a hold/exit review.`);
+    lines.push(`You are researching **${label}** for a trader who **already holds** a spot position (PHP pair **${pair}**, ticker **${base}**).`);
+    lines.push(`When searching news, use **${base}** / the project name — not “${pair}” and not non-crypto meanings of “${base}”.`);
+    lines.push(`**Focus: verified current events + next ~30 days only.** Do **not** dig a long past history. The trader will decide later whether to add or sell — your job is **event/catalyst research**, not size advice.`);
   } else {
-    lines.push(`You are reviewing a **spot LONG-only** entry for **${label}**.`);
-    lines.push(`Local PHP spot pair symbol in the app: **${pair}** (underlying asset ticker: **${base}**). When searching news, use **${base}** / the crypto project name — not “${pair}” and not non-crypto meanings of “${base}”.`);
-    lines.push(`The trader does **not** hold this coin yet. **No shorting. No leverage. No margin.** Question: is it reasonable to **stage buy limit orders** on the ladder (or wait)?`);
+    lines.push(`You are researching **${label}** for a trader who does **not** hold this coin yet (PHP pair **${pair}**, ticker **${base}**).`);
+    lines.push(`When searching news, use **${base}** / the project name — not “${pair}” and not non-crypto meanings of “${base}”.`);
+    lines.push(`**Focus: verified past ~30 days + present/~72h + next ~30 days.** The trader will decide later whether to stage buys — your job is **event/catalyst research**, not a forced buy call.`);
   }
 
   lines.push(``);
@@ -200,7 +200,7 @@ export function formatEntryReviewPrompt(
       lines.push(`  - Long hold underwater with no catalyst → patience or thesis review, not revenge adds.`);
       lines.push(`  - Short hold + extended into resistance → trims more reasonable than waiting forever.`);
     }
-    lines.push(`- Use this to judge **whether to ADD more size** — average-down only if technicals + verified news support it; otherwise DO NOT ADD.`);
+    lines.push(`- Research only: surface catalysts; the trader decides add vs sell later. Do not push ADD / average-down.`);
     lines.push(``);
   }
 
@@ -218,11 +218,11 @@ export function formatEntryReviewPrompt(
   lines.push(`- Unlock does not equal automatic sell pressure — note amount/schedule and whether sales are confirmed.`);
   lines.push(`- Analysis date = **today Manila** unless the user supplies a historical snapshot date (then label it explicitly and shift research windows).`);
   if (isAllocated) {
-    lines.push(`- Primary question: is an **ADD** justified? Ladder % = share of a **predefined additional PHP budget**, not % of coins already held.`);
+    lines.push(`- Holding context is background only — prioritize **dated events** over ladder % advice.`);
     lines.push(`- If ADD: state max additional PHP budget, each tranche PHP size + entry condition, stop-adding / invalidation, approx **new average cost** if filled, extra PHP at risk. Lower avg cost does not mean a safer trade.`);
     lines.push(`- If catalysts + technicals do not justify an add → **PHP 0** additional spending.`);
   } else {
-    lines.push(`- Primary question: stage ladder buys or stay in cash? SHORT/risk-off bias → cash, never short.`);
+    lines.push(`- Not holding yet — include **past ~30d** catalysts that explain the path into today, plus forward dates.`);
     lines.push(`- Extended above ladder → WAIT FOR PULLBACK, not chase.`);
   }
   lines.push(``);
@@ -313,9 +313,13 @@ export function formatEntryReviewPrompt(
   lines.push(`## Mandatory research (complete BEFORE any verdict — no silent skips)`);
   lines.push(`Live search only. Training memory is not evidence. Do not invent events.`);
   lines.push(`Silence is not "none verified." Each category: verified item OR **searched, none found**. Distinguish from not-searched.`);
-  lines.push(`**A) Security/exploit (~90d) MANDATORY:** search project, ticker, exploit, hack, bridge, security incident. Verified hit → lean WAIT/SKIP/DO NOT ADD/TRIM.`);
+  lines.push(`**A) Security/exploit (~90d):** search project, ticker, exploit, hack, bridge, security incident. Report verified hits factually.`);
   lines.push(`**B) Audit lines:** exploit | unlocks/supply | listing/delisting | partnership/launch | regulatory if asset-linked.`);
-  lines.push(`**C) Windows:** past ~30d · **present/~72h** · next ~30d dated catalysts; also ~60d around last high if supplied; forward unlocks — none dated → searched, none found.`);
+  if (isAllocated) {
+    lines.push(`**C) Windows (already holding):** **present/~72h** + **next ~30d** dated catalysts only. Do **not** prioritize deep past-30d history. None dated → searched, none found.`);
+  } else {
+    lines.push(`**C) Windows (not holding):** past ~30d · **present/~72h** · next ~30d dated catalysts; optional context around last local high if supplied. None dated → searched, none found.`);
+  }
   lines.push(`**D) Output:** news audit + ≤6 catalyst rows (date·URL·official vs reported·in-price?·uncertainty·spot implication). Then verdict.`);
   lines.push(`**E) Watch dates:** for every dated catalyst emit \`- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration|listing|hardfork · short detail\` (scraped into Home Coin watch dates).`);
   lines.push(`Correlated indicators are not independent confirms. Structure + invalidation > green-flag count.`);
@@ -490,14 +494,14 @@ export function formatEntryReviewPromptForGoogle(
 
   if (isAllocated) {
     parts.push(
-      `Spot LONG review (already holding) ${label}. Pair ${pair}; search news as ${base} crypto. No short/leverage. Be NEUTRAL. Primary question: ADD more / ADD only on pullback / DO NOT ADD? Exit/trim only if thesis broken.`
+      `Spot research (already holding) ${label}. Pair ${pair}; search as ${base} crypto. NEUTRAL. Research CURRENT events + NEXT ~30 days only (no deep past). No size/add advice — trader decides add vs sell later. CRITICAL: emit Watch date lines for every dated catalyst.`
     );
     if (avgCost != null) {
       parts.push(`Avg cost ~${avgCost.toFixed(4)}; price ${c.currentPrice}; holdings ${holdings}.`);
     }
   } else {
     parts.push(
-      `Spot LONG-only entry review ${label}. Pair ${pair}; search news as ${base} crypto not other meanings. No short/leverage/margin. Be NEUTRAL — do not force a long; if weak/bearish say WAIT or SKIP. Stage ladder buys or wait?`
+      `Spot research (not holding) ${label}. Pair ${pair}; search as ${base} crypto. NEUTRAL. Research PAST ~30d + present/~72h + NEXT ~30d. No forced buy. CRITICAL: emit Watch date lines for every dated catalyst (Coin watch dates).`
     );
   }
 
@@ -562,11 +566,11 @@ export function formatEntryReviewPromptForGoogle(
 
   if (isAllocated) {
     parts.push(
-      `Answer: 1) ADD | ADD ONLY ON PULLBACK | DO NOT ADD | TRIM  2) why (tech+catalyst)  3) levels/size or why not  4) invalidation  5) review by YYYY-MM-DD (Manila; today ${todayManila})  6) past30/next30/security  7) End with copy-paste markdown journal ONLY with exact labels:`
+      `Answer: 1) brief catalyst summary (current + next 30d only)  2) optional light note on risk (no size advice)  3) review by YYYY-MM-DD (Manila; today ${todayManila})  4) **Watch date lines for every dated item**  5) End with copy-paste markdown journal ONLY with exact labels:`
     );
   } else {
     parts.push(
-      `Answer: 1) READY TO STAGE | WAIT FOR PULLBACK | SKIP  2) why  3) ladder+invalidation  4) review by YYYY-MM-DD (Manila; today ${todayManila})  5) past30/next30/security  6) End with copy-paste markdown journal ONLY with exact labels:`
+      `Answer: 1) brief catalyst summary (past 30d + present + next 30d)  2) review by YYYY-MM-DD (Manila; today ${todayManila})  3) **Watch date lines for every dated item**  4) End with copy-paste markdown journal ONLY with exact labels:`
     );
   }
 
@@ -582,8 +586,8 @@ export function formatEntryReviewPromptForGoogle(
       "- **Target exit:** ₱… or n/a",
       "- **Invalidation:** …",
       "- **Review by:** YYYY-MM-DD",
-      "- **Watch date:** YYYY-MM-DD · event · short detail (repeat once per dated catalyst; omit only if none verified)",
-      "- **Past 30d:** …",
+      "- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration|listing|hardfork · short detail (REQUIRED per dated catalyst; repeat lines; omit only if none verified)",
+      "- **Past 30d:** … (skip or n/a if already holding — forward-only research)",
       "- **Next 30d:** …",
       "- **Security 90d:** …",
       "- **Why:** …",
