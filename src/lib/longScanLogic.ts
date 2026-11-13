@@ -341,7 +341,7 @@ export async function listLongScanRuns(): Promise<LongScanRunPayload[]> {
           targetNote: h.targetNote != null ? String(h.targetNote) : null,
           macroTrend: h.macroTrend != null ? String(h.macroTrend) : null,
           signalsNote: h.signalsNote != null ? String(h.signalsNote) : null,
-          tier: h.tier != null ? String(h.tier) : "LONG",
+          tier: String((h as { tier?: unknown }).tier ?? "LONG"),
         };
         (groups.get(key) || groups.set(key, []).get(key)!).push(payload);
       }
