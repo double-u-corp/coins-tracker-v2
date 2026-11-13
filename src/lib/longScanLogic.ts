@@ -4,7 +4,6 @@ import type { ChartPoint } from "@/validators/recordSchema";
 import {
   computeConfluenceSignal,
   isLongExtended,
-  isWatchlistBuyLowHit,
   isNearSupportWorthCheck,
   getEffectivePrice,
   type ConfluenceResult,
@@ -65,7 +64,7 @@ export type LongScanRunResult = {
   totalSaved?: number;
 };
 
-/** Skip majors / gold — speeds scan; focus on alts for buy-low. */
+/** Skip majors / gold — speeds scan; focus on alts. */
 const SKIP_SYMBOLS = new Set([
   "BTCPHP",
   "BTC",
@@ -76,8 +75,7 @@ const SKIP_SYMBOLS = new Set([
 ]);
 
 /**
- * Long-scan only (Spot score unchanged): near support / lower range
- * AND short-term price rising (prefer 3h series).
+ * Long-scan only (Spot score unchanged): short-term price rising (prefer 3h series).
  */
 function isPriceRising(series: ChartPoint[] | null | undefined, fallbackDaily: ChartPoint[]): boolean {
   const src =
@@ -97,17 +95,38 @@ function isPriceRising(series: ChartPoint[] | null | undefined, fallbackDaily: C
   return last >= prev * 0.999 && last > back * 1.002;
 }
 
-function isNearSupportAndRising(
+/**
+ * Save only three classes (no BUY_LOW tier):
+ * 1) STRONG LONG
+ * 2) LONG
+ * 3) NEAR_LONG — NEUTRAL, near support, short-term rising
+ * Extended LONGs are skipped. SHORT / INSUFFICIENT never saved.
+ */
+function longScanTier(
   points: ChartPoint[],
   intraday: ChartPoint[] | null | undefined,
   c: ConfluenceResult
-): boolean {
-  if (c.bias === "INSUFFICIENT DATA") return false;
-  if (c.bias.includes("SHORT")) return false; // hold cash — not a buy watch
-  if (!isNearSupportWorthCheck(c)) return false;
-  // Skip already-run LONGs at the floor that are still "extended" vs ladder/range
-  if (c.bias.includes("LONG") && isLongExtended(c)) return false;
-  return isPriceRising(intraday, points);
+): "STRONG_LONG" | "LONG" | "NEAR_LONG" | null {
+  if (c.bias === "INSUFFICIENT DATA") return null;
+  if (c.bias.includes("SHORT")) return null;
+
+  if (c.bias === "STRONG LONG") {
+    if (isLongExtended(c)) return null;
+    return "STRONG_LONG";
+  }
+  if (c.bias === "LONG") {
+    if (isLongExtended(c)) return null;
+    return "LONG";
+  }
+  // Near-long: constructive floor setup without full LONG bias yet
+  if (
+    c.bias === "NEUTRAL" &&
+    isNearSupportWorthCheck(c) &&
+    isPriceRising(intraday, points)
+  ) {
+    return "NEAR_LONG";
+  }
+  return null;
 }
 
 function signalsNote(c: ConfluenceResult, points?: ChartPoint[]): string {
@@ -322,7 +341,7 @@ export async function listLongScanRuns(): Promise<LongScanRunPayload[]> {
           targetNote: h.targetNote != null ? String(h.targetNote) : null,
           macroTrend: h.macroTrend != null ? String(h.macroTrend) : null,
           signalsNote: h.signalsNote != null ? String(h.signalsNote) : null,
-          tier: "BUY_LOW",
+          tier: h.tier != null ? String(h.tier) : "LONG",
         };
         (groups.get(key) || groups.set(key, []).get(key)!).push(payload);
       }
@@ -583,11 +602,10 @@ export async function runLongScanSnapshot(
           intradayPoints: fast ? undefined : intraday ?? undefined,
         });
 
-        if (!isNearSupportAndRising(points, intraday, confluence)) continue;
+        const tier = longScanTier(points, intraday, confluence);
+        if (!tier) continue;
 
-        const buyLow = isWatchlistBuyLowHit(confluence);
         const ladder: LadderLevel[] = confluence.entrySuggestion?.ladder ?? [];
-        const tier = buyLow ? "BUY_LOW" : "NEAR_SUPPORT_UP";
         const note = `[${tier}] ${signalsNote(confluence, points)}`.slice(0, 500);
         const extended = isLongExtended(confluence);
 

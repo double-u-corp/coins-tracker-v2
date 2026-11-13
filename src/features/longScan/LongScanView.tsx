@@ -226,25 +226,36 @@ function noteNearRangeSupport(note: string | null): boolean {
 }
 
 function tierLabel(tier: string) {
-  if (tier === "NEAR_SUPPORT_UP" || tier === "near_support_up") {
-    return {
-      text: "Near support · rising",
-      cls: "bg-sky-100 text-sky-900",
-    };
+  const t = (tier || "").toUpperCase();
+  if (t === "STRONG_LONG" || t === "STRONG LONG") {
+    return { text: "STRONG LONG", cls: "bg-emerald-600 text-white" };
   }
-  if (tier === "NEAR_CROSS" || tier === "near_cross") {
-    return {
-      text: "Near support · rising",
-      cls: "bg-sky-100 text-sky-900",
-    };
+  if (t === "LONG") {
+    return { text: "LONG", cls: "bg-emerald-100 text-emerald-900" };
   }
-  if (tier === "BUY_LOW" || tier === "buy_low") {
-    return { text: "Buy-low", cls: "bg-emerald-100 text-emerald-900" };
+  if (t === "NEAR_LONG" || t === "NEAR_SUPPORT_UP" || t === "NEAR_CROSS") {
+    return { text: "Near-long", cls: "bg-sky-100 text-sky-900" };
   }
-  if (tier === "EXTENDED" || tier === "extended") {
+  if (t === "BUY_LOW") {
+    // Legacy rows — hide emphasis; prefer not to treat as primary
+    return { text: "Legacy", cls: "bg-slate-100 text-slate-500" };
+  }
+  if (t === "EXTENDED") {
     return { text: "Extended", cls: "bg-amber-100 text-amber-900" };
   }
-  return { text: "Watch", cls: "bg-slate-100 text-slate-700" };
+  return { text: tier || "—", cls: "bg-slate-100 text-slate-700" };
+}
+
+/** Keep page focused on LONG / STRONG LONG / near-long (drop legacy buy-low). */
+function isAllowedLongScanRow(h: { bias?: string; tier?: string }): boolean {
+  const bias = (h.bias || "").toUpperCase();
+  const tier = (h.tier || "").toUpperCase();
+  if (tier === "BUY_LOW") return false;
+  if (bias.includes("STRONG LONG") || tier === "STRONG_LONG") return true;
+  if (bias === "LONG" || tier === "LONG") return true;
+  if (tier === "NEAR_LONG" || tier === "NEAR_SUPPORT_UP" || tier === "NEAR_CROSS") return true;
+  if (bias === "NEUTRAL" && (tier.includes("NEAR") || tier === "")) return true;
+  return false;
 }
 
 export type LongScanViewProps = {
@@ -311,17 +322,20 @@ export default function LongScanView({
           g = { symbol: h.symbol, name: h.name, rows: [] };
           map.set(key, g);
         }
+        if (!isAllowedLongScanRow(h)) continue;
         g.rows.push({ ...h, scannedAt: run.scannedAt, runId: run.id });
       }
     }
-    const groups = [...map.values()].map((g) => {
-      g.rows.sort((a, b) => {
-        const biasCmp = biasRank(a.bias) - biasRank(b.bias);
-        if (biasCmp !== 0) return biasCmp;
-        return b.scannedAt.localeCompare(a.scannedAt);
-      });
-      return g;
-    });
+    const groups = [...map.values()]
+      .map((g) => {
+        g.rows.sort((a, b) => {
+          const biasCmp = biasRank(a.bias) - biasRank(b.bias);
+          if (biasCmp !== 0) return biasCmp;
+          return b.scannedAt.localeCompare(a.scannedAt);
+        });
+        return g;
+      })
+      .filter((g) => g.rows.length > 0);
     // Sort: STRONG LONG / LONG first (among them: stronger bias, then newest).
     // All other biases: newest result only (no score ranking).
     groups.sort((a, b) => {
@@ -913,7 +927,7 @@ export default function LongScanView({
         <div className="space-y-6">
           <p className="text-[11px] text-gray-500">
             {displayedGroups.length} coin(s) with saved hits (not full watchlist size — BTC/ETH/XAUT skipped in
-            scan; only coins that matched a run appear here) ·{" "}
+            scan; LONG / STRONG LONG / near-long only (no buy-low)) ·{" "}
             <span className="font-semibold text-slate-700">STRONG LONG / LONG first</span>, then newest
             non-LONG · newest hit first inside each card
           </p>
