@@ -7,7 +7,6 @@ import FormattedAiResponse from "@/components/FormattedAiResponse";
 import JournalSidebar from "@/features/chart/JournalSidebar";
 import dynamic from "next/dynamic";
 import LongScanPollChart from "./LongScanPollChart";
-import HomeCoinWatchDates from "@/features/home/HomeCoinWatchDates";
 
 const ManageCoinsView = dynamic(() => import("@/features/manage/ManageCoinsView"), {
   ssr: false,
@@ -967,15 +966,6 @@ export default function LongScanView({
               </div>
             </div>
           )}
-
-          {!modalMode && (
-            <HomeCoinWatchDates
-              compact
-              filterSymbols={displayedGroups.map((g) => g.symbol)}
-              allCoins={displayedGroups.map((g) => ({ symbol: g.symbol, name: g.name }))}
-            />
-          )}
-
           {displayedGroups.length === 0 && coinGroups.length > 0 ? (
             <p className="text-sm text-gray-500">No coins match the current filters.</p>
           ) : null}
@@ -1005,21 +995,6 @@ export default function LongScanView({
                       </span>
                     </h2>
                     <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto sm:justify-end">
-                      <button
-                        type="button"
-                        onClick={() => openJournal(g.symbol, { name: g.name })}
-                        className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-800 hover:bg-slate-50"
-                        title={`Journal notes for ${g.symbol}`}
-                      >
-                        📓 Journal
-                        {(journalCountBySymbol[g.symbol.toUpperCase()] ?? 0) > 0 ? (
-                          <span className="ml-1 rounded-full bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                            {journalCountBySymbol[g.symbol.toUpperCase()]}
-                          </span>
-                        ) : (
-                          <span className="ml-1 text-[10px] font-semibold text-slate-400">0</span>
-                        )}
-                      </button>
                       <button
                         type="button"
                         onClick={() => {
