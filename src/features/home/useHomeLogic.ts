@@ -749,8 +749,9 @@ export function useHomeLogic() {
     }
   }
 
-  const loadJournal = useCallback(async () => {
-    setJournalLoading(true);
+  const loadJournal = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent);
+    if (!silent) setJournalLoading(true);
     setJournalError(null);
     try {
       const from = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -761,9 +762,9 @@ export function useHomeLogic() {
       setJournalEntries(data.entries || []);
     } catch (err) {
       setJournalError((err as Error).message);
-      setJournalEntries([]);
+      if (!silent) setJournalEntries([]);
     } finally {
-      setJournalLoading(false);
+      if (!silent) setJournalLoading(false);
     }
   }, []);
 
@@ -790,7 +791,11 @@ export function useHomeLogic() {
           "Failed to save journal entry"
       );
     }
-    await loadJournal();
+    // Silent refresh — avoid journalLoading flicker / page jump on Home
+    await loadJournal({ silent: true });
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("coin-watch-refresh"));
+    }
   }
 
   async function updateJournalEntry(id: number, input: { title?: string; notes?: string }) {
@@ -807,7 +812,10 @@ export function useHomeLogic() {
           "Failed to update entry"
       );
     }
-    await loadJournal();
+    await loadJournal({ silent: true });
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("coin-watch-refresh"));
+    }
   }
 
   async function deleteJournalEntry(id: number) {
@@ -817,7 +825,7 @@ export function useHomeLogic() {
       body: JSON.stringify({ id }),
     });
     if (!res.ok) throw new Error("Failed to delete journal entry");
-    await loadJournal();
+    await loadJournal({ silent: true });
   }
 
   return {

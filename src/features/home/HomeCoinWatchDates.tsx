@@ -219,13 +219,16 @@ export default function HomeCoinWatchDates({
         </p>
       ) : (
         <>
+        <p className="mb-1.5 text-[10px] font-semibold text-violet-800/80 sm:hidden">
+          Swipe sideways for each date · {upcomingDates.length} day{upcomingDates.length === 1 ? "" : "s"}
+        </p>
         <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-2 -mx-1 px-1 sm:mx-0 sm:grid sm:grid-cols-2 lg:grid-cols-3 sm:overflow-visible sm:snap-none sm:pb-0 sm:px-0">
           {upcomingDates.map(({ date, items }) => {
             const isToday = date === manilaToday;
             return (
               <div
                 key={date}
-                className={`snap-center shrink-0 w-[min(92vw,20rem)] sm:w-auto sm:shrink rounded-lg border px-3 py-2.5 ${
+                className={`snap-center shrink-0 w-[min(100%,calc(100vw-2.25rem))] max-w-full sm:w-auto sm:max-w-none sm:shrink rounded-lg border px-3 py-2.5 ${
                   isToday
                     ? "border-amber-400 bg-amber-50 ring-2 ring-amber-300/80 shadow-md"
                     : "border-violet-100 bg-violet-50/40"
