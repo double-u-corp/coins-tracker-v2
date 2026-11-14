@@ -1,3 +1,6 @@
+import {
+  buildCoinNewsResearchPrompt,
+} from "@/lib/coinNewsResearchPrompt";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import AlertBanner from "@/components/AlertBanner";
@@ -72,114 +75,24 @@ function isLongScanJournalTitle(title: string | null | undefined): boolean {
 }
 
 function buildLongScanRankPrompt(
-  groups: {
-    symbol: string;
-    name: string;
-    rows: {
-      bias: string;
-      score: number;
-      maxScore: number;
-      confidence: number;
-      currentPrice: number;
-      support: number | null;
-      resistance: number | null;
-      isExtended: boolean;
-      tier: string;
-      signalsNote: string | null;
-      scannedAt: string;
-      ladder: LadderLevel[];
-      invalidation: number | null;
-      target: number | null;
-    }[];
-  }[],
-  livePriceBySymbol?: Record<string, number | null>
+  groups: { symbol: string; name: string; hits?: unknown[] }[],
+  _priceBySymbol?: Record<string, number | null | undefined>
 ): string {
-  const lines: string[] = [];
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
-  lines.push(`You are a neutral research assistant for a Philippines **spot LONG-only** PHP trader (local exchanges — buy/sell only; no shorting, leverage, or margin).`);
-  lines.push(`Analysis date (Manila): **${today}**.`);
-  lines.push(``);
-  lines.push(`## Primary goal`);
-  lines.push(`The trader has about **₱10,000** to deploy in **one** spot buy (or a tight staged ladder on a single coin).`);
-  lines.push(`Using **only verified research** for **past ~30 days**, **present/~72h**, and **next ~30 days** of events/catalysts (plus security ~90d), answer:`);
-  lines.push(`**Which coin currently on this LONG-scan list is the best candidate to consider buying with ₱10,000 — or should they hold cash?**`);
-  lines.push(`Ranking is a decision aid for that ₱10k question, not a prediction or guarantee.`);
-  lines.push(``);
-  lines.push(`## Research rules`);
-  lines.push(`- **Mandatory security scan first** (every coin, before ranking): search last ~90 days for **exploit, hack, bridge hack, outage, pause withdrawals, validator failure, chain halt, security incident** + project name / chain name (e.g. BNB + "BNB Chain" / BSC).`);
-  lines.push(`- If a **verified** security incident is material to the coin or its chain, you must **not** treat a roadmap/hardfork alone as bullish. ₱10k verdict leans **HOLD CASH** unless the incident is clearly resolved and priced.`);
-  lines.push(`- Then for each coin: official/project calendar, unlocks/supply, listings/delistings, regulatory/political only if asset-linked. **Rank primarily by this news quality**, not by scan score or support/resistance numbers.`);
-  lines.push(`- Past ~30d, present/~72h, and forward ~30d for non-security catalysts. No dated item after search → **none verified** (never silent skip).`);
-  lines.push(`- **"None verified" is only valid after an explicit search** for that category — not when you skipped the scan.`);
-  lines.push(`- Do **not** invent news. Do **not** use training-memory headlines.`);
-  lines.push(`- Hardfork / upgrade = operational catalyst, **not** proof of price-up. Do not rank a coin top for ₱10k only because an upgrade date is near.`);
-  lines.push(`- Neutral: weak/bearish evidence → **HOLD CASH** over forcing a buy.`);
-  lines.push(`- Spot only: never recommend shorting or leverage.`);
-  lines.push(`- In the per-coin section include a line: **Security (90d):** verified items or "searched, none found".`);
-  lines.push(``);
-  lines.push(`## Ranking basis`);
-  lines.push(`Rank by **verified news quality** only (security + past 30d + present + next 30d). Do not assign board color labels or status flags — those were removed from the app.`);
-  lines.push(``);
-  lines.push(`## Coins on screen now (${groups.length}) — LONG-scan filter result`);
-  if (!groups.length) {
-    lines.push(`(none — empty filter)`);
-  }
-  groups.forEach((g, i) => {
-    const best = g.rows[0];
-    const key = g.symbol.toUpperCase();
-    const live = livePriceBySymbol?.[key];
-    const px =
-      live != null && Number.isFinite(live) ? live : best?.currentPrice;
-    const base = g.symbol.replace(/PHP$/i, "") || g.name;
-    lines.push(``);
-    lines.push(`### ${i + 1}. ${g.name} (${g.symbol})`);
-    lines.push(`- Latest scan bias: **${best?.bias || "?"}** (score ${best?.score ?? "?"}/${best?.maxScore ?? "?"}, conf ${best != null ? Math.round((best.confidence || 0) * 100) : "?"}%)`);
-    lines.push(`- Tier: ${best?.tier || "—"} · Extended: ${best?.isExtended ? "yes" : "no"}`);
-    lines.push(`- Price (scan): ${best?.currentPrice ?? "—"} · Live: ${px ?? "—"}`);
-    // S/R omitted from agent prompt — rank by verified news, not levels
-    if (best?.invalidation != null) lines.push(`- Invalidation: ~${best.invalidation}`);
-    if (best?.target != null) lines.push(`- Target ref: ~${best.target}`);
-    if (best?.ladder?.length) {
-      lines.push(`- Ladder: ${best.ladder.map((l) => `~${l.price} (${l.basis}, ${l.allocationPct}%)`).join("; ")}`);
-    }
-    if (best?.signalsNote) lines.push(`- Signals: ${best.signalsNote}`);
-    lines.push(`- Last hit: ${best?.scannedAt || "—"}`);
-    lines.push(`- News search ticker: **${base}** / **${g.name}** (not non-crypto meanings of the ticker).`);
-    if (px != null && Number(px) > 0) {
-      const coinsApprox = 10000 / Number(px);
-      lines.push(`- ~₱10,000 at live price ≈ **${coinsApprox.toFixed(4)}** ${base}`);
-    }
+  const coins = groups
+    .map((g) => ({
+      symbol: String(g.symbol || "").toUpperCase(),
+      name: g.name || String(g.symbol || "").replace(/PHP$/i, ""),
+    }))
+    .filter((c) => c.symbol);
+  return buildCoinNewsResearchPrompt({
+    coins,
+    mode: "board",
+    promptLabel: "LONG-scan · event research (no rank)",
+    extraContext: [
+      "Board = current LONG-scan list only — gather events; do not rank for ₱10k or pick a winner.",
+    ],
   });
-  lines.push(``);
-  lines.push(`## Answer format`);
-  lines.push(`1. **₱10k verdict:** BUY candidate **SYMBOL** | or **HOLD CASH** (one line + why).`);
-  lines.push(`2. **Ranked table** (best → worst for deploying ₱10k as spot): Rank | Coin | News posture (strong catalyst / thin / adverse) | 1-line why`);
-  lines.push(`3. **Per coin:** **Security (90d)** first; then past 30d / present / next 30d catalysts (or none verified). Include **Watch date** lines for every dated item.`);
-  lines.push(`4. **Flag change summary** — only coins where prior → new differs.`);
-  lines.push(`5. **Required copy-paste markdown** for the next agent check / LONG-scan journal (exact labels):`);
-  lines.push(``);
-  lines.push("```markdown");
-  lines.push(`## LONG-SCAN rank · ${today} (Manila)`);
-  lines.push(`- **Agent:** Spot Trading Desk AI (name model)`);
-  lines.push(`- **Prompt:** LONG-scan · ₱10k rank`);
-  lines.push(`- **₱10k verdict:** BUY SYMBOL | HOLD CASH`);
-  lines.push(`- **Top pick:** SYMBOL or none`);
-  lines.push(`- **Target entry:** ₱… or n/a`);
-  lines.push(`- **Target exit:** ₱… or n/a`);
-  lines.push(`- **Invalidation:** …`);
-  lines.push(`- **Review by:** YYYY-MM-DD`);
-    lines.push(`- **Watch date:** YYYY-MM-DD · event · short detail (repeat once per dated catalyst; omit only if none verified)`);
-  lines.push(`- **Rank (best→worst):** SYMBOL > …`);
-  lines.push(`- **Flag changes:** SYMBOL prior→new; … or none`);
-  lines.push(`- **Security (90d):** searched, none found | or brief verified items`);
-  lines.push(`- **News (verified):** …`);
-  lines.push(`- **Why:** …`);
-  lines.push("```");
-  lines.push(``);
-  lines.push(`End with that fenced block so it can be saved under a journal title starting with **LONG-SCAN** (LONG-scan page only).`);
-  return lines.join("\n");
 }
-
 
 
 function parseCompactSignals(note: string | null): string[] {
@@ -840,7 +753,7 @@ export default function LongScanView({
       setRankPromptCopied(true);
       setTimeout(() => setRankPromptCopied(false), 2000);
     } catch {
-      setError("Could not copy rank prompt");
+      setError("Could not copy news prompt");
     }
   }, [displayedGroups, priceBySymbol]);
 
@@ -870,7 +783,7 @@ export default function LongScanView({
             className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-900 hover:bg-indigo-100 disabled:opacity-50"
             title="Copy agent prompt for coins currently on screen (after filters)"
           >
-            {rankPromptCopied ? "✅ Copied" : "📋 Rank coins (agent)"}
+            {rankPromptCopied ? "✅ Copied" : "📋 News / events (agent)"}
           </button>
           <button
             type="button"
@@ -1177,7 +1090,7 @@ export default function LongScanView({
                       {" · "}
                     </>
                   ) : null}
-                  LONG-scan notes only (title starts with LONG-SCAN). Paste agent rank markdown below to save for the next check.
+                  LONG-scan notes only (title starts with LONG-SCAN). Paste agent event research markdown below.
                 </p>
               </div>
               <button
@@ -1192,13 +1105,13 @@ export default function LongScanView({
             <div className="overflow-y-auto px-4 py-3 space-y-3">
               <div className="rounded-lg border border-indigo-100 bg-indigo-50/50 p-3 space-y-2">
                 <div className="text-[11px] font-bold text-indigo-900">
-                  Save rank note for next agent check
+                  Save research note for next check
                 </div>
                 <textarea
                   value={journalDraft}
                   onChange={(e) => setJournalDraft(e.target.value)}
                   rows={5}
-                  placeholder="Paste the agent ## LONG-SCAN rank markdown block here…"
+                  placeholder="Paste the agent Coin research / Watch date markdown here…"
                   className="w-full rounded-md border border-indigo-200 bg-white px-2 py-1.5 text-xs font-mono text-slate-800"
                 />
                 <button

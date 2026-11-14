@@ -1,4 +1,8 @@
 import { useMemo, useState } from "react";
+import {
+  buildCoinNewsResearchPrompt,
+  buildCoinNewsResearchPromptCompact,
+} from "@/lib/coinNewsResearchPrompt";
 import type { ChartPoint } from "@/validators/recordSchema";
 import { formatPhp } from "@/lib/format";
 import { computeConfluenceSignal, detectCrossoverEvent,
@@ -140,336 +144,26 @@ export function formatEntryReviewPrompt(
   structureLevels?: StructureKeyLevel[] | null,
   chartPoints?: { period?: string; high?: number; low?: number; close?: number }[] | null
 ): string {
+  void crossoverAlert;
+  void structureLevels;
+  void chartPoints;
   const c = confluence;
   const { base, pair, label } = formatAssetLabel(symbol);
   const holdings = activePortfolio?.holdings ?? 0;
-  const spent = activePortfolio?.spent ?? 0;
   const isAllocated = holdings > 0;
-  const avgCost = isAllocated && holdings > 0 ? spent / holdings : null;
-  const unrealized =
-    isAllocated && avgCost != null && c.currentPrice != null
-      ? (c.currentPrice - avgCost) * holdings
-      : null;
-  const unrealizedPct =
-    isAllocated && avgCost != null && avgCost > 0 && c.currentPrice != null
-      ? ((c.currentPrice - avgCost) / avgCost) * 100
-      : null;
-  const daysHeld = activePortfolio?.daysHeld ?? null;
-  const firstBuyAt = activePortfolio?.firstBuyAt ?? null;
-
-  const lines: string[] = [];
-
-  if (isAllocated) {
-    lines.push(`You are researching **${label}** for a trader who **already holds** a spot position (PHP pair **${pair}**, ticker **${base}**).`);
-    lines.push(`When searching news, use **${base}** / the project name — not “${pair}” and not non-crypto meanings of “${base}”.`);
-    lines.push(`**Focus: verified current events + next ~30 days only.** Do **not** dig a long past history. The trader will decide later whether to add or sell — your job is **event/catalyst research**, not size advice.`);
-  } else {
-    lines.push(`You are researching **${label}** for a trader who does **not** hold this coin yet (PHP pair **${pair}**, ticker **${base}**).`);
-    lines.push(`When searching news, use **${base}** / the project name — not “${pair}” and not non-crypto meanings of “${base}”.`);
-    lines.push(`**Focus: verified past ~30 days + present/~72h + next ~30 days.** The trader will decide later whether to stage buys — your job is **event/catalyst research**, not a forced buy call.`);
+  const extra: string[] = [];
+  if (c.currentPrice != null && Number.isFinite(c.currentPrice)) {
+    extra.push(`Price now: ${c.currentPrice} (${pair})`);
   }
-
-  lines.push(``);
-  lines.push(`## How this technical data is built (important)`);
-  lines.push(`- Price is polled about **8 times per day** (~every 3 hours, Manila schedule).`);
-  lines.push(`- **Daily bar** = that day's high and low (and effective close) from those checks. Used for RSI, SMA 20/50/200, ATR, 30-day support/resistance, and the main confluence score.`);
-  lines.push(`- **Swing / entry ladder** uses the finer **3-hour (8-check) series** over roughly the last 14 days — fractal swing highs/lows, structure, and ladder levels.`);
-  lines.push(`- Bias: LONG = constructive for buyers; SHORT = risk-off / prefer cash (never a short recommendation).`);
-  lines.push(`- Do not assume exchange OHLC 1h/4h candles — this is our poll → daily aggregate + 3h swing series.`);
-  lines.push(``);
-
-  if (isAllocated) {
-    lines.push(`## Position (already allocated)`);
-    lines.push(`- Holdings: ${holdings}`);
-    lines.push(`- Net spent (cost basis proxy): ${spent}`);
-    if (avgCost != null) {
-      lines.push(`- **Break-even / avg cost: ~${avgCost}**`);
-      lines.push(`  - Mark above break-even → selling locks a gain; below → selling realizes a loss.`);
-      lines.push(`  - Prefer trims into strength above break-even; avoid panic sells on noise if thesis still valid.`);
-    }
-    lines.push(`- Mark price (snapshot): ${c.currentPrice}`);
-    if (unrealized != null && unrealizedPct != null) {
-      lines.push(
-        `- Unrealized (approx): ${unrealized >= 0 ? "+" : ""}${unrealized.toFixed(2)} PHP (${unrealizedPct >= 0 ? "+" : ""}${unrealizedPct.toFixed(1)}%)`
-      );
-    }
-    if (daysHeld != null) {
-      lines.push(
-        `- **Days held (since first buy): ${daysHeld}d**${firstBuyAt ? ` (first buy ~${String(firstBuyAt).slice(0, 10)})` : ""}`
-      );
-      lines.push(`  - Long hold underwater with no catalyst → patience or thesis review, not revenge adds.`);
-      lines.push(`  - Short hold + extended into resistance → trims more reasonable than waiting forever.`);
-    }
-    lines.push(`- Research only: surface catalysts; the trader decides add vs sell later. Do not push ADD / average-down.`);
-    lines.push(``);
-  }
-
-  lines.push(`## Rules`);
-  lines.push(`- **Stance: NEUTRAL.** Never force a bullish/long bias. If evidence is bearish or unclear, prefer DO NOT ADD / WAIT / SKIP and preserve cash.`);
-  lines.push(`- **Spot only** — buy or sell coins; never recommend shorting or leverage.`);
-  lines.push(`- **Technicals first**; verified catalysts can **change risk assessment** but do not override a broken structure by themselves.`);
-  lines.push(`- **Do not average down** only because the bag is underwater.`);
-  lines.push(`- **TRIM** only when existing position risk/thesis warrants it — not as a soft default.`);
-  lines.push(`- Data is **poll-based** (~8x/day Manila): daily H/L aggregates for RSI/SMA/ATR/range; 3h series for swings/ladder. Do **not** treat these as exchange OHLC candles.`);
-  lines.push(`- **Incomplete / thin data:** if confidence is low, macro is ACCUMULATING DATA, or too few bars, name which signals are unreliable. Do not invent certainty. If missing data could flip the call → default **WAIT / DO NOT ADD**.`);
-  lines.push(`- **Correlated indicators:** do **not** count a liquidity sweep, RSI divergence hint, near-support, and bullish swing as independent confirmations of the same bounce. A sweep or divergence alone is **not** enough to ADD. Require price stabilization and/or a defined entry + **clear invalidation**. Weight **structure + risk/reward** over the count of green flags.`);
-  lines.push(`- Live search only for news; no training-memory headlines; never invent events. Empty category → **"none verified"**.`);
-  lines.push(`- Politically themed tickers (e.g. TRUMP): separate **token/project** news from **person/politics** news with no demonstrated link to the asset.`);
-  lines.push(`- Unlock does not equal automatic sell pressure — note amount/schedule and whether sales are confirmed.`);
-  lines.push(`- Analysis date = **today Manila** unless the user supplies a historical snapshot date (then label it explicitly and shift research windows).`);
-  if (isAllocated) {
-    lines.push(`- Holding context is background only — prioritize **dated events** over ladder % advice.`);
-    lines.push(`- If ADD: state max additional PHP budget, each tranche PHP size + entry condition, stop-adding / invalidation, approx **new average cost** if filled, extra PHP at risk. Lower avg cost does not mean a safer trade.`);
-    lines.push(`- If catalysts + technicals do not justify an add → **PHP 0** additional spending.`);
-  } else {
-    lines.push(`- Not holding yet — include **past ~30d** catalysts that explain the path into today, plus forward dates.`);
-    lines.push(`- Extended above ladder → WAIT FOR PULLBACK, not chase.`);
-  }
-  lines.push(``);
-
-  lines.push(``);
-  const pump = findLastPumpContext(chartPoints || []);
-  if (pump) {
-    const pumpDate = pump.period
-      ? new Date(pump.period).toLocaleDateString("en-CA", {
-          timeZone: "Asia/Manila",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        })
-      : "unknown";
-    lines.push(`## Last local high / pump (from our daily series)`);
-    lines.push(
-      `- Peak ~**${pump.peak}** on **${pumpDate}** Manila (~${pump.daysAgo}d ago).`
-    );
-    lines.push(
-      `- Now vs that peak: **${pump.dropPct >= 0 ? "−" : "+"}${Math.abs(pump.dropPct).toFixed(2)}%** (our poll data, not exchange OHLC).`
-    );
-    lines.push(
-      `- Research task: search **verified** news around **${pumpDate}** and the days after that could explain a run-up and the subsequent move down (unlock, listing, exploit, regulatory, project news). Do not invent causes.`
-    );
-    lines.push(``);
-  }
-
-  lines.push(`## Technical snapshot`);
-  lines.push(`- Bias: **${c.bias}** (score ${c.score >= 0 ? "+" : ""}${c.score}/±${c.maxPossibleScore}, ${(c.confidence * 100).toFixed(0)}% data)`);
-  lines.push(`- Macro: ${c.macroTrend}${c.isCounterTrend ? " — short-term bias conflicts with macro" : ""}`);
-  lines.push(`- Price now: ${c.currentPrice}`);
-  // Support/resistance omitted — research focus is coin news, not S/R targets
-  if (structureLevels && structureLevels.length > 0) {
-    lines.push(`- Structure levels (optional context only — do not treat as entry advice):`);
-    for (const lvl of structureLevels) {
-      lines.push(`  - ${lvl.shortLabel || lvl.label}: ${lvl.price} (${lvl.label})`);
-    }
-  }
-  lines.push(
-    `- Swing series: ${c.usedIntradaySwings ? "3h / 8-check intraday" : "daily bars (intraday unavailable)"}`
-  );
-  if (c.invalidationLevel != null) {
-    lines.push(`- Invalidation reference: ~${c.invalidationLevel}`);
-  }
-  if (c.liquiditySweep) {
-    lines.push(
-      `- Liquidity sweep: ${c.liquiditySweep.type} at ${c.liquiditySweep.sweptLevel} (extreme ${c.liquiditySweep.extremePrice}, ${c.liquiditySweep.daysAgo}d ago)`
-    );
-  }
-  if (c.divergence) lines.push(`- RSI divergence hint: ${c.divergence} (supporting only)`);
-  if (crossoverAlert) lines.push(`- Event flag: ${crossoverAlert}`);
-  lines.push(`- Confluence signals:`);
-  for (const s of c.signals) {
-    if (!s.available) continue;
-    lines.push(
-      `  - ${s.name}: ${s.detail}${s.weight !== 0 ? ` (${s.weight > 0 ? "+" : ""}${s.weight})` : ""}`
-    );
-  }
-  if (c.entrySuggestion?.ladder?.length) {
-    lines.push(
-      isAllocated
-        ? `- Reference buy ladder (only relevant if averaging on weakness — optional):`
-        : `- Proposed buy ladder (limit buys on weakness — not market-buy-now):`
-    );
-    for (const lvl of c.entrySuggestion.ladder) {
-      lines.push(`  - ~${lvl.price} (${lvl.basis}) — ~${lvl.allocationPct}%`);
-    }
-  }
-  if (c.exitSuggestion?.price != null) {
-    lines.push(
-      isAllocated
-        ? `- Take-profit / trim reference: ~${c.exitSuggestion.price}`
-        : `- Take-profit reference (if you were holding): ~${c.exitSuggestion.price}`
-    );
-  }
-  if (c.invalidationNote) lines.push(`- Invalidation detail: ${c.invalidationNote}`);
-  lines.push(``);
-
-  // Concrete calendar anchor for the agent's timeframe answer (Manila)
-  const todayManila = new Date().toLocaleDateString("en-CA", {
-    timeZone: "Asia/Manila",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
+  if (crossoverAlert) extra.push(`App note: ${crossoverAlert}`);
+  return buildCoinNewsResearchPrompt({
+    coins: [{ symbol: pair, name: base || label }],
+    mode: isAllocated ? "holding" : "not_holding",
+    promptLabel: isAllocated ? "Spot · Agent (holding · news)" : "Spot · Agent (not held · news)",
+    extraContext: extra,
   });
-
-  lines.push(`## Mandatory research (complete BEFORE any verdict — no silent skips)`);
-  lines.push(`Live search only. Training memory is not evidence. Do not invent events.`);
-  lines.push(`Silence is not "none verified." Each category: verified item OR **searched, none found**. Distinguish from not-searched.`);
-  lines.push(`**A) Security/exploit (~90d):** search project, ticker, exploit, hack, bridge, security incident. Report verified hits factually.`);
-  lines.push(`**B) Audit lines:** exploit | unlocks/supply | listing/delisting | partnership/launch | regulatory if asset-linked.`);
-  if (isAllocated) {
-    lines.push(`**C) Windows (already holding):** **present/~72h** + **next ~30d** dated catalysts only. Do **not** prioritize deep past-30d history. None dated → searched, none found.`);
-  } else {
-    lines.push(`**C) Windows (not holding):** past ~30d · **present/~72h** · next ~30d dated catalysts; optional context around last local high if supplied. None dated → searched, none found.`);
-  }
-  lines.push(`**D) Output:** news audit + ≤6 catalyst rows (date·URL·official vs reported·in-price?·uncertainty·spot implication). Then verdict.`);
-  lines.push(`**E) Watch dates:** for every dated catalyst emit \`- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration|listing|hardfork · short detail\` (scraped into Home Coin watch dates).`);
-  lines.push(`Correlated indicators are not independent confirms. Structure + invalidation > green-flag count.`);
-  lines.push(``);
-  if (isAllocated) {
-    const priceNow = c.currentPrice;
-    if (
-      spent > 0 &&
-      holdings > 0 &&
-      priceNow != null &&
-      Number.isFinite(priceNow) &&
-      priceNow > 0
-    ) {
-      const upnl =
-        unrealizedPct != null
-          ? unrealizedPct
-          : avgCost != null && avgCost > 0
-            ? ((priceNow - avgCost) / avgCost) * 100
-            : null;
-      const daysH =
-        daysHeld != null
-          ? daysHeld
-          : firstBuyAt
-            ? Math.max(
-                0,
-                Math.floor((Date.now() - new Date(firstBuyAt).getTime()) / 86400000)
-              )
-            : null;
-      if (upnl != null) {
-        lines.push(`## Thesis health`);
-        lines.push(
-          `- Unrealized ~${upnl.toFixed(1)}%` +
-            (daysH != null ? ` · held ~${daysH} day(s)` : "") +
-            `.`
-        );
-        lines.push(
-          `- If underwater worse than **-40%** AND held **> 60 days**: ADD needs ≥1 verified positive catalyst with token utility — bounce alone is not enough. Else DO NOT ADD / TRIM if thesis broken.`
-        );
-        lines.push(``);
-      }
-    }
-    lines.push(`## Answer format (already holding — add / size decision)`);
-    lines.push(`1. **News audit** — exploit / unlock / listing / partnership / regulatory (found or searched-none-found)`);
-    lines.push(`2. **Catalyst table** ≤6 rows with links`);
-    lines.push(`3. Verdict: **ADD** | **ADD ONLY ON PULLBACK** | **DO NOT ADD** | **TRIM** — after audit; incomplete data → DO NOT ADD`);
-    lines.push(`4. Why (max 3 bullets) — no signal stacking; mention exploit/unlock if relevant`);
-    lines.push(`5. If ADD / ADD ONLY ON PULLBACK: max **additional PHP budget**; each tranche PHP (30/30/40 of budget) + entry; invalidation; new avg cost if filled. If not justified → **PHP 0**.`);
-    lines.push(`6. If DO NOT ADD: leave bag as-is unless thesis broken (then TRIM)`);
-    lines.push(`7. **Timeframe:** valid until / review by YYYY-MM-DD (Manila; analysis date **${todayManila}**)`);
-    lines.push(`8. Final **journal note** markdown (required)`);
-  } else {
-    lines.push(`## Answer format (no position)`);
-    lines.push(`1. **News audit** — exploit / unlock / listing / partnership / regulatory (found or searched-none-found)`);
-    lines.push(`2. **Catalyst table** ≤6 rows with links`);
-    lines.push(`3. Verdict: **READY TO STAGE** | **WAIT FOR PULLBACK** | **SKIP** — after audit; thin data → WAIT/SKIP`);
-    lines.push(`4. Why (max 3 bullets) — no signal stacking`);
-    lines.push(`5. If READY or WAIT: which ladder level(s) and invalidation`);
-    lines.push(`6. Spot risk note (LONG only — no short / no leverage)`);
-    lines.push(`7. **Timeframe:** valid until / review by YYYY-MM-DD (Manila; analysis date **${todayManila}**)`);
-    lines.push(`8. Final **journal note** markdown (required)`);
-  }
-
-  lines.push(``);
-  lines.push(`## Final journal note (REQUIRED — pure markdown, copy-paste ready)`);
-  lines.push(
-    `End with ONLY the fenced markdown block below. Home Target monitor **parses these exact labels** — do not rename, translate, or merge them into one sentence.`
-  );
-  lines.push(`**STRICT field rules (machine-readable):**`);
-  lines.push(
-    `1. **Agent:** one line, start with \`Spot Trading Desk AI\` then product/model in parentheses. Example: \`Spot Trading Desk AI (Grok)\`. Never put the note title here.`
-  );
-  lines.push(
-    `2. **Target entry** / **Target re-entry:** REQUIRED. Full PHP from research + levels. If allocated / adding, use **Target re-entry**. Example: ₱16332.9 — no commas, no truncation. n/a only if SKIP with no buy level.`
-  );
-  lines.push(
-    `3. **Target exit:** REQUIRED. One full PHP price from research + levels (resistance / trim / TP). Optional ₱. Example: ₱20036.1. **No thousands commas.** Use n/a only if no exit level applies.`
-  );
-  lines.push(
-    `4. **Review by:** exactly \`YYYY-MM-DD\` (Manila calendar date). Example: \`2026-11-04\`. No extra words on that line.`
-  );
-  lines.push(
-    `5. **Watch date:** one bullet per dated catalyst. Shape: \`- **Watch date:** YYYY-MM-DD · event · short detail\`. Labels: unlock | delisting | event | integration | listing | hardfork. Example: \`- **Watch date:** 2026-11-19 · event · SKY governance executive vote\`. Repeat per date. Omit only if none verified. Scraped into Home **Coin watch dates**.`
-  );
-  lines.push(
-    `Keep each of those four as its own bullet: \`- **Label:** value\`. Do not bold the value. Do not use tables for these four.`
-  );
-  lines.push(``);
-  lines.push('```markdown');
-
-  if (isAllocated) {
-    lines.push(`## ${pair} · add / size note · ${todayManila} (Manila)`);
-    lines.push(``);
-    lines.push(`- **Agent:** Spot Trading Desk AI (ChatGPT / Grok / Gemini — name model)`);
-    lines.push(`- **Prompt:** Spot Insights · Copy add/size review (full confluence)`);
-    lines.push(`- **Verdict:** ADD | ADD ONLY ON PULLBACK | DO NOT ADD | TRIM`);
-    lines.push(`- **Analysis date (Manila):** ${todayManila}`);
-    lines.push(`- **Price now:** …`);
-    lines.push(`- **Avg cost / unrealized:** …`);
-    lines.push(
-      `- **Target re-entry:** ₱${c.support != null && Number.isFinite(c.support) ? Number(c.support).toFixed(2) : "…"}`
-    );
-    lines.push(
-      `- **Target exit:** ₱${c.resistance != null && Number.isFinite(c.resistance) ? Number(c.resistance).toFixed(2) : "…"}`
-    );
-    lines.push(`- **Additional budget (PHP):** … (0 if DO NOT ADD)`);
-    lines.push(`- **Tranches:** … (PHP + level; 30/30/40 of additional budget)`);
-    lines.push(`- **New avg cost if filled:** …`);
-    lines.push(`- **Last pump / local high (if relevant):** date · peak · why it may have faded`);
-    lines.push(`- **Invalidation (add thesis broken if):** …`);
-    lines.push(`- **Review by:** YYYY-MM-DD`);
-    lines.push(`- **Watch date:** YYYY-MM-DD · event · short detail (repeat once per dated catalyst; omit only if none verified)`);
-    lines.push(`- **News audit:** exploit / unlock / listing / partnership / regulatory`);
-    lines.push(`- **News (verified only):** …`);
-    lines.push(`- **Why (1–3 short lines):**`);
-    lines.push(`  - …`);
-  } else {
-    lines.push(`## ${pair} · entry note · ${todayManila} (Manila)`);
-    lines.push(``);
-    lines.push(`- **Agent:** Spot Trading Desk AI (ChatGPT / Grok / Gemini — name model)`);
-    lines.push(`- **Prompt:** Spot Insights · Copy entry review (full confluence)`);
-    lines.push(`- **Verdict:** READY TO STAGE | WAIT FOR PULLBACK | SKIP`);
-    lines.push(`- **Analysis date (Manila):** ${todayManila}`);
-    lines.push(`- **Price now:** …`);
-    lines.push(
-      `- **Target entry:** ₱${c.support != null && Number.isFinite(c.support) ? Number(c.support).toFixed(2) : "…"}`
-    );
-    lines.push(
-      `- **Target exit:** ₱${c.resistance != null && Number.isFinite(c.resistance) ? Number(c.resistance).toFixed(2) : "…"}`
-    );
-    lines.push(`- **Ladder levels:**`);
-    lines.push(`  - … (pct)`);
-    lines.push(`- **Invalidation:** …`);
-    lines.push(`- **Review by:** YYYY-MM-DD`);
-    lines.push(`- **Watch date:** YYYY-MM-DD · event · short detail (repeat once per dated catalyst; omit only if none verified)`);
-    lines.push(`- **News audit:** exploit / unlock / listing / partnership / regulatory`);
-    lines.push(`- **News (verified only):** …`);
-    lines.push(`- **Why (1–3 short lines):**`);
-    lines.push(`  - …`);
-  }
-  lines.push('```');
-  lines.push(``);
-  lines.push(`The fenced markdown block above is what the trader saves as a note for later re-checks.`);
-
-  return lines.join("\n");
 }
 
-
-
-
-/** Compact review text for Google ?q= (stays under URL limits). Full detail stays on Copy. */
 export function formatEntryReviewPromptForGoogle(
   symbol: string,
   confluence: ReturnType<typeof computeConfluenceSignal>,
@@ -483,120 +177,20 @@ export function formatEntryReviewPromptForGoogle(
   structureLevels?: StructureKeyLevel[] | null,
   chartPoints?: { period?: string; high?: number; low?: number; close?: number }[] | null
 ): string {
-  const c = confluence;
+  void crossoverAlert;
+  void structureLevels;
+  void chartPoints;
+  void confluence;
   const { base, pair, label } = formatAssetLabel(symbol);
   const holdings = activePortfolio?.holdings ?? 0;
-  const spent = activePortfolio?.spent ?? 0;
   const isAllocated = holdings > 0;
-  const avgCost = isAllocated && holdings > 0 ? spent / holdings : null;
-
-  const parts: string[] = [];
-
-  if (isAllocated) {
-    parts.push(
-      `Spot research (already holding) ${label}. Pair ${pair}; search as ${base} crypto. NEUTRAL. Research CURRENT events + NEXT ~30 days only (no deep past). No size/add advice — trader decides add vs sell later. CRITICAL: emit Watch date lines for every dated catalyst.`
-    );
-    if (avgCost != null) {
-      parts.push(`Avg cost ~${avgCost.toFixed(4)}; price ${c.currentPrice}; holdings ${holdings}.`);
-    }
-  } else {
-    parts.push(
-      `Spot research (not holding) ${label}. Pair ${pair}; search as ${base} crypto. NEUTRAL. Research PAST ~30d + present/~72h + NEXT ~30d. No forced buy. CRITICAL: emit Watch date lines for every dated catalyst (Coin watch dates).`
-    );
-  }
-
-  parts.push(
-    `Data: ~8 polls/day daily H/L for RSI/SMA/ATR/range; 3h swings/ladder (not exchange OHLC). LONG=buy bias SHORT=cash never short. Catalysts before verdict; no correlated-signal stacking; thin data=wait; ladder%=extra PHP budget not bag size.`
-  );
-
-  parts.push(
-    `Snapshot: bias ${c.bias} (score ${c.score >= 0 ? "+" : ""}${c.score}/±${c.maxPossibleScore}, ${(c.confidence * 100).toFixed(0)}% conf). Macro ${c.macroTrend}. Price ${c.currentPrice}; support ${c.support}; resistance ${c.resistance}.`
-  );
-
-  const pumpG = findLastPumpContext(chartPoints || []);
-  if (pumpG) {
-    const pd = pumpG.period
-      ? new Date(pumpG.period).toLocaleDateString("en-CA", { timeZone: "Asia/Manila" })
-      : "?";
-    parts.push(
-      `Last local high ~${pumpG.peak} on ${pd} (~${pumpG.daysAgo}d ago, ${pumpG.dropPct}% below peak). Search verified news around that date for why price may be down.`
-    );
-  }
-
-  if (c.invalidationLevel != null) {
-    parts.push(`Invalidation ~${Number(c.invalidationLevel).toFixed(2)}.`);
-  }
-
-  const sigBits = c.signals
-    .filter((s) => s.available && s.weight !== 0)
-    .slice(0, 6)
-    .map((s) => `${s.name}:${s.weight > 0 ? "+" : ""}${s.weight}`)
-    .join("; ");
-  if (sigBits) parts.push(`Signals: ${sigBits}.`);
-
-  if (crossoverAlert) parts.push(`Event: ${crossoverAlert}`);
-
-  if (c.entrySuggestion?.ladder?.length) {
-    const ladder = c.entrySuggestion.ladder
-      .map((l) => `~${l.price}(${l.allocationPct}%)`)
-      .join(", ");
-    parts.push(`Ladder limits: ${ladder}.`);
-  }
-  if (structureLevels && structureLevels.length > 0) {
-    const bits = structureLevels
-      .slice(0, 6)
-      .map((l) => `${l.shortLabel || l.label}:${l.price}`)
-      .join(" ");
-    parts.push(`Key levels: ${bits}.`);
-  }
-  if (c.exitSuggestion?.price != null) {
-    parts.push(`TP ref ~${c.exitSuggestion.price}.`);
-  }
-
-  const todayManila = new Date().toLocaleDateString("en-CA", {
-    timeZone: "Asia/Manila",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
+  return buildCoinNewsResearchPromptCompact({
+    coins: [{ symbol: pair, name: base || label }],
+    mode: isAllocated ? "holding" : "not_holding",
+    promptLabel: isAllocated ? "Spot · Google (holding)" : "Spot · Google (not held)",
   });
-
-  parts.push(
-    `Mandatory research BEFORE verdict: (A) past ~30d news for ${base}; (B) present/~72h; (C) next ~30d dated catalysts or none verified; (D) security/exploit ~90d or searched none found. Emit Watch date lines for dated items. Do not invent news. No training-memory headlines. Goal is coin information — not S/R advice.`
-  );
-
-  if (isAllocated) {
-    parts.push(
-      `Answer: 1) brief catalyst summary (current + next 30d only)  2) optional light note on risk (no size advice)  3) review by YYYY-MM-DD (Manila; today ${todayManila})  4) **Watch date lines for every dated item**  5) End with copy-paste markdown journal ONLY with exact labels:`
-    );
-  } else {
-    parts.push(
-      `Answer: 1) brief catalyst summary (past 30d + present + next 30d)  2) review by YYYY-MM-DD (Manila; today ${todayManila})  3) **Watch date lines for every dated item**  4) End with copy-paste markdown journal ONLY with exact labels:`
-    );
-  }
-
-  parts.push(
-    [
-      "```markdown",
-      `## ${symbol} · google review · ${todayManila} (Manila)`,
-      "- **Agent:** Spot Trading Desk AI (name model)",
-      "- **Prompt:** Spot · Google review",
-      "- **Verdict:** …",
-      "- **Price now:** …",
-      "- **Target entry:** ₱… or n/a",
-      "- **Target exit:** ₱… or n/a",
-      "- **Invalidation:** …",
-      "- **Review by:** YYYY-MM-DD",
-      "- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration|listing|hardfork · short detail (REQUIRED per dated catalyst; repeat lines; omit only if none verified)",
-      "- **Past 30d:** … (skip or n/a if already holding — forward-only research)",
-      "- **Next 30d:** …",
-      "- **Security 90d:** …",
-      "- **Why:** …",
-      "```",
-    ].join("\n")
-  );
-
-  return parts.join(" ");
 }
+
 
 export default function TradingInsightCard({
   points,

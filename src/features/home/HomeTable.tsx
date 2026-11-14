@@ -12,6 +12,7 @@ import HomeCoinWatchDates from "./HomeCoinWatchDates";
 import { useState, useEffect, useMemo, type ReactNode } from "react";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
+import { buildCoinNewsResearchPrompt } from "@/lib/coinNewsResearchPrompt";
 import { buildCoinAnalytics, type CoinAnalytics } from "@/features/trade/useTradeLogic";
 
 const ManageCoinsView = dynamic(() => import("@/features/manage/ManageCoinsView"), {
@@ -40,51 +41,11 @@ type LadderLevel = { label: string; price: number; pct: number };
 function buildOnHoldNewsPrompt(
   coins: { symbol: string; name: string }[]
 ): string {
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
-  const lines: string[] = [];
-  lines.push(`You are a neutral crypto research assistant (Philippines PHP spot context).`);
-  lines.push(`Analysis date (Manila): **${today}**.`);
-  lines.push(``);
-  lines.push(`## Task`);
-  lines.push(`Research **current / ongoing** catalysts and **next ~30 calendar days only** for the coins below.`);
-  lines.push(`These are already on the trader's board — do **not** ask whether to buy more, add, average down, or size in.`);
-  lines.push(`Do **not** invent position size, cost basis, P&L, or holdings. Treat this as **activity / event research only**.`);
-  lines.push(``);
-  lines.push(`## Coins (ticker only — research the project, not PHP pair spelling in news search)`);
-  for (const c of coins) {
-    const base = c.name || c.symbol.replace(/PHP$/i, "");
-    lines.push(`- **${base}** (local pair ${c.symbol})`);
-  }
-  lines.push(``);
-  lines.push(`## Research windows`);
-  lines.push(`1. **Present / last ~72h** — verified news, listings, exploits, outages, official posts.`);
-  lines.push(`2. **Next ~30 days** — dated unlocks, upgrades, governance votes, listings/delistings, conferences (confirmed dates only).`);
-  lines.push(`3. **Do not** dig historical pumps or past-30d narratives unless needed to name a **forward** dated item.`);
-  lines.push(`4. **Security (last ~90d)** only if a verified exploit/hack/outage still matters for the next 30d.`);
-  lines.push(``);
-  lines.push(`## Rules`);
-  lines.push(`- Neutral. No buy / add / sell verdict.`);
-  lines.push(`- Verified sources only; no training-memory headlines; no invented dates.`);
-  lines.push(`- Per category with nothing found after search → **none verified**.`);
-  lines.push(`- Prefer project name / base ticker in searches (e.g. XLM not XLMPHP).`);
-  lines.push(``);
-  lines.push(`## Output`);
-  lines.push(`1. Short table or bullets: Coin | Now / 72h | Next 30d | Security note`);
-  lines.push(`2. **Watch date lines** (required format for our Coin watch dates scraper) — one line per dated catalyst:`);
-  lines.push(`   \`- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration|listing|hardfork · short detail\``);
-  lines.push(`   Example: \`- **Watch date:** 2026-11-19 · event · SKY governance executive vote\``);
-  lines.push(`3. If no dated items for a coin, omit Watch date lines for that coin (do not invent).`);
-  lines.push(`4. End with a fenced markdown block the trader can paste to journal:`);
-  lines.push(``);
-  lines.push("```markdown");
-  lines.push(`## On-hold research · ${today} (Manila)`);
-  lines.push(`- **Agent:** Spot Trading Desk AI (name model)`);
-  lines.push(`- **Prompt:** Home · On hold · news/events (forward only)`);
-  lines.push(`- **Coins covered:** …`);
-  lines.push(`- **Watch date:** YYYY-MM-DD · event · short detail`);
-  lines.push(`- **Notes:** …`);
-  lines.push("```");
-  return lines.join("\n");
+  return buildCoinNewsResearchPrompt({
+    coins,
+    mode: "holding",
+    promptLabel: "Home · On hold · news/events (forward only)",
+  });
 }
 
 
