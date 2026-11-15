@@ -6,6 +6,7 @@ import {
   hydrateHoldMaeFromDb,
 } from "@/lib/holdMae";
 import { formatPhp } from "@/lib/format";
+import { buildCoinNewsResearchPrompt } from "@/lib/coinNewsResearchPrompt";
 import { findLastPumpContext } from "./TradingInsightCard";
 import { computeConfluenceSignal, detectCrossoverEvent } from "./Technicals";
 import {
@@ -67,6 +68,25 @@ function buildAgentPrompt(args: {
   const base = args.symbol.replace(/PHP$/i, "") || args.symbol;
   const price = args.currentPrice;
   const cheapCoin = Number.isFinite(price) && price > 0 && price < 10_000;
+
+  // Already holding → same On-hold / Spot research prompt (present + next 30d only, no past dig)
+  if (args.holding) {
+    const extra: string[] = [];
+    if (Number.isFinite(price) && price > 0) extra.push(`Price now: ${price} (${args.symbol})`);
+    if (args.holdings > 0) extra.push(`Holdings (context only): ${args.holdings}`);
+    if (args.avg != null && Number.isFinite(args.avg)) extra.push(`Avg cost (context only): ${args.avg}`);
+    if (args.pnlPct != null && Number.isFinite(args.pnlPct)) {
+      extra.push(`Unrealized vs avg (context only): ${args.pnlPct >= 0 ? "+" : ""}${args.pnlPct.toFixed(2)}%`);
+    }
+    if (args.daysHeld != null) extra.push(`Days held (context only): ${args.daysHeld}`);
+    return buildCoinNewsResearchPrompt({
+      coins: [{ symbol: args.symbol, name: base }],
+      mode: "holding",
+      promptLabel: "Spot · Agent (holding · news — no past dig)",
+      extraContext: extra,
+    });
+  }
+
   const lines: string[] = [];
   lines.push(
     `You are a neutral crypto research assistant for a PHP **spot** trader (local exchanges — buy/sell coins only; no leverage products assumed).`
@@ -515,7 +535,7 @@ export default function PositionAndTradesCard({
             onClick={() => void copyPrompt()}
             className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-900 hover:bg-indigo-100"
           >
-            {copied ? "✅ Copied" : holding ? "📋 Agent: add more?" : rebuy ? "📋 Agent: rebuy?" : "📋 Agent: buy advice?"}
+            {copied ? "✅ Copied" : holding ? "📋 Agent: news (held)" : rebuy ? "📋 Agent: rebuy?" : "📋 Agent: buy advice?"}
           </button>
           <button
             type="button"
@@ -568,21 +588,15 @@ export default function PositionAndTradesCard({
                   null,
                   pts
                 );
-                const mini = formatEntryReviewPromptForGoogle(
-                  symbol,
-                  confluence,
-                  cross,
-                  portfolio,
-                  null,
-                  pts
-                );
                 try {
                   await navigator.clipboard.writeText(full);
                 } catch {
                   /* ignore */
                 }
+                const base = symbol.replace(/PHP$/i, "") || symbol;
+                const hint = `Paste clipboard: neutral crypto research for ${base} — Watch date lines YYYY-MM-DD · label · BASE detail (Philippines PHP spot)`;
                 window.open(
-                  `https://www.google.com/search?q=${encodeURIComponent(mini)}`,
+                  `https://www.google.com/search?q=${encodeURIComponent(hint)}`,
                   "_blank",
                   "noopener,noreferrer"
                 );
@@ -595,7 +609,7 @@ export default function PositionAndTradesCard({
                 }
               }
             }}
-            title="Copies full Spot review to clipboard; opens Google with compact prompt (±30d catalysts + journal markdown)"
+            title="Copies full research markdown to clipboard; opens Google — paste with Ctrl/Cmd+V (URL is only a short hint)"
             className="rounded-md border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-bold text-sky-900 hover:bg-sky-100"
           >
             🔍 Google review

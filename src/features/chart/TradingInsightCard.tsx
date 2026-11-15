@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import {
   buildCoinNewsResearchPrompt,
-  buildCoinNewsResearchPromptCompact,
 } from "@/lib/coinNewsResearchPrompt";
 import type { ChartPoint } from "@/validators/recordSchema";
 import { formatPhp } from "@/lib/format";
@@ -177,18 +176,15 @@ export function formatEntryReviewPromptForGoogle(
   structureLevels?: StructureKeyLevel[] | null,
   chartPoints?: { period?: string; high?: number; low?: number; close?: number }[] | null
 ): string {
-  void crossoverAlert;
-  void structureLevels;
-  void chartPoints;
-  void confluence;
-  const { base, pair, label } = formatAssetLabel(symbol);
-  const holdings = activePortfolio?.holdings ?? 0;
-  const isAllocated = holdings > 0;
-  return buildCoinNewsResearchPromptCompact({
-    coins: [{ symbol: pair, name: base || label }],
-    mode: isAllocated ? "holding" : "not_holding",
-    promptLabel: isAllocated ? "Spot · Google (holding)" : "Spot · Google (not held)",
-  });
+  // Same full markdown research prompt as Agent (single coin). Holding = no past-30d dig.
+  return formatEntryReviewPrompt(
+    symbol,
+    confluence,
+    crossoverAlert,
+    activePortfolio,
+    structureLevels,
+    chartPoints
+  );
 }
 
 
@@ -273,20 +269,14 @@ export default function TradingInsightCard({
    * when the box is empty or truncated (same practical flow as long Catalyst prompts).
    */
   const handleOpenGoogleReview = () => {
-    // Full prompt on clipboard for paste into Gemini/AI Mode if needed
+    // Full markdown research prompt (same as Agent) — always on clipboard for Ctrl/Cmd+V
     const full = buildAgentPrompt();
     void navigator.clipboard.writeText(full).catch(() => {});
 
-    // Compact prompt fits Google ?q= without mid-sentence cut
-    const mini = formatEntryReviewPromptForGoogle(
-      symbol,
-      confluence,
-      crossoverAlert,
-      activePortfolio,
-      structureLevels,
-      points
-    );
-    const url = `https://www.google.com/search?q=${encodeURIComponent(mini)}`;
+    // Google URL cannot hold the full prompt; open a short hint so the user pastes clipboard
+    const { base } = formatAssetLabel(symbol || "");
+    const hint = `Paste clipboard: neutral crypto research for ${base} — Watch date lines YYYY-MM-DD · label · BASE detail (Philippines PHP spot)`;
+    const url = `https://www.google.com/search?q=${encodeURIComponent(hint)}`;
     window.open(url, "_blank", "noopener,noreferrer");
 
     setAgentCopied(true);
