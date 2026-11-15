@@ -35,7 +35,7 @@ async function fetchDaily(symbol: string, force = false): Promise<DailyBar[]> {
     if (cached && cached.length > 0) return cached;
   }
   const res = await fetch(
-    `/api/coins?type=chart&symbol=${encodeURIComponent(symbol)}&years=1.00&granularity=daily`,
+    `/api/coins?type=chart&symbol=${encodeURIComponent(symbol)}&years=0.28&granularity=daily`,
     { cache: "no-store" }
   );
   if (!res.ok) return [];

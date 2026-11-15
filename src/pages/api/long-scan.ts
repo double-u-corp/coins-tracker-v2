@@ -58,8 +58,28 @@ async function runScanHandler(req: NextApiRequest, res: NextApiResponse) {
 
   try {
     const opts = parseScanOptions(req);
+    const isCron = isCronAuthorized(req);
+    // Neon transfer saver: scheduled cron is OFF unless LONG_SCAN_CRON=1.
+    // Manual / authenticated UI runs always allowed.
+    if (isCron && process.env.LONG_SCAN_CRON !== "1") {
+      return res.status(200).json({
+        ok: true,
+        skipped: true,
+        reason:
+          "LONG_SCAN_CRON is not 1 — automatic long-scan disabled to save DB transfer. Run from the LONG-scan page or set LONG_SCAN_CRON=1.",
+        scanned: 0,
+        saved: 0,
+      });
+    }
+    // Default cron chunks to fast=1 (daily confluence only) unless caller forces fast=0
+    if (isCron && opts.fast !== false) {
+      opts.fast = true;
+    }
     const result = await runLongScanSnapshot(opts);
-    // Verify the log is readable after write
+    // Skip extra listLongScanRuns on cron — doubles CatalystLog reads for no UI benefit
+    if (isCron) {
+      return res.status(200).json({ ...result, logged: true });
+    }
     const runs = await listLongScanRuns();
     const found = runs.find((r) => r.id === result.runId);
     return res.status(200).json({

@@ -16,7 +16,7 @@ const SLOT_HOURS = [2, 5, 8, 11, 14, 17, 20, 23] as const;
 
 async function fetchPoll3h(symbol: string): Promise<PollPt[]> {
   const res = await fetch(
-    `/api/coins?type=chart&symbol=${encodeURIComponent(symbol)}&granularity=3h&hours=48&_=${Date.now()}`,
+    `/api/coins?type=chart&symbol=${encodeURIComponent(symbol)}&granularity=3h&hours=48`,
     { cache: "no-store" }
   );
   if (!res.ok) return [];
@@ -61,7 +61,7 @@ async function fetchPoll3h(symbol: string): Promise<PollPt[]> {
 
 async function fetchDaily(symbol: string): Promise<DailyPt[]> {
   const res = await fetch(
-    `/api/coins?type=chart&symbol=${encodeURIComponent(symbol)}&years=1.00&granularity=daily&_=${Date.now()}`,
+    `/api/coins?type=chart&symbol=${encodeURIComponent(symbol)}&years=0.28&granularity=daily`,
     { cache: "no-store" }
   );
   if (!res.ok) return [];

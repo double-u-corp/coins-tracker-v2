@@ -58,6 +58,13 @@ function toDailyRecords(records: { price: number; createdAt: Date }[]): DailyRec
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
+
+/** Reduce Neon egress: browsers/CDN may reuse chart JSON until next ~3h poll window. */
+function setChartCacheHeaders(res: NextApiResponse) {
+  // ~10 minutes private cache; chart data only changes on cron polls
+  res.setHeader("Cache-Control", "private, max-age=600, stale-while-revalidate=300");
+}
+
 async function handleSummary(res: NextApiResponse<SummaryResponse>) {
   let coins;
   try {
@@ -225,6 +232,7 @@ async function handleChart(
 
   const coin = await prisma.coin.findUnique({ where: { symbol: symbolResult.data } });
   if (!coin) {
+  setChartCacheHeaders(res);
     return res.status(200).json({ points: [] });
   }
 
@@ -339,6 +347,7 @@ async function handleChart(
     }))
     .sort((a, b) => a.period.localeCompare(b.period));
 
+  setChartCacheHeaders(res);
   res.status(200).json({ points });
 }
 
@@ -375,6 +384,7 @@ async function handleIntradayChart(
 
   const coin = await prisma.coin.findUnique({ where: { symbol: symbolResult.data } });
   if (!coin) {
+  setChartCacheHeaders(res);
     return res.status(200).json({ points: [] });
   }
 
@@ -400,6 +410,7 @@ async function handleIntradayChart(
     close: record.price,
   }));
 
+  setChartCacheHeaders(res);
   res.status(200).json({ points });
 }
 

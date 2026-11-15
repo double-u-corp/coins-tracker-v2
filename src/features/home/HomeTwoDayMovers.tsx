@@ -24,7 +24,7 @@ export type PollPoint = {
 const SLOT_HOURS = [2, 5, 8, 11, 14, 17, 20, 23] as const;
 
 async function fetchTopMovers2d(): Promise<Mover[]> {
-  const res = await fetch(`/api/swing-timing?days=14&_=${Date.now()}`, { cache: "no-store" });
+  const res = await fetch(`/api/swing-timing?days=14&_=${Date.now()}`);
   if (!res.ok) throw new Error("Failed to load movers");
   const data = await res.json();
   const list = Array.isArray(data.topMovers2d) ? data.topMovers2d : [];
@@ -90,8 +90,8 @@ export async function fetchDailyForSma(symbol: string, force = false): Promise<D
     if (cached && cached.length > 0) return cached;
   }
   const res = await fetch(
-    `/api/coins?type=chart&symbol=${encodeURIComponent(symbol)}&years=1.00&granularity=daily`,
-    { cache: "no-store" }
+    `/api/coins?type=chart&symbol=${encodeURIComponent(symbol)}&years=0.28&granularity=daily`,
+    {}
   );
   if (!res.ok) return [];
   const data = await res.json();

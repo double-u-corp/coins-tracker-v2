@@ -11,8 +11,10 @@ import {
 } from "@/features/chart/Technicals";
 
 const RETENTION_DAYS = 30;
-const SCAN_YEARS = 1;
-const INTRADAY_HOURS = 336;
+/** ~7.5 months — enough for SMA200 on daily polls without full-year row transfer */
+const SCAN_YEARS = 0.62;
+/** Rising filter only needs a few days of 3h prints — was 336h (14d) */
+const INTRADAY_HOURS = 72;
 const CONCURRENCY = 6;
 const LOG_PROMPT_ID = "long-scan-log";
 const LOG_CATEGORY = "LongScan";

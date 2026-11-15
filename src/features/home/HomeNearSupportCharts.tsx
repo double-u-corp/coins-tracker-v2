@@ -127,7 +127,7 @@ async function fetchDailyPoints(symbol: string, force = false): Promise<DailyPtF
   }
   // years=1 so we always have ≥30 daily bars when the coin has history
   const res = await fetch(
-    `/api/coins?type=chart&symbol=${encodeURIComponent(symbol)}&years=1.00&granularity=daily`,
+    `/api/coins?type=chart&symbol=${encodeURIComponent(symbol)}&years=0.28&granularity=daily`,
     { cache: "no-store" }
   );
   if (!res.ok) return [];
