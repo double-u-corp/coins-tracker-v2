@@ -153,6 +153,56 @@ export function buildCoinNewsResearchPrompt(args: {
 }
 
 /** Compact version for Google ?q= URL limits. */
+
+/**
+ * Short prompt for Google ?q= (~fits URL). Research + Watch date markdown only.
+ * No price, RSI, SMA, oversold, or entry advice.
+ */
+export function buildCoinNewsResearchPromptGoogleShort(args: {
+  coins: CoinNewsCoin[];
+  mode: CoinNewsMode;
+}): string {
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+  const holding = args.mode === "holding";
+  const list = args.coins
+    .map((c) => {
+      const base = baseName(c);
+      const sym = String(c.symbol || "").toUpperCase();
+      return `${base}${sym ? ` (${sym})` : ""}`;
+    })
+    .filter(Boolean)
+    .slice(0, 6)
+    .join(", ");
+  const bases = args.coins.map((c) => baseName(c)).filter(Boolean).slice(0, 6);
+  const baseEx = bases[0] || "TICKER";
+  const windows = holding
+    ? "Windows: current/~72h + next ~30d only (holding — no past dig)."
+    : "Windows: past ~30d + current/~72h + next ~30d.";
+
+  // Newlines in the prompt help the model emit real markdown lines for our scraper.
+  return [
+    `Neutral crypto research (PH PHP spot). Manila ${today}. Coin(s): ${list || "n/a"}.`,
+    windows,
+    `Search live sources only. No buy/sell/add/rank. No price/RSI/SMA/technicals. No invented dates.`,
+    `If none found after search: none verified.`,
+    ``,
+    `YOUR REPLY must be markdown. Every dated catalyst on its OWN LINE in EXACTLY this form:`,
+    `- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration|listing|hardfork · ${baseEx} short detail`,
+    ``,
+    `Examples:`,
+    `- **Watch date:** 2026-11-29 · unlock · ${baseEx} 2.25M ecosystem unlock`,
+    `- **Watch date:** 2026-12-04 · event · ${baseEx} Stage 6 claim window closes`,
+    ``,
+    `End block:`,
+    `## Coin research · ${today}`,
+    `- **Agent:** (model name)`,
+    `- **Coins covered:** ${bases.join(", ") || "…"}`,
+    `- **Watch date:** (repeat each real date as its own bullet)`,
+    `- **Notes:** brief neutral bullets`,
+  ].join("\n");
+}
+
+
 export function buildCoinNewsResearchPromptCompact(args: {
   coins: CoinNewsCoin[];
   mode: CoinNewsMode;

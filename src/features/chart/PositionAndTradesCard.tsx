@@ -580,7 +580,7 @@ export default function PositionAndTradesCard({
                   currentPrice: currentPrice ?? null,
                 });
                 const cross = pts.length ? detectCrossoverEvent(pts) : null;
-                const full = formatEntryReviewPrompt(
+                const short = formatEntryReviewPromptForGoogle(
                   symbol,
                   confluence,
                   cross,
@@ -589,14 +589,12 @@ export default function PositionAndTradesCard({
                   pts
                 );
                 try {
-                  await navigator.clipboard.writeText(full);
+                  await navigator.clipboard.writeText(short);
                 } catch {
                   /* ignore */
                 }
-                const base = symbol.replace(/PHP$/i, "") || symbol;
-                const hint = `Paste clipboard: neutral crypto research for ${base} — Watch date lines YYYY-MM-DD · label · BASE detail (Philippines PHP spot)`;
                 window.open(
-                  `https://www.google.com/search?q=${encodeURIComponent(hint)}`,
+                  `https://www.google.com/search?q=${encodeURIComponent(short)}`,
                   "_blank",
                   "noopener,noreferrer"
                 );

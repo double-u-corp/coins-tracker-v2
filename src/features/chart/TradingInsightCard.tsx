@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   buildCoinNewsResearchPrompt,
+  buildCoinNewsResearchPromptGoogleShort,
 } from "@/lib/coinNewsResearchPrompt";
 import type { ChartPoint } from "@/validators/recordSchema";
 import { formatPhp } from "@/lib/format";
@@ -176,15 +177,18 @@ export function formatEntryReviewPromptForGoogle(
   structureLevels?: StructureKeyLevel[] | null,
   chartPoints?: { period?: string; high?: number; low?: number; close?: number }[] | null
 ): string {
-  // Same full markdown research prompt as Agent (single coin). Holding = no past-30d dig.
-  return formatEntryReviewPrompt(
-    symbol,
-    confluence,
-    crossoverAlert,
-    activePortfolio,
-    structureLevels,
-    chartPoints
-  );
+  void confluence;
+  void crossoverAlert;
+  void structureLevels;
+  void chartPoints;
+  const { base, pair, label } = formatAssetLabel(symbol);
+  const holdings = activePortfolio?.holdings ?? 0;
+  const isAllocated = holdings > 0;
+  // Short: research + Watch date markdown only (fits Google URL; no price/technicals)
+  return buildCoinNewsResearchPromptGoogleShort({
+    coins: [{ symbol: pair, name: base || label }],
+    mode: isAllocated ? "holding" : "not_holding",
+  });
 }
 
 
@@ -269,18 +273,20 @@ export default function TradingInsightCard({
    * when the box is empty or truncated (same practical flow as long Catalyst prompts).
    */
   const handleOpenGoogleReview = () => {
-    // Full markdown research prompt (same as Agent) — always on clipboard for Ctrl/Cmd+V
-    const full = buildAgentPrompt();
-    void navigator.clipboard.writeText(full).catch(() => {});
-
-    // Google URL cannot hold the full prompt; open a short hint so the user pastes clipboard
-    const { base } = formatAssetLabel(symbol || "");
-    const hint = `Paste clipboard: neutral crypto research for ${base} — Watch date lines YYYY-MM-DD · label · BASE detail (Philippines PHP spot)`;
-    const url = `https://www.google.com/search?q=${encodeURIComponent(hint)}`;
+    // Short research-only prompt (fits Google ?q=). Agent button keeps the long version.
+    const short = formatEntryReviewPromptForGoogle(
+      symbol,
+      confluence,
+      crossoverAlert,
+      activePortfolio,
+      structureLevels,
+      points
+    );
+    void navigator.clipboard.writeText(short).catch(() => {});
+    const url = `https://www.google.com/search?q=${encodeURIComponent(short)}`;
     window.open(url, "_blank", "noopener,noreferrer");
-
     setAgentCopied(true);
-    setTimeout(() => setAgentCopied(false), 2500);
+    setTimeout(() => setAgentCopied(false), 3000);
   };
 
   return (
