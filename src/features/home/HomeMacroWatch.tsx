@@ -625,18 +625,27 @@ export default function HomeMacroWatch() {
       )}
 
       {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2" aria-busy="true">
+        <div
+          className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-2 sm:grid sm:grid-cols-2 lg:grid-cols-3 sm:overflow-visible sm:snap-none sm:pb-0"
+          aria-busy="true"
+        >
           {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="h-16 rounded-lg bg-slate-100 animate-pulse" />
+            <div
+              key={i}
+              className="h-16 min-w-[85%] shrink-0 snap-center rounded-lg bg-slate-100 animate-pulse sm:min-w-0 sm:snap-align-none"
+            />
           ))}
         </div>
       ) : display.length === 0 ? (
         <p className="text-xs text-slate-500 py-2">
           No calendar loaded yet. Macro dates load from saved scans / agent notes when available.
-          pull verified FOMC / CPI / NFP (jobs) schedule.
         </p>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+        <>
+        <p className="mb-1.5 text-[10px] font-semibold text-slate-500 sm:hidden">
+          Swipe for more macro dates →
+        </p>
+        <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-2 -mx-1 px-1 sm:mx-0 sm:px-0 sm:grid sm:grid-cols-2 lg:grid-cols-3 sm:overflow-visible sm:snap-none sm:pb-0">
           {display.map((evt, i) => {
             const high =
               evt.severity === "high" ||
@@ -652,7 +661,7 @@ export default function HomeMacroWatch() {
             return (
               <div
                 key={`${evt.date}-${evt.title}-${i}`}
-                className={`rounded-lg border px-3 py-2.5 relative ${
+                className={`min-w-[85%] shrink-0 snap-center sm:min-w-0 sm:snap-align-none rounded-lg border px-3 py-2.5 relative ${
                   isToday
                     ? "border-amber-400 bg-amber-50 ring-2 ring-amber-300/80 shadow-md"
                     : high
@@ -712,6 +721,7 @@ export default function HomeMacroWatch() {
             );
           })}
         </div>
+        </>
       )}
     </div>
   );
