@@ -391,6 +391,7 @@ async function handleUpdate(req: NextApiRequest, res: NextApiResponse<UpdateResp
       coinAmount: Number(updated.coinAmount),
       isManual: updated.isManual,
       transactedAt: updated.transactedAt.toISOString(),
+      venue: normalizeVenue((updated as { venue?: string }).venue),
     },
   });
 }
