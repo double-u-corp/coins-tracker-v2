@@ -3,7 +3,8 @@ import Link from "next/link";
 import Dropdown from "@/components/Dropdown";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp, formatCoinAmount } from "@/lib/format";
-import { updateHoldMae, formatMaeBadge } from "@/lib/holdMae";
+import { VENUES, venueLabel } from "@/lib/venues";
+import { updateHoldMae, formatMaeBadge, hydrateHoldMaeFromDb } from "@/lib/holdMae";
 import { useTradeLogic, TradeType, formatCycleReviewPrompt, buildCoinLedger, phpFromPrice } from "./useTradeLogic";
 import CoinLedger from "./CoinLedger";
 import TradeTimelineChart from "./TradeTimelineChart"; // adjust path if the chart lives elsewhere
@@ -41,10 +42,14 @@ export default function TradeView() {
   const {
     coinOptions,
     transactions,
+    portfolio = [],
+    cashByVenue: cashByVenueProp,
     loading,
     loadError,
     type,
     setType,
+    venue,
+    setVenue,
     symbol,
     setSymbol,
     phpAmount,
@@ -75,9 +80,24 @@ export default function TradeView() {
     saveEdit,
     coinAnalytics,
     analyticsSummary,
+    riskBudget,
+    setRiskBudget,
+    riskStatus,
   } = useTradeLogic();
 
+  const cashByVenue = cashByVenueProp ?? {};
+  const isCashFlow = type === "deposit" || type === "withdraw";
+  const [txFilter, setTxFilter] = useState<"all" | "buy" | "sell" | "deposit" | "withdraw">("all");
+  const [txCoinFilter, setTxCoinFilter] = useState<string>("all");
+  const [analyticsFilter, setAnalyticsFilter] = useState<"all" | "underwater" | "in_profit" | "holdings">("all");
+  const [analyticsSort, setAnalyticsSort] = useState<"underwater" | "unrealized_pct" | "realized">("underwater");
+  const [cycleReviewCopied, setCycleReviewCopied] = useState<string | null>(null);
+
   // Keep total in sync when price or coins change (user can still edit total after)
+  useEffect(() => {
+    void hydrateHoldMaeFromDb();
+  }, []);
+
   useEffect(() => {
     if (type === "deposit" || type === "withdraw") return;
     const coins = Number(coinAmount);
@@ -88,16 +108,8 @@ export default function TradeView() {
   }, [coinAmount, customPrice, type, setPhpAmount]);
 
 
-  const isCashFlow = type === "deposit" || type === "withdraw";
-  const [txFilter, setTxFilter] = useState<"all" | "buy" | "sell" | "deposit" | "withdraw">("all");
-  const [txCoinFilter, setTxCoinFilter] = useState<string>("all");
-  const [analyticsFilter, setAnalyticsFilter] = useState<"all" | "underwater" | "in_profit" | "holdings">("all");
-  const [analyticsSort, setAnalyticsSort] = useState<"underwater" | "unrealized_pct" | "realized">("underwater");
-  const [cycleReviewCopied, setCycleReviewCopied] = useState<string | null>(null);
-
-
   const filteredAnalytics = useMemo(() => {
-    let rows = [...coinAnalytics];
+    let rows = coinAnalytics.filter((c) => (c.venue || "coins_ph") === venue);
     if (analyticsFilter === "underwater") rows = rows.filter((c) => c.isUnderwater);
     else if (analyticsFilter === "in_profit")
       rows = rows.filter((c) => c.isInProfitOpen || (c.holdings <= 0 && c.realizedPnl > 0));
@@ -119,7 +131,7 @@ export default function TradeView() {
       return b.realizedPnl - a.realizedPnl;
     });
     return rows;
-  }, [coinAnalytics, analyticsFilter, analyticsSort]);
+  }, [coinAnalytics, analyticsFilter, analyticsSort, venue]);
 
   const filteredTransactions = useMemo(() => {
     return transactions.filter((t) => {
@@ -145,12 +157,14 @@ export default function TradeView() {
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [transactions]);
 
-  // Cash from deposits / sells / buys / withdrawals
+  // Cash for the *active venue only* (Coins.ph vs Maya vs GCash stay separate)
   const { totalDeposited, totalWithdrawn, availableCash } = useMemo(() => {
     let dep = 0;
     let wit = 0;
     let cash = 0;
     for (const t of transactions) {
+      const v = (t as { venue?: string }).venue || "coins_ph";
+      if (v !== venue) continue;
       const amt = Number(t.phpAmount) || 0;
       const tType = String(t.type).toLowerCase();
       if (tType === "deposit") {
@@ -166,7 +180,7 @@ export default function TradeView() {
       }
     }
     return { totalDeposited: dep, totalWithdrawn: wit, availableCash: cash };
-  }, [transactions]);
+  }, [transactions, venue]);
 
   // Open crypto mark from analytics (tx-based holdings), not the old per-coin card list
   const portfolioSnapshot = useMemo(() => {
@@ -188,16 +202,24 @@ export default function TradeView() {
       openGl: hasGl ? openGl : null,
       spentOpen,
     };
-  }, [coinAnalytics]);
+  }, [coinAnalytics, venue]);
 
   // Holdings come from the same tx replay as the cards (server portfolio can be stale)
   const selectedAnalytics = useMemo(
-    () => (symbol ? coinAnalytics.find((c) => c.symbol === symbol) ?? null : null),
-    [coinAnalytics, symbol]
+    () =>
+      symbol
+        ? coinAnalytics.find((c) => c.symbol === symbol && (c.venue || "coins_ph") === venue) ??
+          coinAnalytics.find((c) => c.symbol === symbol) ??
+          null
+        : null,
+    [coinAnalytics, symbol, venue]
   );
   const selectedCoinOnHand = isCashFlow ? 0 : selectedAnalytics?.holdings ?? 0;
 
-  const ledgerRows = useMemo(() => (symbol ? buildCoinLedger(transactions, symbol) : []), [transactions, symbol]);
+  const ledgerRows = useMemo(
+    () => (symbol ? buildCoinLedger(transactions, symbol, venue) : []),
+    [transactions, symbol, venue]
+  );
   const selectedName =
     selectedAnalytics?.name || coinOptions.find((c) => c.symbol === symbol)?.name || symbol;
   const lastBuyRow = useMemo(() => [...ledgerRows].reverse().find((r) => r.type === "buy") ?? null, [ledgerRows]);
@@ -255,6 +277,27 @@ export default function TradeView() {
               {t}
             </button>
           ))}
+        </div>
+
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-bold uppercase text-slate-500">Venue</span>
+          {VENUES.map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setVenue(v)}
+              className={`rounded-md border px-3 py-1 text-xs font-bold transition ${
+                venue === v
+                  ? "border-indigo-400 bg-indigo-600 text-white"
+                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              {venueLabel(v)}
+            </button>
+          ))}
+          <span className="text-[11px] text-slate-500">
+            Bags stay separate · 3h price is the same per coin
+          </span>
         </div>
 
         <form onSubmit={submitTransaction} className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
@@ -404,7 +447,7 @@ export default function TradeView() {
           <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-xs text-slate-700">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="font-semibold text-slate-900">
-                {selectedName}: holding{" "}
+                {selectedName} ({venueLabel(venue)}): holding{" "}
                 <span className="tabular-nums">{formatCoinAmount(selectedCoinOnHand)}</span>
                 {selectedCoinOnHand > 0 && selectedAnalytics?.avgCost != null && (
                   <span className="font-normal text-slate-500"> · avg {formatPhp(selectedAnalytics.avgCost)}</span>
@@ -494,7 +537,12 @@ export default function TradeView() {
       {/* —— Snapshot: cash + totals (no per-coin holdings grid) —— */}
       <section className="space-y-3">
         <div>
-          <h2 className="text-base font-bold tracking-tight text-slate-900">Portfolio &amp; cash</h2>
+          <h2 className="text-base font-bold tracking-tight text-slate-900">
+            Portfolio &amp; cash
+            <span className="ml-2 rounded-md bg-indigo-50 px-2 py-0.5 text-[11px] font-bold text-indigo-800">
+              {venueLabel(venue)}
+            </span>
+          </h2>
           <p className="text-[11px] text-slate-500">Live mark · open totals only (per-coin list removed)</p>
         </div>
         {loading ? (
@@ -569,7 +617,12 @@ export default function TradeView() {
 {/* —— Open patience —— */}
       <section className="space-y-3">
         <div>
-          <h2 className="text-base font-bold tracking-tight text-slate-900">Profit &amp; patience</h2>
+          <h2 className="text-base font-bold tracking-tight text-slate-900">
+            Profit &amp; patience
+            <span className="ml-2 rounded-md bg-indigo-50 px-2 py-0.5 text-[11px] font-bold text-indigo-800">
+              {venueLabel(venue)}
+            </span>
+          </h2>
           <p className="text-[11px] text-slate-500">Open cycle · hold clock · house money = Free</p>
         </div>
         {loading ? (
@@ -683,7 +736,7 @@ export default function TradeView() {
                       : { t: c.holdings > 0 ? "Flat" : "Closed", c: "bg-slate-100 text-slate-600" };
                   return (
                     <div
-                      key={c.symbol}
+                      key={`${c.symbol}::${c.venue || "coins_ph"}`}
                       className="relative overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md"
                     >
                       <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/80 px-3 py-2">
@@ -691,6 +744,9 @@ export default function TradeView() {
                           <span className="text-sm font-bold text-slate-900 truncate block">{c.name}</span>
                           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-slate-400">
                             <span className="font-medium">{c.symbol}</span>
+                            <span className="ml-1 rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-bold text-indigo-800">
+                              {venueLabel(c.venue || "coins_ph")}
+                            </span>
                             {c.holdings > 0 && (
                               <span className="font-bold tabular-nums text-slate-700" title={`${c.holdings} coins`}>
                                 · {formatCoinAmount(c.holdings)} coins
@@ -837,14 +893,21 @@ export default function TradeView() {
       {/* —— Closed history —— */}
       <section className="space-y-3">
         <div>
-          <h2 className="text-base font-bold tracking-tight text-slate-900">Closed cycle history</h2>
-          <p className="text-[11px] text-slate-500">Past rounds · no live price</p>
+          <h2 className="text-base font-bold tracking-tight text-slate-900">
+            Closed cycle history
+            <span className="ml-2 rounded-md bg-indigo-50 px-2 py-0.5 text-[11px] font-bold text-indigo-800">
+              {venueLabel(venue)}
+            </span>
+          </h2>
+          <p className="text-[11px] text-slate-500">Past rounds on this venue · no live price</p>
         </div>
         {loading ? (
           <TableSkeleton />
         ) : (
           (() => {
-            const historyRows = coinAnalytics.flatMap((c) =>
+            const historyRows = coinAnalytics
+              .filter((c) => (c.venue || "coins_ph") === venue)
+              .flatMap((c) =>
               (c.closedCycles ?? []).map((cy) => ({
                 symbol: c.symbol,
                 name: c.name,
@@ -974,7 +1037,12 @@ export default function TradeView() {
       <section id="coin-history" className="scroll-mt-4 space-y-3">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
-            <h2 className="text-base font-bold tracking-tight text-slate-900">Coin history</h2>
+            <h2 className="text-base font-bold tracking-tight text-slate-900">
+              Coin history
+              <span className="ml-2 rounded-md bg-indigo-50 px-2 py-0.5 text-[11px] font-bold text-indigo-800">
+                {venueLabel(venue)}
+              </span>
+            </h2>
             <p className="text-[11px] text-slate-500">
               Every buy and sell with the coins you held before and after — see what was left before you re-buy.
             </p>
@@ -985,7 +1053,7 @@ export default function TradeView() {
             className="rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm"
           >
             {coinOptions.map((c) => (
-              <option key={c.symbol} value={c.symbol}>
+              <option key={`${c.symbol}::${c.venue || "coins_ph"}`} value={c.symbol}>
                 {c.name} ({c.symbol})
               </option>
             ))}
@@ -1118,6 +1186,7 @@ export default function TradeView() {
                     <div className="text-sm">
                       <span
                         className={`mr-2 rounded-full border px-2 py-0.5 text-xs font-semibold capitalize ${
+                          /* venue chip below */
                           t.type.toLowerCase() === "deposit"
                             ? "border-cyan-200 bg-cyan-100 text-cyan-800"
                             : t.type.toLowerCase() === "withdraw"

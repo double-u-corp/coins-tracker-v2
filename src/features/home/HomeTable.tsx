@@ -1,3 +1,4 @@
+import { venueLabel, portfolioKey, normalizeVenue } from "@/lib/venues";
 import Link from "next/link";
 import {
   updateHoldMae,
@@ -896,45 +897,61 @@ export default function HomeTable() {
    * "Watch / plan · not held" while BCH/ADA/etc. were missing from held/free.
    */
   const { heldCostCards, heldFreeCards } = useMemo(() => {
-    type Mini = { symbol: string; name: string; currentPrice: number | null };
+    type Mini = {
+      symbol: string;
+      name: string;
+      currentPrice: number | null;
+      venue: string;
+      holdings: number;
+      spent: number;
+    };
     const cost: Mini[] = [];
     const free: Mini[] = [];
     const seen = new Set<string>();
+    const rows = (portfolio || []).filter(
+      (p: { symbol?: string; holdings?: number }) =>
+        p.symbol && p.symbol !== "PHP" && (Number(p.holdings) || 0) > 1e-8
+    ) as {
+      symbol: string;
+      name?: string;
+      venue?: string;
+      holdings?: number;
+      spent?: number;
+      currentPrice?: number | null;
+    }[];
 
-    for (const sym of heldSyms) {
-      if (seen.has(sym)) continue;
-      seen.add(sym);
+    for (const pos of rows) {
+      const sym = pos.symbol.toUpperCase();
+      const venue = normalizeVenue(pos.venue);
+      const key = portfolioKey(sym, venue);
+      if (seen.has(key)) continue;
+      seen.add(key);
       const coin =
         allCoins.find((c) => c.symbol.toUpperCase() === sym) ||
         coins.find((c) => c.symbol.toUpperCase() === sym);
-      const pos = portfolio?.find((p) => p.symbol?.toUpperCase() === sym);
-      const holdings = pos?.holdings ?? openHoldingsBySymbol?.[sym] ?? 0;
-      const spent = pos?.spent ?? 0;
+      const holdings = Number(pos.holdings) || 0;
+      const spent = Number(pos.spent) || 0;
       const row: Mini = {
         symbol: sym,
-        name: coin?.name || sym.replace(/PHP$/i, ""),
-        currentPrice: coin?.currentPrice ?? null,
+        name: coin?.name || pos.name || sym.replace(/PHP$/i, ""),
+        currentPrice: coin?.currentPrice ?? pos.currentPrice ?? null,
+        venue,
+        holdings,
+        spent,
       };
-      // House money: coins left but net spent already recovered
       if (holdings > 0 && spent <= 0) free.push(row);
-      else cost.push(row);
+      else if (holdings > 0 && spent > 0) cost.push(row);
     }
-    const unrealizedPct = (sym: string) => {
-      const pos = portfolio?.find((p) => p.symbol?.toUpperCase() === sym);
-      const coin =
-        allCoins.find((c) => c.symbol.toUpperCase() === sym) ||
-        coins.find((c) => c.symbol.toUpperCase() === sym);
-      const holdings = pos?.holdings ?? openHoldingsBySymbol?.[sym] ?? 0;
-      const spent = pos?.spent ?? 0;
-      const price = Number(coin?.currentPrice ?? pos?.currentPrice ?? 0) || 0;
-      if (!(holdings > 0) || !(spent > 0) || !(price > 0)) return 0;
-      const avg = spent / holdings;
+    const unrealizedPct = (m: Mini) => {
+      const price = Number(m.currentPrice) || 0;
+      if (!(m.holdings > 0) || !(m.spent > 0) || !(price > 0)) return 0;
+      const avg = m.spent / m.holdings;
       if (!(avg > 0)) return 0;
       return ((price - avg) / avg) * 100;
     };
-    cost.sort((a, b) => unrealizedPct(a.symbol) - unrealizedPct(b.symbol)); // negative first
+    cost.sort((a, b) => unrealizedPct(a) - unrealizedPct(b));
     return { heldCostCards: cost, heldFreeCards: free };
-  }, [heldSyms, allCoins, coins, portfolio, openHoldingsBySymbol]);
+  }, [allCoins, coins, portfolio]);
 
   const [movePctBySymbol, setMovePctBySymbol] = useState<Record<string, number>>({});
   const [homeAnalyticsBySym, setHomeAnalyticsBySym] = useState<Record<string, CoinAnalytics>>({});
@@ -1448,20 +1465,32 @@ export default function HomeTable() {
               <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-2 -mx-1 px-1 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:snap-none sm:pb-0 sm:px-0">
                 {heldCostCards.map((card) => {
                   const sym = card.symbol.toUpperCase();
+                  const venue = normalizeVenue((card as { venue?: string }).venue);
+                  const bagKey = portfolioKey(sym, venue);
                   const coin =
                     allCoins.find((c) => c.symbol.toUpperCase() === sym) ||
                     coins.find((c) => c.symbol.toUpperCase() === sym);
                   const pos = (portfolio || []).find(
-                    (p: { symbol?: string }) => (p.symbol || "").toUpperCase() === sym
+                    (p: { symbol?: string; venue?: string }) =>
+                      (p.symbol || "").toUpperCase() === sym &&
+                      normalizeVenue(p.venue) === venue
                   ) as
                     | {
                         holdings?: number;
                         spent?: number;
                         currentPrice?: number | null;
+                        venue?: string;
                       }
                     | undefined;
-                  const holdings = Number(pos?.holdings ?? openHoldingsBySymbol?.[sym] ?? 0) || 0;
-                  const spent = Number(pos?.spent ?? 0) || 0;
+                  const holdings =
+                    Number(
+                      pos?.holdings ??
+                        (card as { holdings?: number }).holdings ??
+                        openHoldingsBySymbol?.[bagKey] ??
+                        0
+                    ) || 0;
+                  const spent =
+                    Number(pos?.spent ?? (card as { spent?: number }).spent ?? 0) || 0;
                   const price =
                     Number(pos?.currentPrice ?? coin?.currentPrice ?? card.currentPrice ?? 0) || 0;
                   const avg = holdings > 0 && spent > 0 ? spent / holdings : null;
@@ -1469,8 +1498,9 @@ export default function HomeTable() {
                   const pnlPhp = mtm != null && spent > 0 ? mtm - spent : null;
                   const pnlPct =
                     avg != null && avg > 0 && price > 0 ? ((price - avg) / avg) * 100 : null;
-                  const daysHeld = daysHeldBySymbol?.[sym] ?? null;
-                  const cycleStart = cycleStartBySymbol?.[sym] ?? null;
+                  const daysHeld = daysHeldBySymbol?.[bagKey] ?? daysHeldBySymbol?.[sym] ?? null;
+                  const cycleStart =
+                    cycleStartBySymbol?.[bagKey] ?? cycleStartBySymbol?.[sym] ?? null;
                   const sinceLabel = cycleStart
                     ? new Date(cycleStart).toLocaleDateString(undefined, {
                         month: "short",
@@ -1486,12 +1516,12 @@ export default function HomeTable() {
                   const downTargets = ladder.downside;
                   const mae: HoldMae | null =
                     typeof window !== "undefined" && avg != null && avg > 0 && price > 0
-                      ? updateHoldMae(sym, avg, price)
+                      ? updateHoldMae(`${sym}::${venue}`, avg, price)
                       : null;
                   const maeBadge = formatMaeBadge(mae);
                   return (
                     <div
-                      key={sym}
+                      key={bagKey}
                       className="snap-center shrink-0 w-[min(92vw,22rem)] sm:w-auto sm:shrink rounded-xl border border-indigo-200 bg-white p-3 shadow-sm"
                     >
                       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -1500,6 +1530,9 @@ export default function HomeTable() {
                             {card.name}{" "}
                             <span className="font-mono text-[11px] font-semibold text-indigo-700">
                               {sym}
+                            </span>{" "}
+                            <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-bold text-indigo-800">
+                              {venueLabel(venue)}
                             </span>
                           </div>
                           <div className="mt-0.5 text-[11px] text-slate-600">
@@ -1872,7 +1905,7 @@ export default function HomeTable() {
               <div className="grid gap-3 sm:grid-cols-2">
                 {planMonitorCards.map((card) => (
                   <MonitorCard
-                    key={card.symbol}
+                    key={`${card.symbol}::${(card as { venue?: string }).venue || "coins_ph"}`}
                     card={card}
                     portfolio={portfolio}
                     daysHeld={daysHeldBySymbol?.[card.symbol.toUpperCase()] ?? null}

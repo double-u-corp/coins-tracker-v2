@@ -1,3 +1,4 @@
+import { normalizeVenue, portfolioKey } from "@/lib/venues";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/features/auth/useAuth";
 import type { CoinSummary, NewRecordAlert } from "@/validators/recordSchema";
@@ -306,50 +307,66 @@ export function useHomeLogic() {
         for (const tx of sorted) {
           const sym = (tx.symbol || "").toUpperCase();
           if (!sym) continue;
+          const venue = normalizeVenue((tx as { venue?: string }).venue);
+          const key = portfolioKey(sym, venue);
           const type = (tx.type || "").toLowerCase();
           const amt = Number(tx.coinAmount) || 0;
-          if (!units[sym]) units[sym] = 0;
+          if (!units[key]) units[key] = 0;
           if (type === "buy") {
-            if (units[sym] <= 0) cycleStart[sym] = tx.transactedAt || null;
-            units[sym] += amt;
+            if (units[key] <= 0) cycleStart[key] = tx.transactedAt || null;
+            units[key] += amt;
           } else if (type === "sell") {
-            units[sym] = Math.max(0, units[sym] - amt);
-            if (units[sym] <= 1e-12) {
-              units[sym] = 0;
-              cycleStart[sym] = null;
+            units[key] = Math.max(0, units[key] - amt);
+            if (units[key] <= 1e-12) {
+              units[key] = 0;
+              cycleStart[key] = null;
             }
           }
         }
         const now = Date.now();
         const days: Record<string, number> = {};
-        for (const [sym, start] of Object.entries(cycleStart)) {
-          if (!start || (units[sym] || 0) <= 0) continue;
+        for (const [key, start] of Object.entries(cycleStart)) {
+          if (!start || (units[key] || 0) <= 0) continue;
           const ms = now - new Date(start).getTime();
-          days[sym] = Math.max(0, Math.floor(ms / (24 * 60 * 60 * 1000)));
+          days[key] = Math.max(0, Math.floor(ms / (24 * 60 * 60 * 1000)));
         }
         setDaysHeldBySymbol(days);
         const starts: Record<string, string> = {};
-        for (const [sym, start] of Object.entries(cycleStart)) {
-          if (start && (units[sym] || 0) > 0) starts[sym] = start;
+        for (const [key, start] of Object.entries(cycleStart)) {
+          if (start && (units[key] || 0) > 0) starts[key] = start;
         }
         setCycleStartBySymbol(starts);
 
         const EPS = 1e-8;
         const openHold: Record<string, number> = {};
-        for (const [sym, u] of Object.entries(units)) {
-          openHold[sym] = u > EPS ? u : 0;
+        for (const [key, u] of Object.entries(units)) {
+          openHold[key] = u > EPS ? u : 0;
+        }
+        // Also roll up by symbol (any venue) for filters that only know the ticker
+        for (const [key, u] of Object.entries(openHold)) {
+          const sym = key.split("::")[0];
+          if (!sym) continue;
+          openHold[sym] = (openHold[sym] || 0) + u;
         }
         setOpenHoldingsBySymbol(openHold);
 
-        // Had at least one buy and currently flat → realized / rebuy candidate
+        // Had at least one buy and currently flat → realized / rebuy candidate (per venue key + symbol)
         const bought = new Set<string>();
         for (const tx of sorted) {
           const sym = (tx.symbol || "").toUpperCase();
-          if ((tx.type || "").toLowerCase() === "buy" && sym) bought.add(sym);
+          if (!sym) continue;
+          if ((tx.type || "").toLowerCase() === "buy") {
+            bought.add(portfolioKey(sym, (tx as { venue?: string }).venue));
+            bought.add(sym);
+          }
         }
         const realized: Record<string, true> = {};
-        for (const sym of bought) {
-          if ((openHold[sym] || 0) <= 0) realized[sym] = true;
+        for (const key of bought) {
+          if (key.includes("::")) {
+            if ((openHold[key] || 0) <= 0) realized[key] = true;
+          } else if ((openHold[key] || 0) <= 0) {
+            realized[key] = true;
+          }
         }
         setRealizedSymbols(realized);
       })

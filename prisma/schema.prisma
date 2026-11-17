@@ -56,10 +56,13 @@ model Transaction {
   phpAmount    Float    // PHP spent, received, deposited, or withdrawn
   price        Float    // PHP price per unit (0 for cash)
   coinAmount   Float    // Quantity of coin (0 for cash)
+  /// Where the trade/cash lives: coins_ph | maya | gcash (price polls stay shared per coin)
+  venue        String   @default("coins_ph")
   isManual     Boolean  @default(false)
   transactedAt DateTime @default(now())
 
   @@index([coinId, transactedAt])
+  @@index([venue, transactedAt])
 }
 
 // One row per coin: the price levels the user wants to be alerted about so

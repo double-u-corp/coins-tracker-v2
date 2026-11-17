@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import type { CoinSummary } from "@/validators/recordSchema";
 import type { PortfolioEntry, TransactionView } from "@/validators/transactionSchema";
+import { normalizeVenue, portfolioKey, venueLabel, VENUES, type VenueId } from "@/lib/venues";
 
 interface CoinOption {
   symbol: string;
@@ -109,7 +110,11 @@ export interface LedgerRow {
 }
 
 /** Buy/sell ledger for one coin with a running coin balance (oldest first). */
-export function buildCoinLedger(txList: TransactionView[], symbol: string): LedgerRow[] {
+export function buildCoinLedger(
+  txList: TransactionView[],
+  symbol: string,
+  venue?: string
+): LedgerRow[] {
   const EPS = 1e-10;
   const out: LedgerRow[] = [];
   let units = 0;
@@ -117,7 +122,14 @@ export function buildCoinLedger(txList: TransactionView[], symbol: string): Ledg
   let round = 0;
   let seen = false;
 
-  for (const t of sortTxChrono(txList.filter((x) => x.symbol === symbol))) {
+  const wantVenue = venue != null ? normalizeVenue(venue) : null;
+  for (const t of sortTxChrono(
+    txList.filter((x) => {
+      if (x.symbol !== symbol) return false;
+      if (wantVenue == null) return true;
+      return normalizeVenue((x as { venue?: string }).venue) === wantVenue;
+    })
+  )) {
     const ty = String(t.type).toLowerCase();
     if (ty !== "buy" && ty !== "sell") continue;
     const coins = Number(t.coinAmount) || 0;
@@ -203,6 +215,7 @@ export function formatCycleReviewPrompt(input: {
 /** Per-coin analytics for “am I profitable?” and “what’s taking long?” */
 export interface CoinAnalytics {
   symbol: string;
+  venue: string;
   name: string;
   holdings: number;
   /** Average cost of remaining units (PHP per coin) — current open lot only. */
@@ -296,8 +309,8 @@ export function buildCoinAnalytics(
 
   const bySymbol = new Map<string, LotState>();
 
-  const ensure = (symbol: string, name: string): LotState => {
-    let s = bySymbol.get(symbol);
+  const ensure = (key: string, name: string): LotState => {
+    let s = bySymbol.get(key);
     if (!s) {
       s = {
         name,
@@ -322,7 +335,7 @@ export function buildCoinAnalytics(
         cycleRealizedPnl: 0,
         closedCycles: [],
       };
-      bySymbol.set(symbol, s);
+      bySymbol.set(key, s);
     }
     return s;
   };
@@ -334,7 +347,10 @@ export function buildCoinAnalytics(
     if (tType !== "buy" && tType !== "sell") continue;
 
     const symbol = t.symbol;
-    const state = ensure(symbol, t.name || symbol);
+    const state = ensure(
+      portfolioKey(symbol, (t as { venue?: string }).venue || "coins_ph"),
+      t.name || symbol
+    );
     const coins = Number(t.coinAmount) || 0;
     const php = Number(t.phpAmount) || 0;
     const txTime = new Date(t.transactedAt).getTime();
@@ -477,15 +493,19 @@ export function buildCoinAnalytics(
   }
 
   // Merge with server portfolio for live price / display holdings when tx trail is thin
-  const portfolioBySymbol = new Map(serverPortfolio.map((p) => [p.symbol, p]));
-  const symbols = new Set<string>([...bySymbol.keys(), ...portfolioBySymbol.keys()]);
+  const portfolioByKey = new Map(
+    serverPortfolio.map((p) => [portfolioKey(p.symbol, (p as { venue?: string }).venue || "coins_ph"), p])
+  );
+  const symbols = new Set<string>([...bySymbol.keys(), ...portfolioByKey.keys()]);
 
   const now = Date.now();
   const rows: CoinAnalytics[] = [];
 
-  for (const symbol of symbols) {
-    const state = bySymbol.get(symbol);
-    const entry = portfolioBySymbol.get(symbol);
+  for (const key of symbols) {
+    const state = bySymbol.get(key);
+    const entry = portfolioByKey.get(key);
+    const symbol = entry?.symbol || key.split("::")[0] || key;
+    const venue = normalizeVenue(entry?.venue || key.split("::")[1] || "coins_ph");
     const name = state?.name || entry?.name || symbol;
 
     const holdingsFromTx = state?.units ?? 0;
@@ -597,6 +617,7 @@ export function buildCoinAnalytics(
 
     rows.push({
       symbol,
+      venue,
       name,
       holdings,
       avgCost,
@@ -648,21 +669,24 @@ const processPortfolio = (
   serverPortfolio: PortfolioEntry[],
   txList: TransactionView[]
 ): PortfolioEntry[] => {
+  // Per symbol × venue — do not mix Coins.ph / Maya / GCash bags
   const coinMap = new Map<string, { totalBoughtPhp: number; totalSoldPhp: number }>();
 
   for (const t of txList) {
     if (!t.symbol || t.symbol === "PHP") continue;
     const tType = String(t.type).toLowerCase();
-    if (!coinMap.has(t.symbol)) {
-      coinMap.set(t.symbol, { totalBoughtPhp: 0, totalSoldPhp: 0 });
+    const key = portfolioKey(t.symbol, (t as { venue?: string }).venue || "coins_ph");
+    if (!coinMap.has(key)) {
+      coinMap.set(key, { totalBoughtPhp: 0, totalSoldPhp: 0 });
     }
-    const stats = coinMap.get(t.symbol)!;
+    const stats = coinMap.get(key)!;
     if (tType === "buy") stats.totalBoughtPhp += Number(t.phpAmount) || 0;
     else if (tType === "sell") stats.totalSoldPhp += Number(t.phpAmount) || 0;
   }
 
   return serverPortfolio.map((entry) => {
-    const stats = coinMap.get(entry.symbol);
+    const key = portfolioKey(entry.symbol, (entry as { venue?: string }).venue || "coins_ph");
+    const stats = coinMap.get(key);
     const totalBought = stats ? stats.totalBoughtPhp : 0;
     const totalSold = stats ? stats.totalSoldPhp : 0;
     const netSpent = Math.max(0, totalBought - totalSold);
@@ -676,11 +700,29 @@ export function useTradeLogic() {
   const [coinOptions, setCoinOptions] = useState<CoinOption[]>([]);
   const [transactions, setTransactions] = useState<TransactionView[]>([]);
   const [portfolio, setPortfolio] = useState<PortfolioEntry[]>([]);
+  const [cashByVenue, setCashByVenue] = useState<Record<string, number>>({});
+  const [cashOnHand, setCashOnHand] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [type, setType] = useState<TradeType>("buy");
+  const [venue, setVenue] = useState<VenueId>("coins_ph");
   const [riskBudget, setRiskBudgetState] = useState<RiskBudgetSettings>(() => loadRiskBudget());
+  const [symbol, setSymbol] = useState("");
+  const [phpAmount, setPhpAmount] = useState("");
+  const [coinAmount, setCoinAmount] = useState("");
+  const [customPrice, setCustomPrice] = useState("");
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [lastTransaction, setLastTransaction] = useState<TransactionView | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editCoinAmount, setEditCoinAmount] = useState("");
+  const [editPhpAmount, setEditPhpAmount] = useState("");
+  const [editPrice, setEditPrice] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
 
   const setRiskBudget = useCallback((next: Partial<RiskBudgetSettings>) => {
     setRiskBudgetState((prev) => {
@@ -693,24 +735,6 @@ export function useTradeLogic() {
       return merged;
     });
   }, []);
-
-  const [symbol, setSymbol] = useState("");
-  const [phpAmount, setPhpAmount] = useState("");
-  const [coinAmount, setCoinAmount] = useState("");
-  const [customPrice, setCustomPrice] = useState("");
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const [lastTransaction, setLastTransaction] = useState<TransactionView | null>(null);
-
-  const [deletingId, setDeletingId] = useState<number | null>(null);
-
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editCoinAmount, setEditCoinAmount] = useState("");
-  const [editPhpAmount, setEditPhpAmount] = useState("");
-  const [editPrice, setEditPrice] = useState("");
-  const [editError, setEditError] = useState<string | null>(null);
-  const [editSaving, setEditSaving] = useState(false);
 
   // silent = refresh after a save/delete without swapping the page back to skeletons
   const load = useCallback(async (silent = false) => {
@@ -725,12 +749,16 @@ export function useTradeLogic() {
       const txData = (await txRes.json()) as {
         transactions: TransactionView[];
         portfolio: PortfolioEntry[];
+        cashByVenue?: Record<string, number>;
+        cashOnHand?: number;
       };
 
       const options = coinsData.coins.map((c) => ({ symbol: c.symbol, name: c.name }));
       setCoinOptions(options);
       setSymbol((prev) => prev || options[0]?.symbol || "");
       setTransactions(txData.transactions);
+      setCashByVenue(txData.cashByVenue || {});
+      setCashOnHand(Number(txData.cashOnHand) || 0);
 
       const adjustedPortfolio = processPortfolio(txData.portfolio, txData.transactions);
       setPortfolio(adjustedPortfolio);
@@ -821,7 +849,10 @@ export function useTradeLogic() {
       return;
     }
     if (type === "sell") {
-      const held = coinAnalytics.find((c) => c.symbol === symbol)?.holdings ?? 0;
+      const held =
+        coinAnalytics.find(
+          (c) => c.symbol === symbol && normalizeVenue(c.venue) === normalizeVenue(venue)
+        )?.holdings ?? 0;
       if (coins > held + 1e-8 + held * 1e-9) {
         setSubmitError(`You only hold ${held} — can't sell ${coins}. Log the missing buy first.`);
         return;
@@ -836,6 +867,7 @@ export function useTradeLogic() {
         body: JSON.stringify({
           symbol: isCashFlow ? null : symbol,
           type,
+          venue,
           phpAmount: amount,
           coinAmount: isCashFlow ? 0 : coins,
           customPrice: customPrice ? Number(customPrice) : undefined,
@@ -1007,6 +1039,8 @@ export function useTradeLogic() {
     coinOptions,
     transactions,
     portfolio,
+    cashByVenue,
+    cashOnHand,
     coinAnalytics,
     analyticsSummary,
     riskBudget,
@@ -1016,6 +1050,8 @@ export function useTradeLogic() {
     loadError,
     type,
     setType,
+    venue,
+    setVenue,
     symbol,
     setSymbol,
     phpAmount,

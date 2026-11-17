@@ -8,11 +8,14 @@ import {
   updateTransactionSchema,
 } from "@/validators/transactionSchema";
 import type { PortfolioEntry, TransactionView } from "@/validators/transactionSchema";
+import { normalizeVenue, portfolioKey } from "@/lib/venues";
 
 type ListResponse = { 
   transactions: TransactionView[]; 
   portfolio: PortfolioEntry[];
   cashOnHand: number;
+  /** Cash per venue (deposits + sells − buys − withdraws) */
+  cashByVenue: Record<string, number>;
   totalDeposited: number;
   totalWithdrawn: number;
 };
@@ -46,6 +49,7 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
       isManual: true,
       transactedAt: true,
       coinId: true,
+      venue: true,
       coin: {
         select: { id: true, symbol: true, name: true },
       },
@@ -56,20 +60,34 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
   let totalDeposited = 0;
   let totalWithdrawn = 0;
 
+  const cashByVenue: Record<string, number> = {
+    coins_ph: 0,
+    maya: 0,
+    gcash: 0,
+  };
   const cashOnHand = transactions.reduce((acc, t) => {
     const type = t.type.toLowerCase();
     const amt = Number(t.phpAmount) || 0;
+    const v = normalizeVenue((t as { venue?: string }).venue);
 
     if (type === "deposit") {
       totalDeposited += amt;
+      cashByVenue[v] = (cashByVenue[v] || 0) + amt;
       return acc + amt;
     }
-    if (type === "sell") return acc + amt;
+    if (type === "sell") {
+      cashByVenue[v] = (cashByVenue[v] || 0) + amt;
+      return acc + amt;
+    }
     if (type === "withdraw") {
       totalWithdrawn += amt;
+      cashByVenue[v] = (cashByVenue[v] || 0) - amt;
       return acc - amt;
     }
-    if (type === "buy") return acc - amt;
+    if (type === "buy") {
+      cashByVenue[v] = (cashByVenue[v] || 0) - amt;
+      return acc - amt;
+    }
     return acc;
   }, 0);
 
@@ -83,20 +101,32 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
     coinAmount: Number(t.coinAmount),
     isManual: t.isManual,
     transactedAt: t.transactedAt.toISOString(),
+    venue: normalizeVenue((t as { venue?: string }).venue),
   }));
 
   const byCoin = new Map<
     string,
-    { coinId: number; symbol: string; name: string; holdings: number; spent: number; sold: number }
+    {
+      coinId: number;
+      symbol: string;
+      name: string;
+      venue: string;
+      holdings: number;
+      spent: number;
+      sold: number;
+    }
   >();
 
   for (const t of transactions) {
     if (!t.coin) continue;
+    const venue = normalizeVenue((t as { venue?: string }).venue);
+    const key = portfolioKey(t.coin.symbol, venue);
 
-    const existing = byCoin.get(t.coin.symbol) ?? {
+    const existing = byCoin.get(key) ?? {
       coinId: t.coin.id,
       symbol: t.coin.symbol,
       name: t.coin.name,
+      venue,
       holdings: 0,
       spent: 0,
       sold: 0,
@@ -116,7 +146,7 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
     // Dust / float noise: treat near-zero bags as fully realized
     if (Math.abs(existing.holdings) < 1e-8) existing.holdings = 0;
     if (existing.holdings < 0) existing.holdings = 0;
-    byCoin.set(t.coin.symbol, existing);
+    byCoin.set(key, existing);
   }
 
   const entries = Array.from(byCoin.values());
@@ -157,6 +187,7 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
     return {
       symbol: entry.symbol,
       name: entry.name,
+      venue: entry.venue || "coins_ph",
       holdings: entry.holdings,
       bought: entry.spent,
       spent: netSpent,
@@ -171,6 +202,7 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
     transactions: transactionViews, 
     portfolio, 
     cashOnHand,
+    cashByVenue,
     totalDeposited,
     totalWithdrawn,
   });
@@ -182,27 +214,39 @@ async function handleCreate(req: NextApiRequest, res: NextApiResponse<CreateResp
     return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Invalid transaction payload" });
   }
 
-  const { symbol, type, phpAmount, coinAmount, transactedAt: manualDate } = parsed.data;
+  const { symbol, type, phpAmount, coinAmount, transactedAt: manualDate, venue: venueRaw } = parsed.data;
   const typeLower = type.toLowerCase();
+  const venue = normalizeVenue(venueRaw);
 
-  const allTxs = await prisma.transaction.findMany({ select: { type: true, phpAmount: true } });
+  const allTxs = await prisma.transaction.findMany({
+    select: { type: true, phpAmount: true, venue: true },
+  });
   let cashBalance = 0;
+  let venueCash = 0;
   for (const tx of allTxs) {
     const tType = tx.type.toLowerCase();
     const amt = Number(tx.phpAmount) || 0;
-    if (tType === "deposit" || tType === "sell") cashBalance += amt;
-    if (tType === "withdraw" || tType === "buy") cashBalance -= amt;
+    const v = normalizeVenue((tx as { venue?: string }).venue);
+    if (tType === "deposit" || tType === "sell") {
+      cashBalance += amt;
+      if (v === venue) venueCash += amt;
+    }
+    if (tType === "withdraw" || tType === "buy") {
+      cashBalance -= amt;
+      if (v === venue) venueCash -= amt;
+    }
   }
 
-  if ((typeLower === "buy" || typeLower === "withdraw") && phpAmount > cashBalance) {
+  // Soft check per venue — warn via message but allow if total cash ok? Prefer strict per venue.
+  if ((typeLower === "buy" || typeLower === "withdraw") && phpAmount > venueCash + 1e-6) {
     return res.status(400).json({
-      error: `Insufficient cash balance. Available: ₱${cashBalance.toLocaleString("en-US", {
+      error: `Insufficient ${venue} cash. Available on this venue: ₱${venueCash.toLocaleString("en-US", {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       })}. Tried to ${typeLower}: ₱${phpAmount.toLocaleString("en-US", {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
-      })}.`,
+      })}. Deposit on ${venue} first (or use another venue).`,
     });
   }
 
@@ -225,8 +269,8 @@ async function handleCreate(req: NextApiRequest, res: NextApiResponse<CreateResp
 
     if (typeLower === "sell") {
       const existing = await prisma.transaction.findMany({
-        where: { coinId: coin.id },
-        select: { type: true, coinAmount: true },
+        where: { coinId: coin.id, venue },
+        select: { type: true, coinAmount: true, venue: true },
       });
       const currentlyHeld = existing.reduce(
         (sum, t) =>
@@ -238,16 +282,14 @@ async function handleCreate(req: NextApiRequest, res: NextApiResponse<CreateResp
               : 0),
         0
       );
-      // Float tolerance: UI often posts the same 0.17372 that we compute as 0.173719999…
       const EPS = 1e-8;
       if (finalCoinAmount > currentlyHeld + EPS) {
         return res.status(400).json({
           error: `You only hold ${currentlyHeld.toLocaleString(undefined, {
             maximumFractionDigits: 8,
-          })} ${symbol}, can't sell ${finalCoinAmount}.`,
+          })} ${symbol} on ${venue}, can't sell ${finalCoinAmount}.`,
         });
       }
-      // Full exit: clamp to exact held so residual dust does not remain
       if (finalCoinAmount >= currentlyHeld - EPS) {
         finalCoinAmount = Math.max(0, currentlyHeld);
       }
@@ -261,6 +303,7 @@ async function handleCreate(req: NextApiRequest, res: NextApiResponse<CreateResp
     phpAmount,
     price: isCashFlow ? 0 : price,
     coinAmount: isCashFlow ? 0 : finalCoinAmount,
+    venue,
     isManual: true,
     ...(coinId !== null ? { coinId } : {}),
     ...(manualDate ? { transactedAt: new Date(manualDate) } : {}),
@@ -282,6 +325,7 @@ async function handleCreate(req: NextApiRequest, res: NextApiResponse<CreateResp
       coinAmount: Number(transaction.coinAmount),
       isManual: transaction.isManual,
       transactedAt: transaction.transactedAt.toISOString(),
+      venue: normalizeVenue((transaction as { venue?: string }).venue),
     },
   });
 }

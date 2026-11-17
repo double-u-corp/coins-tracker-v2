@@ -836,14 +836,19 @@ export default function ChartView() {
   }, [symbol, transactions]);
 
   const buyMarks = useMemo(() => {
-    if (!coinTransactions?.length) return [] as { dayKey: string; price: number }[];
-    const marks: { dayKey: string; price: number }[] = [];
+    if (!coinTransactions?.length)
+      return [] as { dayKey: string; price: number; venue?: string }[];
+    const marks: { dayKey: string; price: number; venue?: string }[] = [];
     for (const tx of coinTransactions) {
       if (tx.type !== "buy" || !(tx.price > 0)) continue;
       const tms = new Date(tx.transactedAt).getTime();
       if (!Number.isFinite(tms)) continue;
       const dayKey = new Date(tms + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
-      marks.push({ dayKey, price: tx.price });
+      marks.push({
+        dayKey,
+        price: tx.price,
+        venue: (tx as { venue?: string }).venue || "coins_ph",
+      });
     }
     return marks;
   }, [coinTransactions]);
@@ -936,14 +941,6 @@ export default function ChartView() {
             >
               <span aria-hidden>⚙️</span>
               <span>Manage</span>
-            </Link>
-            <Link
-              href="/long-scan"
-              className={`${pageNavBtn} border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100`}
-              title="LONG scan log"
-            >
-              <span aria-hidden>📡</span>
-              <span>LONG scan</span>
             </Link>
           </>
         )}

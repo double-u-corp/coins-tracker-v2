@@ -1,3 +1,4 @@
+import { VENUES, venueColor, venueLabel, normalizeVenue } from "@/lib/venues";
 import { useState, useMemo, useEffect, useCallback } from "react";
 import {
   ResponsiveContainer,
@@ -242,21 +243,30 @@ export default function PriceLineChart({
         const hit = manilaH != null && m.hours.includes(manilaH);
         sessionFields[`sessionPrice${mi}`] = hit ? px : null;
       });
-      let buyPrice: number | null = null;
+      const buyByVenue: Record<string, number | null> = {
+        coins_ph: null,
+        maya: null,
+        gcash: null,
+      };
       if (buyMarks?.length && rawPeriod) {
         const tms = new Date(rawPeriod).getTime();
         if (Number.isFinite(tms)) {
           const dayKey = new Date(tms + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
-          const hit = buyMarks.find((b) => b.dayKey === dayKey);
-          if (hit && hit.price >= bandLo && hit.price <= bandHi) {
-            buyPrice = hit.price;
+          for (const b of buyMarks) {
+            if (b.dayKey !== dayKey) continue;
+            if (!(b.price >= bandLo && b.price <= bandHi)) continue;
+            const v = normalizeVenue(b.venue);
+            // last buy that day per venue wins
+            buyByVenue[v] = b.price;
           }
         }
       }
       return {
         ...p,
         price: px,
-        buyPrice,
+        buyPrice_coins_ph: buyByVenue.coins_ph,
+        buyPrice_maya: buyByVenue.maya,
+        buyPrice_gcash: buyByVenue.gcash,
         hotPrice: isHotSlot ? px : null,
         isHotSlot,
         ...sessionFields,
@@ -423,26 +433,29 @@ export default function PriceLineChart({
             {showHigh && (
               <Line type="monotone" dataKey="high" stroke="#22c55e" strokeWidth={1.5} dot={false} name="High" connectNulls />
             )}
-            <Line
-              type="monotone"
-              dataKey="buyPrice"
-              stroke="none"
-              dot={{
-                r: isMobile ? 3 : 4,
-                fill: "#7c3aed",
-                stroke: "#fff",
-                strokeWidth: isMobile ? 1 : 1.5,
-              }}
-              activeDot={{
-                r: isMobile ? 4 : 5,
-                fill: "#7c3aed",
-                stroke: "#fff",
-                strokeWidth: 1.5,
-              }}
-              name="Buy"
-              connectNulls={false}
-              isAnimationActive={false}
-            />
+            {VENUES.map((v) => (
+              <Line
+                key={`buy-${v}`}
+                type="monotone"
+                dataKey={`buyPrice_${v}`}
+                stroke="none"
+                dot={{
+                  r: isMobile ? 3 : 4,
+                  fill: venueColor(v),
+                  stroke: "#fff",
+                  strokeWidth: isMobile ? 1 : 1.5,
+                }}
+                activeDot={{
+                  r: isMobile ? 4 : 5,
+                  fill: venueColor(v),
+                  stroke: "#fff",
+                  strokeWidth: 1.5,
+                }}
+                name={`Buy · ${venueLabel(v)}`}
+                connectNulls={false}
+                isAnimationActive={false}
+              />
+            ))}
             {highlightHotSlots && (
               <Line
                 type="monotone"

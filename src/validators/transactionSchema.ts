@@ -16,6 +16,10 @@ export const createTransactionSchema = z
       .optional()
       .nullable(),
     type: z.enum(["buy", "sell", "deposit", "withdraw"]),
+    venue: z
+      .enum(["coins_ph", "maya", "gcash"])
+      .optional()
+      .default("coins_ph"),
     phpAmount: z.coerce
       .number({ invalid_type_error: "Enter a valid PHP amount" })
       .positive("PHP amount must be greater than 0")
@@ -85,6 +89,7 @@ export const transactionSchema = z.object({
   coinAmount: z.number(),
   isManual: z.boolean(),
   transactedAt: z.string(),
+  venue: z.string().default("coins_ph"),
 });
 
 export type TransactionView = z.infer<typeof transactionSchema>;
@@ -100,6 +105,8 @@ export type TransactionView = z.infer<typeof transactionSchema>;
 export const portfolioEntrySchema = z.object({
   symbol: z.string(),
   name: z.string(),
+  /** coins_ph | maya | gcash — separate bags; same symbol can appear multiple times */
+  venue: z.string().default("coins_ph"),
   holdings: z.number(), // net coins held = totalBought - totalSold
   spent: z.number(), // net PHP invested = totalPhpSpent (buys) - totalPhpReceived (sells)
   sold: z.number(), // gross PHP received from sells (totalPhpReceived)
