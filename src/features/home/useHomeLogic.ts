@@ -356,7 +356,9 @@ export function useHomeLogic() {
           const sym = (tx.symbol || "").toUpperCase();
           if (!sym) continue;
           if ((tx.type || "").toLowerCase() === "buy") {
-            bought.add(portfolioKey(sym, (tx as { venue?: string }).venue));
+            bought.add(
+              portfolioKey(sym, normalizeVenue((tx as { venue?: string }).venue))
+            );
             bought.add(sym);
           }
         }
