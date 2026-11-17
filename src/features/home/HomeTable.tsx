@@ -9,6 +9,7 @@ import {
 } from "@/lib/holdMae";
 import dynamic from "next/dynamic";
 import HomeCoinWatchDates from "./HomeCoinWatchDates";
+import HomeMonitorBoard from "./HomeMonitorBoard";
 import { useState, useEffect, useMemo, type ReactNode } from "react";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
@@ -26,10 +27,7 @@ const ManageCoinsView = dynamic(() => import("@/features/manage/ManageCoinsView"
 import { useHomeLogic } from "./useHomeLogic";
 import NewRecordModal from "./NewRecordModal";
 import HomeMacroWatch from "./HomeMacroWatch";
-import HomeRsiOversold from "./HomeRsiOversold";
 import HomeWatchPlanCharts from "./HomeWatchPlanCharts";
-import HomeNearSupportCharts from "./HomeNearSupportCharts";
-import HomeExtendedAboveSma from "./HomeExtendedAboveSma";
 import JournalSidebar from "@/features/chart/JournalSidebar";
 import PriceUpdateModal from "./PriceUpdateModal";
 import type { CoinSummary } from "@/validators/recordSchema";
@@ -1892,30 +1890,6 @@ export default function HomeTable() {
 </div>
       )}
 
-      {!loading && allCoins.length > 0 && (
-        <div className="mb-6 space-y-4">
-          <HomeNearSupportCharts
-            universe={allCoins.map((c) => ({ symbol: c.symbol, name: c.name }))}
-            watchPlanCoins={planMonitorCards.map((card) => {
-              const coin =
-                allCoins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase()) ||
-                coins.find((c) => c.symbol.toUpperCase() === card.symbol.toUpperCase());
-              return {
-                symbol: card.symbol,
-                name: card.name,
-                currentPrice: card.currentPrice ?? coin?.currentPrice ?? null,
-              };
-            })}
-          />
-          <HomeExtendedAboveSma
-            universe={allCoins.map((c) => ({ symbol: c.symbol, name: c.name }))}
-          />
-          <HomeRsiOversold
-            universe={allCoins.map((c) => ({ symbol: c.symbol, name: c.name }))}
-          />
-        </div>
-      )}
-
       {loading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true" aria-label="Loading coins">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -1962,7 +1936,9 @@ export default function HomeTable() {
       )}
 
       {/* 2a) Coin watch dates from journals */}
-      <HomeCoinWatchDates journalEntries={journalEntries} allCoins={allCoins} />
+      <HomeMonitorBoard universe={allCoins || []} />
+
+          <HomeCoinWatchDates journalEntries={journalEntries} allCoins={allCoins} />
 
       {/* 2b) Macro watch */}
       <HomeMacroWatch />

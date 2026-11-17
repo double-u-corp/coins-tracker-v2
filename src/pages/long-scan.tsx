@@ -1,23 +1,17 @@
-import type { GetServerSideProps, NextPage } from "next";
-import Head from "next/head";
-import LongScanView from "@/features/longScan/LongScanView";
-import { requireAuthSSR } from "@/lib/auth";
+import { useEffect } from "react";
+import { useRouter } from "next/router";
+import type { NextPage } from "next";
 
-/** SSR only — do not combine with getStaticProps / getStaticPaths. */
-export const getServerSideProps: GetServerSideProps = async (context) => {
-  const redirect = requireAuthSSR(context);
-  if (redirect) return redirect;
-  return { props: {} };
-};
-
+/** LONG-scan page retired — monitor board lives on Home (manual bulk scan). */
 const LongScanPage: NextPage = () => {
+  const router = useRouter();
+  useEffect(() => {
+    void router.replace("/");
+  }, [router]);
   return (
-    <>
-      <Head>
-        <title>Daily LONG scan · Coins Tracker</title>
-      </Head>
-      <LongScanView />
-    </>
+    <p className="p-6 text-sm text-slate-600">
+      LONG scan moved to Home → Monitor board. Redirecting…
+    </p>
   );
 };
 
