@@ -6,8 +6,8 @@ import prisma from "@/lib/prisma";
 import {
   calculateRSIAt,
   calculateSMAAt,
-  type ChartPoint,
 } from "@/features/chart/Technicals";
+import type { ChartPoint } from "@/validators/recordSchema";
 
 export const HOME_MONITOR_PROMPT_ID = "home-monitor-scan";
 export const HOME_MONITOR_CATEGORY = "HomeMonitor";
