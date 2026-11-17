@@ -41,7 +41,7 @@ export interface PriceLineChartProps {
   /** Live / latest price — shown as a distinct dot on the last bar (Spot). */
   currentPrice?: number | null;
   /** Spot buys plotted on the matching Manila day at fill price. */
-  buyMarks?: { dayKey: string; price: number }[] | null;
+  buyMarks?: { dayKey: string; price: number; venue?: string | null }[] | null;
   /** Optional analysis overlays controlled from parent (Spot). */
   overlayControls?: {
     showClose?: boolean;
