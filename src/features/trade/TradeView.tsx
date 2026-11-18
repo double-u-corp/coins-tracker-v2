@@ -1051,7 +1051,7 @@ export default function TradeView() {
             className="rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm"
           >
             {coinOptions.map((c) => (
-              <option key={`${c.symbol}::${c.venue || "coins_ph"}`} value={c.symbol}>
+              <option key={`${c.symbol}::${(c as { venue?: string }).venue || "coins_ph"}`} value={c.symbol}>
                 {c.name} ({c.symbol})
               </option>
             ))}
