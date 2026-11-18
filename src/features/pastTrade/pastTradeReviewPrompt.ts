@@ -27,6 +27,8 @@ function formatAssetLabel(symbol: string): { base: string; pair: string; label: 
     ENA: "Ethena",
     XAUT: "Tether Gold",
     ONDO: "Ondo Finance RWA",
+    RENDER: "Render Network (RNDR/RENDER) GPU/decentralized rendering — crypto token, not the English verb “render”",
+    NEAR: "NEAR Protocol L1 blockchain — crypto token, not “near” as in proximity",
     SKY: "Sky protocol (MakerDAO-related)",
     TRUMP: "TRUMP meme coin on Solana — not the person as a news topic alone",
     SOL: "Solana",

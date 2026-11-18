@@ -149,7 +149,8 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
     byCoin.set(key, existing);
   }
 
-  const entries = Array.from(byCoin.values());
+  // Only open bags — drop flat rows so Home/Trade don't show "closed" coins as held
+  const entries = Array.from(byCoin.values()).filter((e) => e.holdings > 1e-8);
   const coinIds = entries.map((e) => e.coinId);
 
   // Batch query latest fallback prices from DB in a single call
@@ -391,7 +392,6 @@ async function handleUpdate(req: NextApiRequest, res: NextApiResponse<UpdateResp
       coinAmount: Number(updated.coinAmount),
       isManual: updated.isManual,
       transactedAt: updated.transactedAt.toISOString(),
-      venue: normalizeVenue((updated as { venue?: string }).venue),
     },
   });
 }

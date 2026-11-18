@@ -908,9 +908,13 @@ export default function HomeTable() {
     const cost: Mini[] = [];
     const free: Mini[] = [];
     const seen = new Set<string>();
+    /** Ignore dust residuals after a "full" sell (float / leftover micro units). */
+    const MIN_UNITS = 1e-6;
+    const MIN_MARK_PHP = 25; // below this mark value → treat as closed, not on-hold
+
     const rows = (portfolio || []).filter(
       (p: { symbol?: string; holdings?: number }) =>
-        p.symbol && p.symbol !== "PHP" && (Number(p.holdings) || 0) > 1e-8
+        p.symbol && p.symbol !== "PHP" && (Number(p.holdings) || 0) > MIN_UNITS
     ) as {
       symbol: string;
       name?: string;
@@ -931,6 +935,11 @@ export default function HomeTable() {
         coins.find((c) => c.symbol.toUpperCase() === sym);
       const holdings = Number(pos.holdings) || 0;
       const spent = Number(pos.spent) || 0;
+      const price =
+        Number(coin?.currentPrice ?? pos.currentPrice ?? 0) || 0;
+      const mark = price > 0 ? holdings * price : spent > 0 ? spent : 0;
+      // Closed / dust: no meaningful bag left on this venue
+      if (holdings <= MIN_UNITS || (price > 0 && mark < MIN_MARK_PHP)) continue;
       const row: Mini = {
         symbol: sym,
         name: coin?.name || pos.name || sym.replace(/PHP$/i, ""),
@@ -939,8 +948,9 @@ export default function HomeTable() {
         holdings,
         spent,
       };
-      if (holdings > 0 && spent <= 0) free.push(row);
-      else if (holdings > 0 && spent > 0) cost.push(row);
+      // House money residual (sold enough PHP to clear cost) → free, not cost-hold
+      if (spent <= 0) free.push(row);
+      else cost.push(row);
     }
     const unrealizedPct = (m: Mini) => {
       const price = Number(m.currentPrice) || 0;

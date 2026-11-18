@@ -82,7 +82,7 @@ function inferSymbolFromText(text: string, known?: string | null): string | null
   const bases = [
     "ASTER", "TRUMP", "WEMIX", "VIRTUAL", "HBAR", "AAVE", "LINK", "ONDO", "GRAM",
     "SHIB", "XAUT", "BCH", "BNB", "BTC", "ETH", "SOL", "SUI", "XLM", "XRP", "XDC",
-    "ADA", "UNI", "TRX", "SPX", "ENA", "XPL", "RON", "TX", "POL", "BGB", "SKY", "HYPE",
+    "ADA", "UNI", "TRX", "SPX", "ENA", "XPL", "RON", "TX", "POL", "BGB", "SKY", "HYPE", "RENDER", "NEAR",
   ];
   const upper = t.toUpperCase();
   for (const b of bases) {
@@ -145,7 +145,8 @@ export function extractCoinWatchEventsFromNotes(
   };
 
   for (const raw of lines) {
-    const line = raw.trim();
+    // Strip list markers: • · - * and optional "Watch date" noise
+    let line = raw.trim().replace(/^[•·▪◦\-\*]+\s*/, "").trim();
     if (!line || line.length < 8) continue;
     // skip section headers only
     if (/^watch[_\s-]*dates\s*:?\s*$/i.test(line)) continue;

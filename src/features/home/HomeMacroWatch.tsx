@@ -211,7 +211,7 @@ Summarize **current and upcoming** Coins.ph platform issues, specifically auditi
 `;
 
 export default function HomeMacroWatch() {
-    const [macroPromptCopied, setMacroPromptCopied] = useState(false);
+  const [macroPromptCopied, setMacroPromptCopied] = useState(false);
   const [coinsPhCopied, setCoinsPhCopied] = useState(false);
   const [events, setEvents] = useState<MacroEvent[]>([]);
   const [meta, setMeta] = useState<MetaStore>({ version: 1, deletedKeys: [], history: [] });
@@ -220,15 +220,6 @@ export default function HomeMacroWatch() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [formDate, setFormDate] = useState("");
-  const [formTitle, setFormTitle] = useState("");
-  const [formType, setFormType] = useState<MacroEvent["type"]>("OTHER");
-  const [formSeverity, setFormSeverity] = useState<"high" | "medium">("medium");
-  const [formTimeET, setFormTimeET] = useState("");
-  const [formDetail, setFormDetail] = useState("");
-  const [formCoin, setFormCoin] = useState("");
-  const [savingManual, setSavingManual] = useState(false);
 
   const saveEvents = async (next: MacroEvent[]) => {
     await fetch("/api/catalyst-ai", {
@@ -410,72 +401,6 @@ export default function HomeMacroWatch() {
     }
   };
 
-  const addManualEvent = async () => {
-    const date = formDate.trim();
-    const title = formTitle.trim();
-    if (!date || !title) {
-      setError("Date and title are required");
-      return;
-    }
-    setSavingManual(true);
-    setError(null);
-    try {
-      const evt: ManualEvent = {
-        date,
-        title,
-        type: formType,
-        severity: formSeverity,
-        timeET: formTimeET.trim() || undefined,
-        detail: formDetail.trim() || undefined,
-        coinSymbol: formCoin.trim().toUpperCase() || undefined,
-        source: "manual",
-      };
-      const withManila = attachManilaFields([evt])[0] ?? evt;
-      const deleted = new Set(meta.deletedKeys);
-      // Allow re-adding a previously deleted key
-      const key = eventKey(withManila);
-      const nextDeleted = meta.deletedKeys.filter((k) => k !== key);
-      const merged = mergeEvents(events, [withManila], new Set(nextDeleted));
-      const nextMeta: MetaStore = { ...meta, deletedKeys: nextDeleted };
-      await persistMerged(merged, nextMeta);
-      setEvents(merged);
-      setMeta(nextMeta);
-      setFormTitle("");
-      setFormDetail("");
-      setFormTimeET("");
-      setFormCoin("");
-      setShowAddForm(false);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setSavingManual(false);
-    }
-  };
-
-  const deleteHistorySnap = async (at: number) => {
-    const nextMeta: MetaStore = {
-      ...meta,
-      history: meta.history.filter((h) => h.at !== at),
-    };
-    setMeta(nextMeta);
-    try {
-      await persistMerged(events, nextMeta);
-    } catch (err) {
-      setError((err as Error).message);
-      void loadCache();
-    }
-  };
-
-  const clearAllHistory = async () => {
-    const nextMeta: MetaStore = { ...meta, history: [] };
-    setMeta(nextMeta);
-    try {
-      await persistMerged(events, nextMeta);
-    } catch (err) {
-      setError((err as Error).message);
-      void loadCache();
-    }
-  };
 
   const deleteEvent = async (evt: MacroEvent) => {
     const key = eventKey(evt);
@@ -543,6 +468,23 @@ export default function HomeMacroWatch() {
           )}
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void copyMacroAgentPrompt()}
+            className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-900 hover:bg-indigo-100"
+            title="Copy dynamic macro calendar agent prompt (verify dates + find missing events)"
+          >
+            {macroPromptCopied ? "✅ Copied" : "📋 Macro agent"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            disabled={refreshing}
+            className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+            title="Scan upcoming CPI / NFP / FOMC / PCE dates (AI + search)"
+          >
+            {refreshing ? "Scanning…" : "↻ Refresh dates"}
+          </button>
           <button
             type="button"
             onClick={async () => {
@@ -638,7 +580,7 @@ export default function HomeMacroWatch() {
         </div>
       ) : display.length === 0 ? (
         <p className="text-xs text-slate-500 py-2">
-          No calendar loaded yet. Macro dates load from saved scans / agent notes when available.
+          No calendar loaded yet. Click <span className="font-semibold">↻ Refresh dates</span> to scan upcoming CPI / NFP / FOMC / PCE, or use <span className="font-semibold">📋 Macro agent</span> to verify with an external model.
         </p>
       ) : (
         <>

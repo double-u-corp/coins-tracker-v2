@@ -30,52 +30,92 @@ interface CoinsTickerResponse {
  * Fetches the current price for a single symbol from the Coins.ph public
  * ticker endpoint, with custom interceptors for CoinMarketCap tokens.
  */
-export async function fetchPrice(symbol: string): Promise<number> {
-  // 1. Intercept custom coins to use CoinMarketCap
-  if (["ONDOPHP", "ONDO", "TXPHP", "TX"].includes(symbol)) {
-    const baseSymbol = symbol.replace("PHP", ""); // Extracts exactly "ONDO" or "TX"
+/** CMC symbols that may lack a Coins.ph PHP pair (or pair is unreliable). */
+const CMC_FALLBACK_BASES = new Set(["ONDO", "TX", "RENDER", "NEAR"]);
 
-    // A. Fetch price in USD from CoinMarketCap
-    const cmcRes = await fetch(
-      `${CMC_QUOTE_URL}?symbol=${baseSymbol}`,
-      {
-        headers: {
-          "X-CMC_PRO_API_KEY": process.env.CMC_API_KEY || "", 
-        },
-        cache: "no-store",
-      }
-    );
-    if (!cmcRes.ok) throw new Error(`CoinMarketCap API error for ${symbol}`);
-    const cmcData = await cmcRes.json();
-    const usdPrice = cmcData.data[baseSymbol].quote.USD.price;
-
-    // B. Fetch live USD to PHP exchange rate (Free, no API key)
-    const fxRes = await fetch(FOREX_API_URL, { cache: "no-store" });
-    if (!fxRes.ok) throw new Error(`Forex API error for USD to PHP conversion`);
-    const fxData = await fxRes.json();
-    const usdToPhpRate = fxData.rates.PHP;
-
-    // C. Calculate final PHP price
-    return usdPrice * usdToPhpRate;
+async function fetchUsdToPhpRate(): Promise<number> {
+  const fxRes = await fetch(FOREX_API_URL, { cache: "no-store" });
+  if (!fxRes.ok) throw new Error(`Forex API error for USD→PHP (${fxRes.status})`);
+  const fxData = (await fxRes.json()) as { rates?: { PHP?: number } };
+  const rate = Number(fxData?.rates?.PHP);
+  if (!Number.isFinite(rate) || rate <= 0) {
+    throw new Error("Forex API returned invalid PHP rate");
   }
+  return rate;
+}
 
-  // 2. Default behavior for all other coins (Coins.ph)
-  const res = await fetch(`${TICKER_PRICE_URL}?symbol=${encodeURIComponent(symbol)}`, {
+async function fetchPriceFromCmc(baseSymbol: string): Promise<number> {
+  const key = process.env.CMC_API_KEY || "";
+  if (!key) {
+    throw new Error(
+      `CMC_API_KEY is missing — required for ${baseSymbol} (same path as ONDO/TX)`
+    );
+  }
+  const cmcRes = await fetch(`${CMC_QUOTE_URL}?symbol=${encodeURIComponent(baseSymbol)}`, {
+    headers: { "X-CMC_PRO_API_KEY": key },
     cache: "no-store",
   });
-
-  if (!res.ok) {
-    throw new Error(`Coins.ph API error for ${symbol}: ${res.status} ${res.statusText}`);
+  const bodyText = await cmcRes.text();
+  let cmcData: {
+    status?: { error_message?: string; error_code?: number };
+    data?: Record<string, { quote?: { USD?: { price?: number } } }>;
+  } = {};
+  try {
+    cmcData = JSON.parse(bodyText) as typeof cmcData;
+  } catch {
+    throw new Error(`CoinMarketCap non-JSON for ${baseSymbol}: ${bodyText.slice(0, 120)}`);
   }
+  if (!cmcRes.ok) {
+    const msg = cmcData?.status?.error_message || cmcRes.statusText;
+    throw new Error(`CoinMarketCap HTTP ${cmcRes.status} for ${baseSymbol}: ${msg}`);
+  }
+  const usdPrice = Number(cmcData?.data?.[baseSymbol]?.quote?.USD?.price);
+  if (!Number.isFinite(usdPrice) || usdPrice <= 0) {
+    const keys = cmcData?.data ? Object.keys(cmcData.data).join(",") : "none";
+    throw new Error(
+      `CoinMarketCap has no USD price for ${baseSymbol} (data keys: ${keys}). Check CMC symbol.`
+    );
+  }
+  const usdToPhp = await fetchUsdToPhpRate();
+  return usdPrice * usdToPhp;
+}
 
+async function fetchPriceFromCoinsPh(phpSymbol: string): Promise<number> {
+  const res = await fetch(`${TICKER_PRICE_URL}?symbol=${encodeURIComponent(phpSymbol)}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new Error(`Coins.ph API error for ${phpSymbol}: ${res.status} ${res.statusText}`);
+  }
   const data = (await res.json()) as CoinsTickerResponse;
   const price = parseFloat(data.price);
+  if (Number.isNaN(price) || price <= 0) {
+    throw new Error(`Coins.ph invalid price for ${phpSymbol}: ${JSON.stringify(data)}`);
+  }
+  return price;
+}
 
-  if (Number.isNaN(price)) {
-    throw new Error(`Coins.ph API returned an invalid price for ${symbol}: ${JSON.stringify(data)}`);
+export async function fetchPrice(symbol: string): Promise<number> {
+  const raw = (symbol || "").trim().toUpperCase();
+  const phpSymbol = raw.endsWith("PHP") ? raw : `${raw}PHP`;
+  const baseSymbol = phpSymbol.replace(/PHP$/, "") || raw;
+
+  // Prefer Coins.ph when the pair exists; CMC only for known non-pair / fallback bases
+  if (CMC_FALLBACK_BASES.has(baseSymbol)) {
+    try {
+      return await fetchPriceFromCoinsPh(phpSymbol);
+    } catch (coinsErr) {
+      try {
+        return await fetchPriceFromCmc(baseSymbol);
+      } catch (cmcErr) {
+        throw new Error(
+          `${baseSymbol} price failed. Coins.ph: ${(coinsErr as Error).message}. CMC: ${(cmcErr as Error).message}`
+        );
+      }
+    }
   }
 
-  return price;
+  return fetchPriceFromCoinsPh(phpSymbol);
 }
 
 /**
