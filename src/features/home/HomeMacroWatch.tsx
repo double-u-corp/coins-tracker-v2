@@ -421,6 +421,32 @@ export default function HomeMacroWatch() {
     }
   };
 
+  const deleteHistorySnap = async (at: number) => {
+    const nextMeta: MetaStore = {
+      ...meta,
+      history: meta.history.filter((h) => h.at !== at),
+    };
+    setMeta(nextMeta);
+    try {
+      await persistMerged(events, nextMeta);
+    } catch (err) {
+      setError((err as Error).message);
+      void loadCache();
+    }
+  };
+
+  const clearAllHistory = async () => {
+    if (!window.confirm("Clear all macro history snapshots?")) return;
+    const nextMeta: MetaStore = { ...meta, history: [] };
+    setMeta(nextMeta);
+    try {
+      await persistMerged(events, nextMeta);
+    } catch (err) {
+      setError((err as Error).message);
+      void loadCache();
+    }
+  };
+
   const display = useMemo(() => {
     const manilaToday = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
     const manilaYesterday = new Date(Date.now() + 8 * 3600_000 - 86400000)
