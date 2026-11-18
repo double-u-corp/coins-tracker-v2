@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import type { CoinSummary } from "@/validators/recordSchema";
 import type { PortfolioEntry, TransactionView } from "@/validators/transactionSchema";
-import { normalizeVenue, portfolioKey, venueLabel, VENUES, type VenueId } from "@/lib/venues";
+import { normalizeVenue, portfolioKey, type VenueId } from "@/lib/venues";
 
 interface CoinOption {
   symbol: string;

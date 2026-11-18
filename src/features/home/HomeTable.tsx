@@ -17,6 +17,14 @@ import { formatPhp } from "@/lib/format";
 import { buildCoinNewsResearchPrompt } from "@/lib/coinNewsResearchPrompt";
 import { buildCoinAnalytics, type CoinAnalytics } from "@/features/trade/useTradeLogic";
 
+import { useHomeLogic } from "./useHomeLogic";
+import NewRecordModal from "./NewRecordModal";
+import HomeMacroWatch from "./HomeMacroWatch";
+import HomeWatchPlanCharts from "./HomeWatchPlanCharts";
+import JournalSidebar from "@/features/chart/JournalSidebar";
+import PriceUpdateModal from "./PriceUpdateModal";
+import type { CoinSummary } from "@/validators/recordSchema";
+
 const ManageCoinsView = dynamic(() => import("@/features/manage/ManageCoinsView"), {
   ssr: false,
   loading: () => (
@@ -25,13 +33,6 @@ const ManageCoinsView = dynamic(() => import("@/features/manage/ManageCoinsView"
 });
 
 
-import { useHomeLogic } from "./useHomeLogic";
-import NewRecordModal from "./NewRecordModal";
-import HomeMacroWatch from "./HomeMacroWatch";
-import HomeWatchPlanCharts from "./HomeWatchPlanCharts";
-import JournalSidebar from "@/features/chart/JournalSidebar";
-import PriceUpdateModal from "./PriceUpdateModal";
-import type { CoinSummary } from "@/validators/recordSchema";
 
 
 type LadderLevel = { label: string; price: number; pct: number };
