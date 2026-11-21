@@ -494,14 +494,14 @@ export default function HomeMacroWatch() {
           )}
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
+          {/* <button
             type="button"
             onClick={() => void copyMacroAgentPrompt()}
             className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-900 hover:bg-indigo-100"
             title="Copy dynamic macro calendar agent prompt (verify dates + find missing events)"
           >
             {macroPromptCopied ? "✅ Copied" : "📋 Macro agent"}
-          </button>
+          </button> */}
           <button
             type="button"
             onClick={() => void refresh()}

@@ -98,6 +98,21 @@ type UserFillOutcome = {
   pathToLatestPct: number | null;
 };
 
+/** Actionable scorecard: did your trades line up with book lean days / hot slots? */
+type FillAlignment = {
+  buyCount: number;
+  sellCount: number;
+  buysOnBuyLeanWeekday: number;
+  buysOnSellLeanWeekday: number;
+  sellsOnSellLeanWeekday: number;
+  sellsOnBuyLeanWeekday: number;
+  /** share 0–100 */
+  buyLeanAlignmentPct: number | null;
+  sellLeanAlignmentPct: number | null;
+  /** short lines for UI / Did you know */
+  takeaways: string[];
+};
+
 type DayFlowSummary = {
   day: number;
   label: string;
@@ -136,6 +151,7 @@ type ResponseBody = {
   strongestDownWeekday: WeekdayStat | null;
   topMoversByHotSlot: CoinSlotHighlight[];
   userFills: UserFillOutcome[];
+  fillAlignment: FillAlignment | null;
   /** Ranked by totalAbsPct over last 48h — not the 14/30/60 hot-slot list */
   topMovers2d: Coin2dMover[];
   /** Weekdays sorted most buy-lean (high % up) → most sell-lean */
@@ -275,6 +291,7 @@ export default async function handler(
       strongestDownWeekday: null,
       topMoversByHotSlot: [],
       userFills: [],
+      fillAlignment: null,
       topMovers2d: [],
       dayFlow: [],
       coinsBuyLean: [],
@@ -747,28 +764,72 @@ export default async function handler(
     });
   }
 
-  // Dynamic guidance from dayFlow + fills
-  if (userFills.length) {
-    const buys = userFills.filter((f) => f.type === "buy");
-    const sells = userFills.filter((f) => f.type === "sell");
-    const avgPath = (arr: UserFillOutcome[], key: "path24hPct" | "path72hPct") => {
-      const xs = arr.map((f) => f[key]).filter((x): x is number => x != null);
-      if (!xs.length) return null;
-      return Number((xs.reduce((a, b) => a + b, 0) / xs.length).toFixed(2));
-    };
-    if (buys.length) {
-      const a24 = avgPath(buys, "path24hPct");
-      const a72 = avgPath(buys, "path72hPct");
-      guidance.push(
-        `Your ${buys.length} buy(s) in this window: avg path 24h ${a24 != null ? a24 + "%" : "n/a"}, 72h ${a72 != null ? a72 + "%" : "n/a"} (vs fill price, poll path).`
-      );
-    }
-    if (sells.length) {
-      const a24 = avgPath(sells, "path24hPct");
-      guidance.push(
-        `Your ${sells.length} sell(s): avg path 24h after exit ${a24 != null ? a24 + "%" : "n/a"} (negative = price fell after sell = good timing).`
-      );
-    }
+  // Alignment vs book lean weekdays (actionable — not raw path-after %)
+  const buyLeanDays = new Set(
+    dayFlow.filter((d) => d.upSharePct >= 52).map((d) => d.label)
+  );
+  const sellLeanDays = new Set(
+    dayFlow.filter((d) => d.upSharePct <= 48).map((d) => d.label)
+  );
+  const buys = userFills.filter((f) => f.type === "buy");
+  const sells = userFills.filter((f) => f.type === "sell");
+  let buysOnBuyLean = 0;
+  let buysOnSellLean = 0;
+  let sellsOnSellLean = 0;
+  let sellsOnBuyLean = 0;
+  for (const f of buys) {
+    if (buyLeanDays.has(f.weekdayLabel)) buysOnBuyLean++;
+    if (sellLeanDays.has(f.weekdayLabel)) buysOnSellLean++;
+  }
+  for (const f of sells) {
+    if (sellLeanDays.has(f.weekdayLabel)) sellsOnSellLean++;
+    if (buyLeanDays.has(f.weekdayLabel)) sellsOnBuyLean++;
+  }
+  const buyLeanAlignmentPct =
+    buys.length > 0 ? Math.round((buysOnBuyLean / buys.length) * 1000) / 10 : null;
+  const sellLeanAlignmentPct =
+    sells.length > 0 ? Math.round((sellsOnSellLean / sells.length) * 1000) / 10 : null;
+
+  const fillTakeaways: string[] = [];
+  if (buys.length > 0 && buyLeanAlignmentPct != null) {
+    fillTakeaways.push(
+      `Of your ${buys.length} buy(s), ${buysOnBuyLean} on book buy-lean weekdays (${buyLeanAlignmentPct}%). ` +
+        (buyLeanAlignmentPct >= 55
+          ? "Aligned with stronger UP days in the book."
+          : buysOnSellLean > buysOnBuyLean
+            ? "Many buys on sell-lean days — beware catching knives; prefer limits on buy-lean days when Spot is LONG."
+            : "Mixed — stage limits on buy-lean weekdays when confluence allows.")
+    );
+  }
+  if (sells.length > 0 && sellLeanAlignmentPct != null) {
+    fillTakeaways.push(
+      `Of your ${sells.length} sell(s), ${sellsOnSellLean} on sell-lean weekdays (${sellLeanAlignmentPct}%). ` +
+        (sellLeanAlignmentPct >= 50
+          ? "Selling into softer book days can help lock gains before red clusters."
+          : "Several sells on buy-lean days — fine for targets, not required by the weekly pattern.")
+    );
+  }
+  if (!userFills.length) {
+    fillTakeaways.push("No logged buys/sells in this window — scorecard empty until you trade.");
+  }
+
+  const fillAlignment: FillAlignment | null =
+    userFills.length > 0
+      ? {
+          buyCount: buys.length,
+          sellCount: sells.length,
+          buysOnBuyLeanWeekday: buysOnBuyLean,
+          buysOnSellLeanWeekday: buysOnSellLean,
+          sellsOnSellLeanWeekday: sellsOnSellLean,
+          sellsOnBuyLeanWeekday: sellsOnBuyLean,
+          buyLeanAlignmentPct,
+          sellLeanAlignmentPct,
+          takeaways: fillTakeaways,
+        }
+      : null;
+
+  for (const line of fillTakeaways) {
+    if (userFills.length) guidance.push(line);
   }
 
   const body: ResponseBody = {
@@ -789,6 +850,7 @@ export default async function handler(
     strongestDownWeekday,
     topMoversByHotSlot,
     userFills,
+    fillAlignment,
     topMovers2d,
     dayFlow,
     coinsBuyLean,

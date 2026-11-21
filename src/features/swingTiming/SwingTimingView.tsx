@@ -1,6 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import AlertBanner from "@/components/AlertBanner";
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  Legend,
+  CartesianGrid,
+  PieChart,
+  Pie,
+  Cell,
+} from "recharts";
 
 type SlotStat = {
   hour: number;
@@ -85,6 +98,17 @@ type TimingResponse = {
   strongestUpWeekday?: WeekdayStat | null;
   strongestDownWeekday?: WeekdayStat | null;
   topMoversByHotSlot: CoinSlotHighlight[];
+  fillAlignment?: {
+    buyCount: number;
+    sellCount: number;
+    buysOnBuyLeanWeekday: number;
+    buysOnSellLeanWeekday: number;
+    sellsOnSellLeanWeekday: number;
+    sellsOnBuyLeanWeekday: number;
+    buyLeanAlignmentPct: number | null;
+    sellLeanAlignmentPct: number | null;
+    takeaways: string[];
+  } | null;
   userFills?: {
     type: "buy" | "sell";
     symbol: string;
@@ -789,6 +813,41 @@ function symbolsFor2dPath(data: TimingResponse): string[] {
 export default function SwingTimingView() {
   const [days, setDays] = useState(28);
   const [data, setData] = useState<TimingResponse | null>(null);
+
+  const [weeklyBrief, setWeeklyBrief] = useState<{
+    weekOf: string;
+    generatedAt: string;
+    didYouKnow: string[];
+    monitorRules: string[];
+    windows: {
+      days: number;
+      hottestSlot: string | null;
+      buyLeanWeekday: string | null;
+      sellLeanWeekday: string | null;
+      clearestBuyCoin: string | null;
+      clearestSellCoin: string | null;
+    }[];
+    macroTips: string[];
+    chartSlots?: { label: string; avgAbsPct: number; intensity: string }[];
+    chartCompareSlots?: {
+      label: string;
+      hour: number;
+      avg7: number | null;
+      avg14: number | null;
+      avg28: number | null;
+    }[];
+    chartDonut?: {
+      weekdayLabel: string;
+      upSharePct: number;
+      downSharePct: number;
+      windowDays: number;
+    } | null;
+    chartWeekdays?: { label: string; upSharePct: number; avgAbsPct: number }[];
+    macroMeetings?: { type: string; title: string; date: string; regime24h: string; summary: string }[];
+    agentContext?: string;
+  } | null>(null);
+  const [weeklyBriefLoading, setWeeklyBriefLoading] = useState(false);
+  const [weeklyBriefMsg, setWeeklyBriefMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [macroImpactLoading, setMacroImpactLoading] = useState(false);
   const [macroImpact, setMacroImpact] = useState<{
@@ -927,6 +986,44 @@ export default function SwingTimingView() {
     }
   };
 
+  const loadWeeklyBrief = async (full = false) => {
+    setWeeklyBriefLoading(true);
+    setWeeklyBriefMsg(null);
+    try {
+      // full=1 → recompute 7/14/28 Timing + macro impact, then save brief
+      const url = full
+        ? `/api/timing-weekly-brief?full=1&_=${Date.now()}`
+        : `/api/timing-weekly-brief?_=${Date.now()}`;
+      const res = await fetch(url, {
+        method: full ? "POST" : "GET",
+        cache: "no-store",
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || "Weekly brief failed");
+      if (j.brief) {
+        setWeeklyBrief(j.brief);
+        // Keep main Timing board in sync with primary window after full refresh
+        if (full) void load(days, { refresh: false });
+      } else {
+        setWeeklyBrief(null);
+        setWeeklyBriefMsg(j.message || "No brief yet — run full weekly analysis once.");
+      }
+      if (full && j.saved) {
+        const ranges = Array.isArray(j.refreshedRanges) ? j.refreshedRanges.join("/") : "";
+        const errs = Array.isArray(j.pipelineErrors) && j.pipelineErrors.length
+          ? ` · notes: ${j.pipelineErrors.slice(0, 2).join("; ")}`
+          : "";
+        setWeeklyBriefMsg(
+          `Weekly analysis saved${ranges ? ` (refreshed ${ranges}d)` : ""}. Home Did you know updated.${errs}`
+        );
+      }
+    } catch (e) {
+      setWeeklyBriefMsg((e as Error).message);
+    } finally {
+      setWeeklyBriefLoading(false);
+    }
+  };
+
   const saveTimingSnapshotToJournal = async (kind: "manual" | "monthly") => {
     if (!data) return;
     try {
@@ -1049,7 +1146,8 @@ export default function SwingTimingView() {
   }, []);
 
   // Load cached snapshot only — full recompute is "Run analysis"
-  useEffect(() => { void loadMacroImpact(false); void load(days, { refresh: false });
+  useEffect(() => { void loadMacroImpact(false);
+    void loadWeeklyBrief(false); void load(days, { refresh: false });
   }, [days, load]);
 
 
@@ -1083,13 +1181,36 @@ export default function SwingTimingView() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-sm text-gray-600 max-w-2xl">
-            Cached snapshot loads by default (no heavy recompute). Click <span className="font-semibold">Run analysis</span> to rebuild
-            for 7 / 14 / 28 days. Use to watch vs stage limits — not a buy signal. Confirm on{" "}
+            Poll-window and weekday patterns from your 3h data. Cached by default —{" "}
+            <span className="font-semibold">Full weekly analysis</span> rebuilds 7d/14d/28d + macro impact and saves the Monday brief.
+            Watch vs stage limits only — not a buy signal. Confirm on{" "}
             <Link href="/chart" className="font-semibold text-purple-700 hover:underline">
               Spot
             </Link>
             .
           </p>
+          <div className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50/80 p-3 text-[11px] text-indigo-950 shadow-sm">
+            <div className="text-xs font-extrabold text-indigo-900 mb-1.5">
+              Monday ~08:00 Manila — your steps (so you don’t forget)
+            </div>
+            <ol className="list-decimal list-inside space-y-1 font-medium leading-relaxed">
+              <li>
+                Click <span className="font-bold text-sky-800">📅 Full weekly analysis</span> on this page
+                (refreshes 7d / 14d / 28d + last CPI/NFP/FOMC impact, updates charts, saves brief to DB).
+              </li>
+              <li>
+                Wait until the button finishes — charts + “Weekly Monday brief” should show fresh numbers.
+              </li>
+              <li>
+                Message Grok: <span className="font-mono font-bold bg-white/80 px-1 rounded">Monday weekly timing review</span>
+                — I interpret the brief, add live research, and can save a narrative if you ask.
+              </li>
+              <li>
+                Use the brief for the week only as <span className="font-semibold">monitor / awareness</span> —
+                confirm entries on Spot. Not a buy signal.
+              </li>
+            </ol>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mr-1">
@@ -1112,45 +1233,254 @@ export default function SwingTimingView() {
           ))}
           <button
             type="button"
-            onClick={() => void load(days, { refresh: true })}
-            disabled={loading}
-            className="rounded-md border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-800 hover:bg-indigo-100 disabled:opacity-50"
-            title="Recompute from latest poll history"
+            onClick={() => void loadWeeklyBrief(true)}
+            disabled={weeklyBriefLoading}
+            className="rounded-md border border-sky-400 bg-sky-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-sky-700 disabled:opacity-50"
+            title="Recompute 7d/14d/28d Timing + macro impact and save Monday weekly brief"
           >
-            {loading ? "Refreshing…" : "↻ Run analysis"}
-          </button>
-          <button
-            type="button"
-            onClick={() => void loadMacroImpact(true)}
-            disabled={macroImpactLoading}
-            className="rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-950 hover:bg-amber-100 disabled:opacity-50"
-            title="Compare watchlist moves after past CPI / NFP / FOMC / PCE — saved for Home Did you know"
-          >
-            {macroImpactLoading ? "Analyzing…" : "📊 Last CPI/NFP/FOMC impact"}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => void copyTimingPrompt()}
-            disabled={!data || loading}
-            className="rounded-md border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-bold text-violet-900 hover:bg-violet-100 disabled:opacity-50"
-            title="Copy: slot + weekday activity pattern"
-          >
-            {agentCopied === "timing" ? "✅ Copied" : "📋 Timing pattern"}
-          </button>
-          <button
-            type="button"
-            onClick={() => void saveTimingSnapshotToJournal("manual")}
-            disabled={!data || loading}
-            className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-900 hover:bg-emerald-100 disabled:opacity-50"
-            title="Save slots + weekdays snapshot to global journal (no coin)"
-          >
-            {agentCopied === "journal" ? "✅ Saved" : "📓 Save to journal"}
+            {weeklyBriefLoading ? "Analyzing 7/14/28d…" : "📅 Full weekly analysis"}
           </button>
         </div>
       </div>
 
       {error && <AlertBanner variant="error" message={error} />}
+
+      {(weeklyBrief || weeklyBriefMsg) && (
+        <div className="rounded-lg border border-sky-200 bg-sky-50/50 p-3 shadow-sm space-y-2">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-bold text-sky-950">Weekly Monday brief</h2>
+              <p className="text-[10px] text-sky-900/80">
+                After Full weekly analysis: bars + 7/14/28 line + weekday donut update here and save for Home Did you know.
+                Then message Grok “Monday weekly timing review” for research-backed interpretation.
+              </p>
+              {weeklyBrief && (
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  Week of {weeklyBrief.weekOf} · generated{" "}
+                  {new Date(weeklyBrief.generatedAt).toLocaleString(undefined, { timeZone: "Asia/Manila" })} Manila
+                </p>
+              )}
+            </div>
+          </div>
+          {weeklyBriefMsg && <p className="text-xs text-sky-900">{weeklyBriefMsg}</p>}
+          {weeklyBrief && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
+              <div>
+                <div className="font-bold text-slate-800 mb-1">Monitor this week</div>
+                <ul className="list-disc list-inside space-y-1 text-slate-700">
+                  {weeklyBrief.monitorRules.slice(0, 6).map((r, i) => (
+                    <li key={i}>{r}</li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <div className="font-bold text-slate-800 mb-1">Did you know</div>
+                <ul className="list-disc list-inside space-y-1 text-slate-700">
+                  {weeklyBrief.didYouKnow.slice(0, 6).map((r, i) => (
+                    <li key={i}>{r}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {weeklyBrief?.chartSlots && weeklyBrief.chartSlots.length > 0 && (
+            <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="rounded-md border border-sky-100 bg-white p-2.5">
+                <div className="text-[10px] font-bold uppercase text-slate-500 mb-2">
+                  Poll windows · avg |move| (primary window)
+                </div>
+                <div className="space-y-1.5">
+                  {weeklyBrief.chartSlots.map((s) => {
+                    const max = Math.max(...weeklyBrief.chartSlots!.map((x) => x.avgAbsPct), 0.01);
+                    const w = Math.min(100, (s.avgAbsPct / max) * 100);
+                    return (
+                      <div key={s.label} className="flex items-center gap-2 text-[10px]">
+                        <span className="w-[7.5rem] shrink-0 truncate font-semibold text-slate-700">
+                          {s.label.replace(" Manila", "")}
+                        </span>
+                        <div className="flex-1 h-2 rounded bg-slate-100 overflow-hidden">
+                          <div
+                            className={`h-full rounded ${
+                              s.intensity === "hot"
+                                ? "bg-rose-500"
+                                : s.intensity === "active"
+                                  ? "bg-amber-400"
+                                  : s.intensity === "quiet"
+                                    ? "bg-slate-300"
+                                    : "bg-sky-400"
+                            }`}
+                            style={{ width: `${w}%` }}
+                          />
+                        </div>
+                        <span className="w-10 text-right font-mono text-slate-600">
+                          {s.avgAbsPct.toFixed(2)}%
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              {weeklyBrief.chartWeekdays && weeklyBrief.chartWeekdays.length > 0 && (
+                <div className="rounded-md border border-sky-100 bg-white p-2.5">
+                  <div className="text-[10px] font-bold uppercase text-slate-500 mb-2">
+                    Weekday · % prints up (buy-lean vs sell-lean)
+                  </div>
+                  <div className="space-y-1.5">
+                    {weeklyBrief.chartWeekdays.map((d) => (
+                      <div key={d.label} className="flex items-center gap-2 text-[10px]">
+                        <span className="w-16 shrink-0 font-semibold text-slate-700">{d.label}</span>
+                        <div className="flex-1 h-2 rounded bg-slate-100 overflow-hidden">
+                          <div
+                            className={`h-full rounded ${
+                              d.upSharePct >= 52
+                                ? "bg-emerald-500"
+                                : d.upSharePct <= 48
+                                  ? "bg-rose-400"
+                                  : "bg-slate-400"
+                            }`}
+                            style={{ width: `${Math.min(100, d.upSharePct)}%` }}
+                          />
+                        </div>
+                        <span className="w-10 text-right font-mono text-slate-600">
+                          {d.upSharePct.toFixed(0)}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {(weeklyBrief?.chartCompareSlots && weeklyBrief.chartCompareSlots.length > 0) ||
+          weeklyBrief?.chartDonut ? (
+            <div className="mt-2 grid grid-cols-1 lg:grid-cols-3 gap-3">
+              {weeklyBrief?.chartCompareSlots && weeklyBrief.chartCompareSlots.length > 0 && (
+                <div className="lg:col-span-2 rounded-md border border-sky-100 bg-white p-2.5 min-h-[220px]">
+                  <div className="text-[10px] font-bold uppercase text-slate-500 mb-1">
+                    Slot intensity · 7d vs 14d vs 28d (avg |%| move)
+                  </div>
+                  <p className="text-[9px] text-slate-500 mb-2">
+                    Higher = more movement into that Manila poll. Not direction — confirm on Spot.
+                  </p>
+                  <div className="h-[180px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart
+                        data={weeklyBrief.chartCompareSlots.map((r) => ({
+                          ...r,
+                          tick: r.label.replace(" Manila", "").replace(" (US peak)", ""),
+                        }))}
+                        margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        <XAxis
+                          dataKey="tick"
+                          tick={{ fontSize: 9 }}
+                          interval={0}
+                          angle={-25}
+                          textAnchor="end"
+                          height={48}
+                        />
+                        <YAxis tick={{ fontSize: 9 }} width={32} unit="%" />
+                        <Tooltip
+                          contentStyle={{ fontSize: 11 }}
+                          formatter={(v: number) => [`${Number(v).toFixed(2)}%`, ""]}
+                        />
+                        <Legend wrapperStyle={{ fontSize: 10 }} />
+                        <Line
+                          type="monotone"
+                          dataKey="avg7"
+                          name="7d"
+                          stroke="#6366f1"
+                          strokeWidth={2}
+                          dot={{ r: 2 }}
+                          connectNulls
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="avg14"
+                          name="14d"
+                          stroke="#0ea5e9"
+                          strokeWidth={2}
+                          dot={{ r: 2 }}
+                          connectNulls
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="avg28"
+                          name="28d"
+                          stroke="#94a3b8"
+                          strokeWidth={2}
+                          dot={{ r: 2 }}
+                          connectNulls
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+              {weeklyBrief?.chartDonut && (
+                <div className="rounded-md border border-sky-100 bg-white p-2.5 min-h-[220px] flex flex-col">
+                  <div className="text-[10px] font-bold uppercase text-slate-500 mb-1">
+                    Hottest weekday · up vs down
+                  </div>
+                  <p className="text-[9px] text-slate-500 mb-1">
+                    {weeklyBrief.chartDonut.weekdayLabel} · {weeklyBrief.chartDonut.windowDays}d window · % of
+                    prints up (green) vs not (rose)
+                  </p>
+                  <div className="flex-1 h-[160px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={[
+                            {
+                              name: "Up share",
+                              value: weeklyBrief.chartDonut.upSharePct,
+                            },
+                            {
+                              name: "Down / flat",
+                              value: weeklyBrief.chartDonut.downSharePct,
+                            },
+                          ]}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={42}
+                          outerRadius={62}
+                          paddingAngle={2}
+                        >
+                          <Cell fill="#10b981" />
+                          <Cell fill="#fb7185" />
+                        </Pie>
+                        <Tooltip formatter={(v: number) => `${Number(v).toFixed(1)}%`} />
+                        <Legend wrapperStyle={{ fontSize: 10 }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="text-center text-[11px] font-bold text-slate-800">
+                    {weeklyBrief.chartDonut.upSharePct.toFixed(0)}% up-lean on{" "}
+                    {weeklyBrief.chartDonut.weekdayLabel}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          {weeklyBrief?.macroMeetings && weeklyBrief.macroMeetings.length > 0 && (
+            <div className="mt-2 rounded-md border border-amber-100 bg-amber-50/50 p-2.5 text-[11px] space-y-1.5">
+              <div className="font-bold text-amber-950">Recent macro impact (alts)</div>
+              {weeklyBrief.macroMeetings.slice(0, 4).map((m, i) => (
+                <div key={`${m.date}-${m.type}-${i}`} className="text-amber-950/90">
+                  <span className="font-semibold">{m.date}</span> · {m.type} · {m.regime24h}
+                  <div className="text-[10px] text-amber-900/80 line-clamp-2">{m.summary}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
 
             {macroImpact && (macroImpact.tips?.length || macroImpact.meetings?.length || macroImpact.message) ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50/40 p-3 shadow-sm space-y-3">
@@ -1336,57 +1666,62 @@ export default function SwingTimingView() {
 
           {/* Buy / sell day patterns */}
 
-          {(data.userFills && data.userFills.length > 0) && (
-            <div className="rounded-xl border-2 border-slate-200 bg-white p-4 shadow-sm space-y-3">
+          {/* Trade timing alignment — not path-after scorecard */}
+          {(data.fillAlignment || (data.userFills && data.userFills.length > 0)) && (
+            <div className="rounded-xl border-2 border-sky-200 bg-sky-50/30 p-4 shadow-sm space-y-3">
               <div>
                 <h3 className="text-sm font-extrabold text-slate-900">
-                  Your fills · path after (Manila · {data.days}d)
+                  Your timing vs the book (Manila · {data.days}d)
                 </h3>
                 <p className="mt-0.5 text-[11px] text-slate-600">
-                  Logged buys/sells in this window. Path % is vs fill price using 3h polls — not a scorecard guarantee.
+                  Did your buys land on <span className="font-semibold">buy-lean</span> weekdays and sells on{" "}
+                  <span className="font-semibold">sell-lean</span> days? More useful than chasing 24h path % after a fill.
+                  Confirm entries on Spot — this is alignment only.
                 </p>
               </div>
-              <div className="space-y-2">
-                {data.userFills.map((f, i) => {
-                  const pathCls = (v: number | null) => {
-                    if (v == null) return "text-slate-500";
-                    if (f.type === "buy") return v >= 0 ? "text-emerald-700" : "text-rose-700";
-                    // sell: price down after sell is good
-                    return v <= 0 ? "text-emerald-700" : "text-amber-700";
-                  };
-                  const fmt = (v: number | null) =>
-                    v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
-                  return (
-                    <div
-                      key={`${f.transactedAt}-${f.symbol}-${i}`}
-                      className={`rounded-lg border px-3 py-2 text-[11px] ${
-                        f.type === "buy"
-                          ? "border-emerald-100 bg-emerald-50/40"
-                          : "border-rose-100 bg-rose-50/40"
-                      }`}
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-1">
-                        <span className="font-bold text-slate-900">
-                          {f.type === "buy" ? "BUY" : "SELL"} {f.name}{" "}
-                          <span className="font-mono font-semibold text-slate-500">{f.symbol}</span>
-                        </span>
-                        <span className="text-slate-600">{f.manilaLabel} · {f.weekdayLabel}</span>
-                      </div>
-                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-slate-700">
-                        <span>
-                          ₱{f.phpAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })} @{" "}
-                          {f.price}
-                        </span>
-                        <span className={pathCls(f.path24hPct)}>24h {fmt(f.path24hPct)}</span>
-                        <span className={pathCls(f.path72hPct)}>72h {fmt(f.path72hPct)}</span>
-                        <span className={pathCls(f.pathToLatestPct)}>
-                          to now {fmt(f.pathToLatestPct)}
-                        </span>
-                      </div>
+              {data.fillAlignment && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                  <div className="rounded-lg border border-emerald-200 bg-white px-2.5 py-2">
+                    <div className="text-slate-500 font-semibold">Buys</div>
+                    <div className="text-lg font-extrabold text-slate-900">{data.fillAlignment.buyCount}</div>
+                    <div className="text-emerald-800">
+                      {data.fillAlignment.buysOnBuyLeanWeekday} on buy-lean days
                     </div>
-                  );
-                })}
-              </div>
+                  </div>
+                  <div className="rounded-lg border border-rose-200 bg-white px-2.5 py-2">
+                    <div className="text-slate-500 font-semibold">Sells</div>
+                    <div className="text-lg font-extrabold text-slate-900">{data.fillAlignment.sellCount}</div>
+                    <div className="text-rose-800">
+                      {data.fillAlignment.sellsOnSellLeanWeekday} on sell-lean days
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-white px-2.5 py-2">
+                    <div className="text-slate-500 font-semibold">Buy alignment</div>
+                    <div className="text-lg font-extrabold text-slate-900">
+                      {data.fillAlignment.buyLeanAlignmentPct != null
+                        ? `${data.fillAlignment.buyLeanAlignmentPct}%`
+                        : "—"}
+                    </div>
+                    <div className="text-slate-600">on stronger UP weekdays</div>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-white px-2.5 py-2">
+                    <div className="text-slate-500 font-semibold">Sell alignment</div>
+                    <div className="text-lg font-extrabold text-slate-900">
+                      {data.fillAlignment.sellLeanAlignmentPct != null
+                        ? `${data.fillAlignment.sellLeanAlignmentPct}%`
+                        : "—"}
+                    </div>
+                    <div className="text-slate-600">on softer book days</div>
+                  </div>
+                </div>
+              )}
+              {data.fillAlignment?.takeaways?.length ? (
+                <ul className="text-[12px] text-slate-800 space-y-1 list-disc list-inside">
+                  {data.fillAlignment.takeaways.map((line, i) => (
+                    <li key={i}>{line}</li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           )}
 

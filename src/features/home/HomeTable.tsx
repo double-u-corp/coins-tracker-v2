@@ -808,6 +808,23 @@ export default function HomeTable() {
       } catch {
         /* optional */
       }
+      try {
+        const wb = await fetch(`/api/timing-weekly-brief?_=${Date.now()}`, {
+          cache: "no-store",
+        });
+        if (wb.ok) {
+          const body = (await wb.json()) as {
+            brief?: { didYouKnow?: string[]; monitorRules?: string[] };
+          };
+          const extra = [
+            ...(body.brief?.didYouKnow || []),
+            ...(body.brief?.monitorRules || []),
+          ].filter((x) => x && String(x).length > 20);
+          if (extra.length) tipsPool = tipsPool.concat(extra);
+        }
+      } catch {
+        /* optional weekly brief */
+      }
       if (tipsPool.length) {
         setDidYouKnow(tipsPool[Math.floor(Math.random() * tipsPool.length)]);
       }
