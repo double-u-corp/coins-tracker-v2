@@ -33,6 +33,19 @@ type TimingCache = {
     sellLeanAlignmentPct?: number | null;
   } | null;
   guidance?: string[];
+  topWindowLosers?: {
+    symbol: string;
+    name: string;
+    netPct: number;
+    totalAbsPct?: number;
+    lastPrice?: number;
+  }[];
+  topWindowGainers?: {
+    symbol: string;
+    name: string;
+    netPct: number;
+    lastPrice?: number;
+  }[];
   cacheUpdatedAt?: string | null;
   generatedAt?: string;
 };
@@ -94,6 +107,14 @@ export type WeeklyBrief = {
   macroTips: string[];
   didYouKnow: string[];
   monitorRules: string[];
+  /** Soft book this week — net path losers / gainers (alts) + RSI oversold snapshot if available */
+  softBook: {
+    losers7d: { symbol: string; name: string; netPct: number }[];
+    losers14d: { symbol: string; name: string; netPct: number }[];
+    /** In both 7d and 14d loser lists (multi-week pressure) */
+    consecutiveWeak: { symbol: string; name: string; net7: number; net14: number }[];
+    rsiOversold: { symbol: string; name: string; rsi: number; detail: string }[];
+  };
   /** Ready for Grok / agent: paste into Monday review */
   agentContext: string;
   fullRefresh?: boolean;
@@ -209,7 +230,8 @@ function buildBrief(
   t14: TimingCache | null,
   t28: TimingCache | null,
   macro: MacroCache | null,
-  meta?: { fullRefresh?: boolean; refreshedRanges?: number[] }
+  meta?: { fullRefresh?: boolean; refreshedRanges?: number[] },
+  rsiOversoldHits: { symbol: string; name: string; rsi: number; detail: string }[] = []
 ): WeeklyBrief {
   const windows = [7, 14, 28].map((d) =>
     summarizeWindow(d, d === 7 ? t7 : d === 14 ? t14 : t28)
@@ -342,6 +364,81 @@ function buildBrief(
     summary: String(m.summary || "").slice(0, 280),
   }));
 
+  const losers7 = (t7?.topWindowLosers || [])
+    .filter((x) => (x.netPct ?? 0) < -1)
+    .slice(0, 8)
+    .map((x) => ({
+      symbol: x.symbol,
+      name: x.name,
+      netPct: Number(x.netPct) || 0,
+    }));
+  const losers14 = (t14?.topWindowLosers || [])
+    .filter((x) => (x.netPct ?? 0) < -1)
+    .slice(0, 8)
+    .map((x) => ({
+      symbol: x.symbol,
+      name: x.name,
+      netPct: Number(x.netPct) || 0,
+    }));
+  const map14 = new Map(losers14.map((x) => [x.symbol.toUpperCase(), x]));
+  const consecutiveWeak = losers7
+    .filter((x) => map14.has(x.symbol.toUpperCase()))
+    .map((x) => {
+      const b = map14.get(x.symbol.toUpperCase())!;
+      return {
+        symbol: x.symbol,
+        name: x.name,
+        net7: x.netPct,
+        net14: b.netPct,
+      };
+    })
+    .slice(0, 8);
+
+  const rsiOversold = rsiOversoldHits.slice(0, 8);
+
+  if (consecutiveWeak.length) {
+    didYouKnow.push(
+      `Multi-week soft alts (weak in both 7d & 14d net path): ${consecutiveWeak
+        .slice(0, 4)
+        .map((c) => `${c.name} (${c.net7.toFixed(1)}% / ${c.net14.toFixed(1)}%)`)
+        .join(", ")} — awareness only, not a buy signal.`
+    );
+    monitorRules.push(
+      `Soft book (7d+14d): ${consecutiveWeak
+        .slice(0, 5)
+        .map((c) => c.name)
+        .join(", ")} — only stage if Spot is constructive and news is clean; prefer pullbacks.`
+    );
+  } else if (losers7.length) {
+    didYouKnow.push(
+      `Weakest alts last ~7d net path: ${losers7
+        .slice(0, 5)
+        .map((c) => `${c.name} ${c.netPct.toFixed(1)}%`)
+        .join(", ")}.`
+    );
+  }
+  if (rsiOversold.length) {
+    didYouKnow.push(
+      `RSI oversold snapshot (last Home monitor scan): ${rsiOversold
+        .slice(0, 5)
+        .map((c) => `${c.name} RSI ${c.rsi}`)
+        .join(", ")} — confirm on Spot; not automatic entries.`
+    );
+    monitorRules.push(
+      `Oversold watchlist: ${rsiOversold
+        .slice(0, 5)
+        .map((c) => c.name)
+        .join(", ")} — pair with catalyst check before any limit buy.`
+    );
+  }
+
+  const softBook = {
+    losers7d: losers7,
+    losers14d: losers14,
+    consecutiveWeak,
+    rsiOversold,
+  };
+
   const agentLines: string[] = [];
   agentLines.push(`## Timing weekly brief · ${manilaDateKey()} Manila`);
   agentLines.push(`Generated: ${new Date().toISOString()}`);
@@ -357,6 +454,30 @@ function buildBrief(
     for (const m of macroMeetings) {
       agentLines.push(`- ${m.date} ${m.type} · ${m.regime24h}: ${m.summary}`);
     }
+  }
+  agentLines.push(`### Soft book · week path (alts)`);
+  if (consecutiveWeak.length) {
+    agentLines.push(`Multi-week weak (in 7d and 14d losers):`);
+    for (const c of consecutiveWeak) {
+      agentLines.push(
+        `- ${c.name} (${c.symbol}): 7d ${c.net7.toFixed(2)}% · 14d ${c.net14.toFixed(2)}%`
+      );
+    }
+  }
+  if (losers7.length) {
+    agentLines.push(`Weakest ~7d net:`);
+    for (const c of losers7.slice(0, 6)) {
+      agentLines.push(`- ${c.name}: ${c.netPct.toFixed(2)}%`);
+    }
+  }
+  if (rsiOversold.length) {
+    agentLines.push(`RSI oversold (Home monitor snapshot):`);
+    for (const c of rsiOversold) {
+      agentLines.push(`- ${c.name}: RSI ${c.rsi} · ${c.detail}`);
+    }
+  }
+  if (!consecutiveWeak.length && !losers7.length && !rsiOversold.length) {
+    agentLines.push(`- none listed (run Full weekly analysis after Timing caches exist)`);
   }
   agentLines.push(`### Monitor rules`);
   for (const r of monitorRules) agentLines.push(`- ${r}`);
@@ -375,6 +496,7 @@ function buildBrief(
     macroTips: (macro?.tips || []).slice(0, 6),
     didYouKnow: didYouKnow.slice(0, 12),
     monitorRules: monitorRules.slice(0, 10),
+    softBook,
     agentContext: agentLines.join("\n"),
     fullRefresh: meta?.fullRefresh,
     refreshedRanges: meta?.refreshedRanges,
@@ -431,10 +553,38 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       loadMacro(),
     ]);
 
-    const brief = buildBrief(t7, t14, t28, macro, {
-      fullRefresh: full,
-      refreshedRanges,
-    });
+    // Reuse last Home monitor scan for RSI oversold (no extra heavy scan)
+    let rsiHits: { symbol: string; name: string; rsi: number; detail: string }[] = [];
+    try {
+      const mon = await prisma.catalystLog.findUnique({
+        where: { promptId: "home-monitor-scan" },
+      });
+      if (mon?.response) {
+        const snap = JSON.parse(mon.response) as {
+          rsiOversold?: { symbol: string; name: string; rsi: number; detail?: string }[];
+        };
+        rsiHits = (snap.rsiOversold || []).slice(0, 8).map((h) => ({
+          symbol: h.symbol,
+          name: h.name,
+          rsi: Number(h.rsi) || 0,
+          detail: String(h.detail || `RSI ${h.rsi}`),
+        }));
+      }
+    } catch {
+      /* ignore */
+    }
+
+    const brief = buildBrief(
+      t7,
+      t14,
+      t28,
+      macro,
+      {
+        fullRefresh: full,
+        refreshedRanges,
+      },
+      rsiHits
+    );
     const payload = JSON.stringify(brief);
 
     await prisma.catalystLog.upsert({

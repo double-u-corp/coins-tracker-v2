@@ -154,6 +154,10 @@ type ResponseBody = {
   fillAlignment: FillAlignment | null;
   /** Ranked by totalAbsPct over last 48h — not the 14/30/60 hot-slot list */
   topMovers2d: Coin2dMover[];
+  /** Net % over the full activity window (days) — worst first */
+  topWindowLosers: Coin2dMover[];
+  /** Net % over the full activity window — best first */
+  topWindowGainers: Coin2dMover[];
   /** Weekdays sorted most buy-lean (high % up) → most sell-lean */
   dayFlow: DayFlowSummary[];
   /** Coins with clearest buy-lean day (need enough samples) */
@@ -293,6 +297,8 @@ export default async function handler(
       userFills: [],
       fillAlignment: null,
       topMovers2d: [],
+      topWindowLosers: [],
+      topWindowGainers: [],
       dayFlow: [],
       coinsBuyLean: [],
       coinsSellLean: [],
@@ -338,6 +344,14 @@ export default async function handler(
     samples: number;
     lastPrice: number;
   }[] = [];
+  const moversWindowRaw: {
+    symbol: string;
+    name: string;
+    totalAbsPct: number;
+    netPct: number;
+    samples: number;
+    lastPrice: number;
+  }[] = [];
 
   for (const coin of coins) {
     const records = await prisma.record.findMany({
@@ -372,6 +386,35 @@ export default async function handler(
           samples: samples2d,
           lastPrice: last.price,
         });
+      }
+    }
+
+    // Full window net path (7d / 14d / 28d depending on request)
+    {
+      const firstW = records.find((r) => r.price > 0);
+      const lastW = [...records].reverse().find((r) => r.price > 0);
+      if (firstW && lastW && records.length >= 4) {
+        let totalAbsW = 0;
+        let samplesW = 0;
+        for (let i = 1; i < records.length; i++) {
+          const prev = records[i - 1];
+          const cur = records[i];
+          if (!(prev.price > 0) || !(cur.price > 0)) continue;
+          const gapH = (cur.createdAt.getTime() - prev.createdAt.getTime()) / (60 * 60 * 1000);
+          if (gapH > 5) continue;
+          totalAbsW += (Math.abs(cur.price - prev.price) / prev.price) * 100;
+          samplesW += 1;
+        }
+        if (samplesW >= 3) {
+          moversWindowRaw.push({
+            symbol: coin.symbol,
+            name: coin.name,
+            totalAbsPct: totalAbsW,
+            netPct: ((lastW.price - firstW.price) / firstW.price) * 100,
+            samples: samplesW,
+            lastPrice: lastW.price,
+          });
+        }
       }
     }
 
@@ -513,6 +556,17 @@ export default async function handler(
       totalAbsPct: Number(x.totalAbsPct.toFixed(3)),
       netPct: Number(x.netPct.toFixed(3)),
     }));
+
+  const mapWin = (x: (typeof moversWindowRaw)[0]) => ({
+    ...x,
+    totalAbsPct: Number(x.totalAbsPct.toFixed(3)),
+    netPct: Number(x.netPct.toFixed(3)),
+  });
+  // Exclude majors from "which alt is weak/strong this window"
+  const skipMajors = new Set(["BTCPHP", "ETHPHP", "XAUTPHP", "BTC", "ETH", "XAUT"]);
+  const windowAlts = moversWindowRaw.filter((x) => !skipMajors.has(x.symbol.toUpperCase()));
+  const topWindowLosers = [...windowAlts].sort((a, b) => a.netPct - b.netPct).slice(0, 8).map(mapWin);
+  const topWindowGainers = [...windowAlts].sort((a, b) => b.netPct - a.netPct).slice(0, 8).map(mapWin);
 
   const nameBySym = new Map(coins.map((c) => [c.symbol, c.name]));
   const MIN_COIN_SAMPLES = 8;
@@ -852,6 +906,8 @@ export default async function handler(
     userFills,
     fillAlignment,
     topMovers2d,
+    topWindowLosers,
+    topWindowGainers,
     dayFlow,
     coinsBuyLean,
     coinsSellLean,

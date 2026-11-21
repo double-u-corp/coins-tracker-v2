@@ -842,6 +842,12 @@ export default function SwingTimingView() {
       downSharePct: number;
       windowDays: number;
     } | null;
+    softBook?: {
+      losers7d: { symbol: string; name: string; netPct: number }[];
+      losers14d: { symbol: string; name: string; netPct: number }[];
+      consecutiveWeak: { symbol: string; name: string; net7: number; net14: number }[];
+      rsiOversold: { symbol: string; name: string; rsi: number; detail: string }[];
+    };
     chartWeekdays?: { label: string; upSharePct: number; avgAbsPct: number }[];
     macroMeetings?: { type: string; title: string; date: string; regime24h: string; summary: string }[];
     agentContext?: string;
@@ -1284,6 +1290,78 @@ export default function SwingTimingView() {
             </div>
           )}
 
+          {weeklyBrief?.softBook &&
+            (weeklyBrief.softBook.consecutiveWeak?.length > 0 ||
+              weeklyBrief.softBook.losers7d?.length > 0 ||
+              weeklyBrief.softBook.rsiOversold?.length > 0) && (
+            <div className="mt-2 rounded-md border border-rose-100 bg-rose-50/40 p-2.5 text-[11px] space-y-2">
+              <div className="font-bold text-rose-950">Soft book · week path & oversold</div>
+              <p className="text-[10px] text-rose-900/80">
+                Alts weak on net path and/or RSI oversold from last Home monitor scan. Awareness only —
+                not a buy signal. Confirm news + Spot bias before any limit.
+              </p>
+              {weeklyBrief.softBook.consecutiveWeak?.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-bold uppercase text-rose-800 mb-1">
+                    Weak in both 7d & 14d
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {weeklyBrief.softBook.consecutiveWeak.map((c) => (
+                      <Link
+                        key={c.symbol}
+                        href={`/chart?symbol=${encodeURIComponent(c.symbol)}`}
+                        className="rounded-md border border-rose-200 bg-white px-2 py-1 text-[10px] font-semibold text-rose-950 hover:bg-rose-50"
+                      >
+                        {c.name}{" "}
+                        <span className="font-mono text-rose-700">
+                          7d {c.net7.toFixed(1)}% · 14d {c.net14.toFixed(1)}%
+                        </span>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {weeklyBrief.softBook.losers7d?.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-bold uppercase text-rose-800 mb-1">
+                    Weakest ~7d net path
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {weeklyBrief.softBook.losers7d.slice(0, 8).map((c) => (
+                      <Link
+                        key={c.symbol}
+                        href={`/chart?symbol=${encodeURIComponent(c.symbol)}`}
+                        className="rounded-md border border-rose-100 bg-white px-2 py-1 text-[10px] font-semibold text-slate-800 hover:bg-rose-50"
+                      >
+                        {c.name}{" "}
+                        <span className="font-mono text-rose-700">{c.netPct.toFixed(1)}%</span>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {weeklyBrief.softBook.rsiOversold?.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-bold uppercase text-rose-800 mb-1">
+                    RSI oversold (Home monitor snapshot)
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {weeklyBrief.softBook.rsiOversold.map((c) => (
+                      <Link
+                        key={c.symbol}
+                        href={`/chart?symbol=${encodeURIComponent(c.symbol)}`}
+                        className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-semibold text-slate-800 hover:bg-amber-50"
+                      >
+                        {c.name}{" "}
+                        <span className="font-mono text-amber-800">RSI {c.rsi}</span>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {weeklyBrief?.chartSlots && weeklyBrief.chartSlots.length > 0 && (
             <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="rounded-md border border-sky-100 bg-white p-2.5">
@@ -1561,6 +1639,7 @@ export default function SwingTimingView() {
           ) : null}
         </div>
       ) : null}
+
 
 
       {loading && !data && (
