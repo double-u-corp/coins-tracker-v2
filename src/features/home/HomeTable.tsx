@@ -962,12 +962,11 @@ export default function HomeTable() {
       const mark = price > 0 ? holdings * price : spent > 0 ? spent : 0;
       // Closed / dust: no meaningful bag left on this venue
       if (holdings <= MIN_UNITS || (price > 0 && mark < MIN_MARK_PHP)) continue;
-      // Fully exited in economic terms: sold covered cost and residual is noise
-      if (bought > 0 && sold >= bought * 0.98 && mark < Math.max(MIN_MARK_PHP * 4, bought * 0.03)) {
-        continue;
-      }
-      // Net spent already <= 0 means free/recovered path only — not cost on-hold
-      // (spent from API is already net of sells)
+      // Economic exit: sold PHP covered almost all cost — residual is closed, not on-hold
+      if (bought > 0 && sold >= bought * 0.95) continue;
+      // Tiny leftover vs original cost after meaningful sells
+      if (bought > 0 && mark > 0 && mark < bought * 0.05 && sold > bought * 0.5) continue;
+
       const row: Mini = {
         symbol: sym,
         name: coin?.name || pos.name || sym.replace(/PHP$/i, ""),
@@ -976,9 +975,12 @@ export default function HomeTable() {
         holdings,
         spent,
       };
-      // House money residual (sold enough PHP to clear cost) → free, not cost-hold
-      if (spent <= 0) free.push(row);
-      else cost.push(row);
+      // House-money residual (net spent cleared, still some units) → free/recovered only if mark meaningful
+      if (spent <= 0) {
+        if (mark >= MIN_MARK_PHP) free.push(row);
+        continue;
+      }
+      cost.push(row);
     }
     const unrealizedPct = (m: Mini) => {
       const price = Number(m.currentPrice) || 0;

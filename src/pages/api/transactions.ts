@@ -115,6 +115,8 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
       spent: number;
       sold: number;
       boughtUnits: number;
+      soldUnits: number;
+      peakUnits: number;
     }
   >();
 
@@ -132,6 +134,8 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
       spent: 0,
       sold: 0,
       boughtUnits: 0,
+      soldUnits: 0,
+      peakUnits: 0,
     };
 
     const type = t.type.toLowerCase();
@@ -142,21 +146,37 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
       existing.holdings += coinAmt;
       existing.spent += phpAmt;
       existing.boughtUnits += coinAmt;
+      if (existing.holdings > existing.peakUnits) existing.peakUnits = existing.holdings;
     } else if (type === "sell") {
       existing.holdings -= coinAmt;
       existing.sold += phpAmt;
+      existing.soldUnits += coinAmt;
     }
-    // Dust / float noise: treat near-zero bags as fully realized
+
+    // Float noise
     if (Math.abs(existing.holdings) < 1e-8) existing.holdings = 0;
     if (existing.holdings < 0) existing.holdings = 0;
-    // Residual after near-full exit: <0.15% of cumulative buy units → closed
-    if (
-      existing.boughtUnits > 0 &&
-      existing.holdings > 0 &&
-      existing.holdings / existing.boughtUnits < 0.0015 &&
-      existing.sold >= existing.spent * 0.97
-    ) {
-      existing.holdings = 0;
+    // Round tiny residuals (8 dp is enough for PHP spot bags)
+    if (existing.holdings > 0 && existing.holdings < 1e-6) existing.holdings = 0;
+
+    /**
+     * Closed bag heuristics (fixes TRUMP/XAUT-style leftovers after "sold all"):
+     * 1) Sold ≥98% of all units ever bought → treat residual as closed
+     * 2) Residual &lt;2% of peak bag after meaningful sells → closed
+     * 3) Residual &lt;0.2% of bought units → closed
+     */
+    if (existing.holdings > 0 && existing.boughtUnits > 0) {
+      const soldFrac = existing.soldUnits / existing.boughtUnits;
+      const residualOfBought = existing.holdings / existing.boughtUnits;
+      const residualOfPeak =
+        existing.peakUnits > 0 ? existing.holdings / existing.peakUnits : residualOfBought;
+      if (
+        soldFrac >= 0.98 ||
+        (existing.soldUnits > 0 && residualOfPeak < 0.02) ||
+        residualOfBought < 0.002
+      ) {
+        existing.holdings = 0;
+      }
     }
     byCoin.set(key, existing);
   }
