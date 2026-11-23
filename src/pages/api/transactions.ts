@@ -114,6 +114,7 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
       holdings: number;
       spent: number;
       sold: number;
+      boughtUnits: number;
     }
   >();
 
@@ -130,6 +131,7 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
       holdings: 0,
       spent: 0,
       sold: 0,
+      boughtUnits: 0,
     };
 
     const type = t.type.toLowerCase();
@@ -139,6 +141,7 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
     if (type === "buy") {
       existing.holdings += coinAmt;
       existing.spent += phpAmt;
+      existing.boughtUnits += coinAmt;
     } else if (type === "sell") {
       existing.holdings -= coinAmt;
       existing.sold += phpAmt;
@@ -146,6 +149,15 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
     // Dust / float noise: treat near-zero bags as fully realized
     if (Math.abs(existing.holdings) < 1e-8) existing.holdings = 0;
     if (existing.holdings < 0) existing.holdings = 0;
+    // Residual after near-full exit: <0.15% of cumulative buy units → closed
+    if (
+      existing.boughtUnits > 0 &&
+      existing.holdings > 0 &&
+      existing.holdings / existing.boughtUnits < 0.0015 &&
+      existing.sold >= existing.spent * 0.97
+    ) {
+      existing.holdings = 0;
+    }
     byCoin.set(key, existing);
   }
 
@@ -392,7 +404,6 @@ async function handleUpdate(req: NextApiRequest, res: NextApiResponse<UpdateResp
       coinAmount: Number(updated.coinAmount),
       isManual: updated.isManual,
       transactedAt: updated.transactedAt.toISOString(),
-      venue: normalizeVenue((updated as { venue?: string }).venue),
     },
   });
 }

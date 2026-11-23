@@ -336,7 +336,7 @@ export default function HomeNearSupportCharts({
           <p className="mt-0.5 text-[11px] text-rose-900/80">
             Lowest % of the 30-day range first (near support / discount zone). Same 3h + 20 SMA
             chart. Use <span className="font-semibold">Entry monitor prompt</span> for agent research on this
-            top 8 <span className="font-semibold">+ Watch / plan + RSI oversold + Fast pump</span> (±30d news/events,
+            top 8 <span className="font-semibold">+ Watch / plan + RSI oversold</span> (±30d news/events,
             X accounts, copy-ready markdown). Confirm on Spot — not a buy signal by itself.
           </p>
         </div>

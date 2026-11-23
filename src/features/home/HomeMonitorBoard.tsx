@@ -146,7 +146,7 @@ export default function HomeMonitorBoard({ universe }: { universe: CoinPx[] }) {
         <div>
           <h2 className="text-base font-extrabold text-indigo-950">Monitor board</h2>
           <p className="text-[11px] text-slate-500 max-w-xl">
-            Near 30d support · Fast pump · RSI oversold — one bulk scan, saved for reference.
+            Near 30d support · RSI oversold — one bulk scan, saved for reference. (Fast pump removed — use weekly Timing.)
             Home does not re-scan on every visit. Compare <span className="font-semibold">price at scan</span>{" "}
             vs live price below.
           </p>
@@ -176,18 +176,11 @@ export default function HomeMonitorBoard({ universe }: { universe: CoinPx[] }) {
       {loading && <p className="text-xs text-slate-500">Loading last snapshot…</p>}
 
       {!loading && (
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           <Section
             title="Near 30-day support · top 8"
             subtitle="Discount zone vs 30d range at last scan"
             hits={snap?.nearSupport || []}
-            priceBySym={priceBySym}
-            empty="None in snapshot — run scan."
-          />
-          <Section
-            title="Fast pump above 20 SMA · top 3"
-            subtitle="Quick lift / fresh cross — watch cool-down"
-            hits={snap?.fastPump || []}
             priceBySym={priceBySym}
             empty="None in snapshot — run scan."
           />

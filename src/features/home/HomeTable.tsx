@@ -928,8 +928,8 @@ export default function HomeTable() {
     const seen = new Set<string>();
     /** Ignore dust residuals after a "full" sell (float / leftover micro units). */
     const MIN_UNITS = 1e-6;
-    const MIN_MARK_PHP = 25; // below this mark value → treat as closed, not on-hold
-
+    const MIN_MARK_PHP = 50; // below this mark → closed for Home on-hold
+    /** If net spent already recovered (sold ≥ bought) residual units are house money / closed for cost-hold */
     const rows = (portfolio || []).filter(
       (p: { symbol?: string; holdings?: number }) =>
         p.symbol && p.symbol !== "PHP" && (Number(p.holdings) || 0) > MIN_UNITS
@@ -939,6 +939,8 @@ export default function HomeTable() {
       venue?: string;
       holdings?: number;
       spent?: number;
+      sold?: number;
+      bought?: number;
       currentPrice?: number | null;
     }[];
 
@@ -951,13 +953,21 @@ export default function HomeTable() {
       const coin =
         allCoins.find((c) => c.symbol.toUpperCase() === sym) ||
         coins.find((c) => c.symbol.toUpperCase() === sym);
-      const holdings = Number(pos.holdings) || 0;
+      let holdings = Number(pos.holdings) || 0;
       const spent = Number(pos.spent) || 0;
+      const sold = Number((pos as { sold?: number }).sold) || 0;
+      const bought = Number((pos as { bought?: number }).bought) || 0;
       const price =
         Number(coin?.currentPrice ?? pos.currentPrice ?? 0) || 0;
       const mark = price > 0 ? holdings * price : spent > 0 ? spent : 0;
       // Closed / dust: no meaningful bag left on this venue
       if (holdings <= MIN_UNITS || (price > 0 && mark < MIN_MARK_PHP)) continue;
+      // Fully exited in economic terms: sold covered cost and residual is noise
+      if (bought > 0 && sold >= bought * 0.98 && mark < Math.max(MIN_MARK_PHP * 4, bought * 0.03)) {
+        continue;
+      }
+      // Net spent already <= 0 means free/recovered path only — not cost on-hold
+      // (spent from API is already net of sells)
       const row: Mini = {
         symbol: sym,
         name: coin?.name || pos.name || sym.replace(/PHP$/i, ""),
@@ -1036,7 +1046,10 @@ export default function HomeTable() {
       "Focus on **market-wide** drivers that historically move the whole crypto complex — not altcoin tips."
     );
     lines.push(
-      "Examples of the kind of story we care about: major tech/AI firms and capital markets (e.g. large AI lab IPO / public-market path), mega-corp treasury or product moves (Tesla-style), ETF flow shocks, exchange failures, stablecoin stress, major regulation or court dates, protocol-level BTC/ETH upgrades, and macro prints that risk assets react to."
+      "Examples of the kind of story we care about: **US equity risk** (S&P 500, Nasdaq, major indices), risk-on/off rotation between stocks and crypto, mega-cap tech moves, major tech/AI capital-markets events (IPO / public path), corporate treasury moves (Tesla-style), crypto ETF flow shocks, exchange failures, stablecoin stress, regulation/court dates, BTC/ETH upgrades, and macro prints (CPI/FOMC/NFP) that hit risk assets."
+    );
+    lines.push(
+      "Equity ↔ crypto link (use carefully): when S&P 500 / Nasdaq sell off hard, BTC/ETH often risk-off with them; when equities rally on liquidity/risk appetite, crypto *may* follow — but correlation is regime-dependent, not a rule. Note divergences (crypto weak while S&P firm, or vice versa)."
     );
     lines.push(
       "Use BTC + ETH as **direction anchors only**. Do **not** recommend buying, selling, or trading BTC or ETH. Do **not** give individual altcoin buy signals."
@@ -1058,7 +1071,8 @@ export default function HomeTable() {
     lines.push("RESEARCH TASKS (live search required — no training-memory headlines)");
     lines.push("1. **Now / last ~72h** — What verified items are moving BTC and ETH?");
     lines.push("   Search: Bitcoin, Ethereum, BTC ETF flows, ETH ETF, major exchange, stablecoin, liquidations, SEC, Fed speakers.");
-    lines.push("   Also search **cross-asset / equity–crypto bridges**: large AI or tech IPO/listing news, mega-cap balance-sheet crypto, payment rails, corporate BTC/ETH disclosures.");
+    lines.push("   **Equities (required):** S&P 500 and Nasdaq tone last ~72h — big up/down days, futures shocks, VIX spike; whether BTC/ETH moved with or against the index.");
+    lines.push("   Also **cross-asset bridges**: AI/tech IPO or listing path, mega-cap treasury/crypto disclosures, payment rails.");
     lines.push("2. **Negative / security (required bucket)** — Hacks, exploits, bridge drains, exchange insolvency, withdrawal halts, stablecoin depeg, major lawsuit, enforcement actions.");
     lines.push("   Search last ~90d if still affecting risk appetite; last ~72h for active incidents. Prefer official post or two independent outlets.");
     lines.push("   Include these even if price already reacted — they explain risk-off tape and why alts may lag.");
@@ -1078,6 +1092,7 @@ export default function HomeTable() {
     lines.push("1. **Verdict for alt risk backdrop:** RISK-ON / MIXED / RISK-OFF");
     lines.push("   Confidence: Low / Medium / High · Data quality: Good / Partial / Poor");
     lines.push("2. **Why BTC / ETH are moving (max 5 bullets)** — fact + source · date · risk-on/off/mixed");
+    lines.push("2a. **Equities check** — 1–2 lines on S&P 500/Nasdaq vs BTC/ETH (aligned, diverging, or unclear) with source");
     lines.push("2b. **Security / negative** — bullet list or **none verified** after search (hacks, exploits, exchange/stablecoin stress, enforcement)");
     lines.push("3. **Forward calendar (max 6 lines)** — only confirmed dates:");
     lines.push("   `- **Watch date:** YYYY-MM-DD · event|integration|listing|unlock|hardfork · BTC or ETH short detail`");

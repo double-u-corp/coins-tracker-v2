@@ -1,5 +1,5 @@
 /**
- * One bulk scan for Home: Near 30d support · Fast pump · RSI oversold.
+ * One bulk scan for Home: Near 30d support · RSI oversold (fast pump removed — weekly Timing covers momentum).
  * Results stored in CatalystLog — Home loads snapshot (1 read) unless user re-runs.
  */
 import prisma from "@/lib/prisma";
@@ -243,7 +243,7 @@ export async function runHomeMonitorScan(): Promise<HomeMonitorSnapshot> {
     scannedAtManila: manilaLabel(now),
     coinCount: active.length,
     nearSupport: near.slice(0, 8),
-    fastPump: pump.slice(0, 3),
+    fastPump: [] /* deprecated: weekly Timing soft/hot windows */,
     rsiOversold: rsiHits.slice(0, 8),
   };
 
