@@ -153,28 +153,24 @@ async function handleList(res: NextApiResponse<ListResponse | ErrorResponse>) {
       existing.soldUnits += coinAmt;
     }
 
-    // Float noise
+    // Float noise / near-zero after full exit (do NOT wipe intentional house-money leftovers)
     if (Math.abs(existing.holdings) < 1e-8) existing.holdings = 0;
     if (existing.holdings < 0) existing.holdings = 0;
-    // Round tiny residuals (8 dp is enough for PHP spot bags)
     if (existing.holdings > 0 && existing.holdings < 1e-6) existing.holdings = 0;
 
     /**
-     * Closed bag heuristics (fixes TRUMP/XAUT-style leftovers after "sold all"):
-     * 1) Sold ≥98% of all units ever bought → treat residual as closed
-     * 2) Residual &lt;2% of peak bag after meaningful sells → closed
-     * 3) Residual &lt;0.2% of bought units → closed
+     * Only kill microscopic residuals after a near-full unit exit.
+     * Keep real leftover bags (free/recovered house money) when user intentionally held units
+     * after selling enough PHP to recover cost (net spent <= 0 on portfolio row).
+     * residual < 0.05% of peak after selling ≥99.5% of bought units → closed dust
      */
-    if (existing.holdings > 0 && existing.boughtUnits > 0) {
+    if (existing.holdings > 0 && existing.boughtUnits > 0 && existing.soldUnits > 0) {
       const soldFrac = existing.soldUnits / existing.boughtUnits;
-      const residualOfBought = existing.holdings / existing.boughtUnits;
       const residualOfPeak =
-        existing.peakUnits > 0 ? existing.holdings / existing.peakUnits : residualOfBought;
-      if (
-        soldFrac >= 0.98 ||
-        (existing.soldUnits > 0 && residualOfPeak < 0.02) ||
-        residualOfBought < 0.002
-      ) {
+        existing.peakUnits > 0
+          ? existing.holdings / existing.peakUnits
+          : existing.holdings / existing.boughtUnits;
+      if (soldFrac >= 0.995 && residualOfPeak < 0.0005) {
         existing.holdings = 0;
       }
     }

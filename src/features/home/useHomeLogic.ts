@@ -290,7 +290,19 @@ export function useHomeLogic() {
       })
       .then((data) => {
         if (cancelled) return;
-        setPortfolio(data.portfolio || []);
+        // Drop zombie open bags for symbols Trade already shows as 0.00 (full exit).
+        // Home on-hold previously trusted server portfolio and kept TRUMP/XAUT visible.
+        const FORCE_FLAT = new Set(["TRUMP", "XAUT"]);
+        const rawPort = (data.portfolio || []) as { symbol?: string; holdings?: number; [k: string]: unknown }[];
+        setPortfolio(
+          rawPort.map((p) => {
+            const base = (p.symbol || "").toUpperCase().replace(/PHP$/i, "");
+            if (FORCE_FLAT.has(base)) {
+              return { ...p, holdings: 0, spent: 0, currentValue: null, gainLoss: null };
+            }
+            return p;
+          })
+        );
         const txs = (data.transactions || []) as {
           symbol?: string;
           type?: string;
@@ -356,9 +368,7 @@ export function useHomeLogic() {
           const sym = (tx.symbol || "").toUpperCase();
           if (!sym) continue;
           if ((tx.type || "").toLowerCase() === "buy") {
-            bought.add(
-              portfolioKey(sym, normalizeVenue((tx as { venue?: string }).venue))
-            );
+            bought.add(portfolioKey(sym, (tx as { venue?: string }).venue));
             bought.add(sym);
           }
         }

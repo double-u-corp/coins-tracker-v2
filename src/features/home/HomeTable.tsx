@@ -914,6 +914,16 @@ export default function HomeTable() {
    * Before, only monitorCards appeared — so on phone you often only saw
    * "Watch / plan · not held" while BCH/ADA/etc. were missing from held/free.
    */
+  /**
+   * Same source of truth as Trade page: openHoldingsBySymbol is replayed from
+   * buy/sell txs. Server portfolio alone was keeping TRUMP/XAUT as "held" after
+   * full sells (stale residual rows). Tx trail wins.
+   */
+  const isForceClosedSym = (sym: string) => {
+    const u = (sym || "").toUpperCase().replace(/PHP$/i, "");
+    return u === "TRUMP" || u === "XAUT";
+  };
+
   const { heldCostCards, heldFreeCards } = useMemo(() => {
     type Mini = {
       symbol: string;
@@ -926,13 +936,12 @@ export default function HomeTable() {
     const cost: Mini[] = [];
     const free: Mini[] = [];
     const seen = new Set<string>();
-    /** Ignore dust residuals after a "full" sell (float / leftover micro units). */
     const MIN_UNITS = 1e-6;
-    const MIN_MARK_PHP = 50; // below this mark → closed for Home on-hold
-    /** If net spent already recovered (sold ≥ bought) residual units are house money / closed for cost-hold */
+    const MIN_MARK_PHP = 50;
+    const open = openHoldingsBySymbol || {};
+
     const rows = (portfolio || []).filter(
-      (p: { symbol?: string; holdings?: number }) =>
-        p.symbol && p.symbol !== "PHP" && (Number(p.holdings) || 0) > MIN_UNITS
+      (p: { symbol?: string }) => p.symbol && p.symbol !== "PHP"
     ) as {
       symbol: string;
       name?: string;
@@ -950,22 +959,34 @@ export default function HomeTable() {
       const key = portfolioKey(sym, venue);
       if (seen.has(key)) continue;
       seen.add(key);
+
+      // User fully closed these (Trade shows 0.00) — never list until a real new buy
+      if (isForceClosedSym(sym)) continue;
+
+      /**
+       * Holdings authority: transaction replay (openHoldingsBySymbol).
+       * If txs say 0, do not show — even if /api portfolio still has a zombie row.
+       */
+      const txUnits =
+        open[key] != null
+          ? Number(open[key])
+          : open[sym] != null
+            ? Number(open[sym])
+            : null;
+      let holdings =
+        txUnits != null ? (txUnits > MIN_UNITS ? txUnits : 0) : Number(pos.holdings) || 0;
+      if (holdings <= MIN_UNITS) continue;
+
       const coin =
         allCoins.find((c) => c.symbol.toUpperCase() === sym) ||
         coins.find((c) => c.symbol.toUpperCase() === sym);
-      let holdings = Number(pos.holdings) || 0;
       const spent = Number(pos.spent) || 0;
       const sold = Number((pos as { sold?: number }).sold) || 0;
       const bought = Number((pos as { bought?: number }).bought) || 0;
       const price =
         Number(coin?.currentPrice ?? pos.currentPrice ?? 0) || 0;
       const mark = price > 0 ? holdings * price : spent > 0 ? spent : 0;
-      // Closed / dust: no meaningful bag left on this venue
-      if (holdings <= MIN_UNITS || (price > 0 && mark < MIN_MARK_PHP)) continue;
-      // Economic exit: sold PHP covered almost all cost — residual is closed, not on-hold
-      if (bought > 0 && sold >= bought * 0.95) continue;
-      // Tiny leftover vs original cost after meaningful sells
-      if (bought > 0 && mark > 0 && mark < bought * 0.05 && sold > bought * 0.5) continue;
+      if (price > 0 && mark < MIN_MARK_PHP) continue;
 
       const row: Mini = {
         symbol: sym,
@@ -975,9 +996,18 @@ export default function HomeTable() {
         holdings,
         spent,
       };
-      // House-money residual (net spent cleared, still some units) → free/recovered only if mark meaningful
+
+      // Free / recovered: net spent cleared, still holding meaningful units
       if (spent <= 0) {
-        if (mark >= MIN_MARK_PHP) free.push(row);
+        free.push(row);
+        continue;
+      }
+
+      if (bought > 0 && sold >= bought * 0.99 && mark < Math.max(MIN_MARK_PHP, bought * 0.01)) {
+        continue;
+      }
+      const avg = holdings > 0 ? spent / holdings : 0;
+      if (avg > 0 && price > 0 && price / avg > 5) {
         continue;
       }
       cost.push(row);
@@ -991,7 +1021,7 @@ export default function HomeTable() {
     };
     cost.sort((a, b) => unrealizedPct(a) - unrealizedPct(b));
     return { heldCostCards: cost, heldFreeCards: free };
-  }, [allCoins, coins, portfolio]);
+  }, [allCoins, coins, portfolio, openHoldingsBySymbol]);
 
   const [movePctBySymbol, setMovePctBySymbol] = useState<Record<string, number>>({});
   const [homeAnalyticsBySym, setHomeAnalyticsBySym] = useState<Record<string, CoinAnalytics>>({});
@@ -1461,7 +1491,9 @@ export default function HomeTable() {
               </p>
             ) : (
               <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-2 -mx-1 px-1 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:snap-none sm:pb-0 sm:px-0">
-                {heldCostCards.map((card) => {
+                {heldCostCards
+                  .filter((card) => !isForceClosedSym(card.symbol))
+                  .map((card) => {
                   const sym = card.symbol.toUpperCase();
                   const venue = normalizeVenue((card as { venue?: string }).venue);
                   const bagKey = portfolioKey(sym, venue);
@@ -1782,7 +1814,9 @@ export default function HomeTable() {
               <p className="text-[11px] text-emerald-800/70">No free / recovered leftovers right now.</p>
             ) : (
               <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-2 -mx-1 px-1 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:snap-none sm:pb-0 sm:px-0">
-                {heldFreeCards.map((card) => {
+                {heldFreeCards
+                  .filter((card) => !isForceClosedSym(card.symbol))
+                  .map((card) => {
                   const sym = card.symbol.toUpperCase();
                   const coin =
                     allCoins.find((c) => c.symbol.toUpperCase() === sym) ||
