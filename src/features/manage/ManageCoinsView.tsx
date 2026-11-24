@@ -13,12 +13,17 @@ function formatRawPrice(value: number): string {
 function MonitoredCoinCard({
   coin,
   removeCoin,
+  setTracking,
   pendingSymbol,
+  onSaved,
 }: {
   coin: any;
   removeCoin: (symbol: string) => void;
+  setTracking: (symbol: string, trackingEnabled: boolean) => void | Promise<void>;
   pendingSymbol: string | null;
+  onSaved?: () => void | Promise<void>;
 }) {
+  const trackingOn = coin.trackingEnabled !== false;
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -105,6 +110,7 @@ function MonitoredCoinCard({
       setIsEditing(false);
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 2500);
+      await onSaved?.();
     } catch (err) {
       alert((err as Error).message || "Failed to save target ranges.");
     } finally {
@@ -129,6 +135,7 @@ function MonitoredCoinCard({
       coin.onMonitor = mon;
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 2500);
+      await onSaved?.();
     } catch (err) {
       setInputMonitor(savedMonitor);
       alert((err as Error).message || "Failed to save Home monitor.");
@@ -150,6 +157,11 @@ function MonitoredCoinCard({
             <span className="text-xs font-semibold text-gray-500 font-mono tracking-tight bg-gray-100 px-1.5 py-0.5 rounded">
               {coin.symbol}
             </span>
+            {!trackingOn && (
+              <span className="text-[10px] font-bold uppercase text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200">
+                Tracking paused
+              </span>
+            )}
           </div>
 
           {/* 2. Current Price Inline */}
@@ -163,15 +175,75 @@ function MonitoredCoinCard({
           </div>
 
         </div>
+      </div>
 
-        {/* <button
-          type="button"
-          onClick={() => removeCoin(coin.symbol)}
-          disabled={pendingSymbol === coin.symbol}
-          className="rounded-md border border-red-200 px-2.5 py-1 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
-        >
-          {pendingSymbol === coin.symbol ? "…" : "Remove"}
-        </button> */}
+      {/* Price tracking: pause = no cron / scans; history + trades kept */}
+      <div className="mt-2 flex flex-col gap-1.5 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <span className="text-[11px] font-bold uppercase tracking-wide text-slate-600">
+              Price tracking
+            </span>
+            <p className="text-[10px] text-slate-500 font-normal max-w-md">
+              Pause for exchange delist / stop future polls. Keeps buy/sell history and old
+              charts. Resume anytime.
+            </p>
+          </div>
+          <span
+            className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+              trackingOn
+                ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                : "bg-amber-100 text-amber-900 border border-amber-200"
+            }`}
+          >
+            {trackingOn ? "Tracking on" : "Paused — no new prices"}
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {trackingOn ? (
+            <button
+              type="button"
+              disabled={pendingSymbol === coin.symbol}
+              onClick={() => {
+                if (
+                  !confirm(
+                    `Pause price tracking for ${coin.symbol}?\n\nCron will stop fetching new prices. Trades, journals, and past charts stay. Use this for coins.ph delist (e.g. sell first, then pause).`
+                  )
+                )
+                  return;
+                void setTracking(coin.symbol, false);
+              }}
+              className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+            >
+              {pendingSymbol === coin.symbol ? "…" : "Pause tracking"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={pendingSymbol === coin.symbol}
+              onClick={() => void setTracking(coin.symbol, true)}
+              className="rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-900 hover:bg-emerald-100 disabled:opacity-50"
+            >
+              {pendingSymbol === coin.symbol ? "…" : "Resume tracking"}
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={pendingSymbol === coin.symbol}
+            onClick={() => {
+              if (
+                !confirm(
+                  `PERMANENTLY remove ${coin.symbol}?\n\nThis deletes price history and transactions for this coin. Prefer “Pause tracking” if you only want to stop new prices.`
+                )
+              )
+                return;
+              void removeCoin(coin.symbol);
+            }}
+            className="rounded-md border border-red-200 px-2.5 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+          >
+            {pendingSymbol === coin.symbol ? "…" : "Delete forever"}
+          </button>
+        </div>
       </div>
 
       {/* Target Ranges: Edit / Cancel / Save */}
@@ -321,6 +393,7 @@ export default function ManageCoinsView({
 
   const {
     monitored,
+    loadMonitored,
     monitoredLoading,
     query,
     setQuery,
@@ -332,6 +405,7 @@ export default function ManageCoinsView({
     addCoin,
     setStartingPrice,
     removeCoin,
+    setTracking,
   } = useManageCoinsLogic();
 
   // Mode state for adding coins: "manual" | "browse" | null
@@ -464,9 +538,11 @@ export default function ManageCoinsView({
           <div className={`grid gap-4 ${modalMode ? "grid-cols-1 max-w-lg mx-auto" : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3"}`}>
             {filteredMonitored.map((coin) => (
               <MonitoredCoinCard
+                      onSaved={loadMonitored}
                 key={coin.symbol}
                 coin={coin}
                 removeCoin={removeCoin}
+                setTracking={setTracking}
                 pendingSymbol={pendingSymbol}
               />
             ))}

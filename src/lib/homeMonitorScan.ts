@@ -199,10 +199,19 @@ export async function loadHomeMonitorSnapshot(): Promise<HomeMonitorSnapshot | n
 
 export async function runHomeMonitorScan(): Promise<HomeMonitorSnapshot> {
   const cutoff = new Date(Date.now() - DAYS * 24 * 3600_000);
-  const coins = await prisma.coin.findMany({
-    select: { id: true, symbol: true, name: true },
-    orderBy: { symbol: "asc" },
-  });
+  let coins: { id: number; symbol: string; name: string }[];
+  try {
+    coins = await prisma.coin.findMany({
+      where: { trackingEnabled: true },
+      select: { id: true, symbol: true, name: true },
+      orderBy: { symbol: "asc" },
+    });
+  } catch {
+    coins = await prisma.coin.findMany({
+      select: { id: true, symbol: true, name: true },
+      orderBy: { symbol: "asc" },
+    });
+  }
   const active = coins.filter((c) => !SKIP.has(c.symbol.toUpperCase()));
   const ids = active.map((c) => c.id);
   const records = await prisma.record.findMany({

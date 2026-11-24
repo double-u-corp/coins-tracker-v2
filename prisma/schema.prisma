@@ -11,6 +11,9 @@ model Coin {
   id             Int            @id @default(autoincrement())
   name           String
   symbol         String         @unique
+  /// When false: keep coin + trades + history, but skip cron price polls and auto scans.
+  /// Use for exchange delist / stop monitoring without wiping ledger.
+  trackingEnabled Boolean       @default(true)
   /// LONG-scan card flag: bad | monitor | nochase | neutral | null (cleared)
   scanFlag       String?
   records        Record[]

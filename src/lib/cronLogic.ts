@@ -77,7 +77,20 @@ export async function runCronJob(): Promise<CronResult[]> {
   const errors: string[] = [];
   const newsWarnings: string[] = [];
 
-  const monitoredCoins = await prisma.coin.findMany({ orderBy: { symbol: "asc" } });
+  let monitoredCoins: { id: number; symbol: string; name: string }[];
+  try {
+    monitoredCoins = await prisma.coin.findMany({
+      where: { trackingEnabled: true },
+      orderBy: { symbol: "asc" },
+      select: { id: true, symbol: true, name: true },
+    });
+  } catch {
+    // Column missing before migrate — poll all coins
+    monitoredCoins = await prisma.coin.findMany({
+      orderBy: { symbol: "asc" },
+      select: { id: true, symbol: true, name: true },
+    });
+  }
 
   const cronLog = await prisma.cronLog.create({ data: { status: "running" } });
 

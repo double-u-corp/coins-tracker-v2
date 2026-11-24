@@ -128,13 +128,45 @@ export function useManageCoinsLogic() {
     }
   }
 
-  async function updateTarget(symbol: string, targetHigh: number | null, targetLow: number | null) {
+  /** Pause/resume price tracking — keeps trades + history. */
+  async function setTracking(symbol: string, trackingEnabled: boolean) {
+    setActionError(null);
+    setPendingSymbol(symbol);
+    try {
+      const res = await fetch("/api/coins", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol, trackingEnabled }),
+      });
+      if (!res.ok) {
+        const body = (await res.json()) as { error?: string };
+        throw new Error(body.error ?? `Failed to update tracking for ${symbol}`);
+      }
+      await loadMonitored();
+    } catch (err) {
+      setActionError((err as Error).message);
+    } finally {
+      setPendingSymbol(null);
+    }
+  }
+
+  async function updateTarget(
+    symbol: string,
+    targetHigh: number | null,
+    targetLow: number | null,
+    onMonitor?: boolean
+  ) {
     setActionError(null);
     try {
       const res = await fetch("/api/targets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol, targetHigh, targetLow }),
+        body: JSON.stringify({
+          symbol,
+          targetHigh,
+          targetLow,
+          ...(onMonitor === undefined ? {} : { onMonitor }),
+        }),
       });
       if (!res.ok) {
         const body = (await res.json()) as { error?: string };
@@ -147,6 +179,7 @@ export function useManageCoinsLogic() {
   }
 
   return {
+    loadMonitored,
     monitored,
     monitoredLoading,
     query,
@@ -159,6 +192,7 @@ export function useManageCoinsLogic() {
     addCoin,
     setStartingPrice,
     removeCoin,
+    setTracking,
     updateTarget,
   };
 }

@@ -10,6 +10,7 @@ import {
   coinSymbolQuerySchema,
   monthQuerySchema,
   removeCoinSchema,
+  setTrackingSchema,
 } from "@/validators/coinSchema";
 import type { ChartPoint, CoinSummary, DailyRecord, NewRecordAlert } from "@/validators/recordSchema";
 
@@ -17,8 +18,9 @@ type SummaryResponse = { coins: CoinSummary[]; lastCronRun: string | null; lastC
 type CalendarResponse = { days: DailyRecord[] };
 type ChartResponse = { points: ChartPoint[] };
 type AlertsResponse = { cronLogId: number | null; ranAt: string | null; newRecords: NewRecordAlert[] };
-type MutationResponse = { coin: { id: number; symbol: string; name: string } };
+type MutationResponse = { coin: { id: number; symbol: string; name: string; trackingEnabled?: boolean } };
 type DeleteResponse = { ok: true };
+type TrackingResponse = { ok: true; symbol: string; trackingEnabled: boolean };
 type ErrorResponse = { error: string };
 
 /** Groups a list of Records into one high/low entry per calendar day (UTC date). Used by the Calendar page. */
@@ -134,6 +136,7 @@ async function handleSummary(res: NextApiResponse<SummaryResponse>) {
       targetLow,
       onMonitor,
       reviewUntil,
+      trackingEnabled: (coin as { trackingEnabled?: boolean }).trackingEnabled !== false,
       targetHighReached: targetHigh !== null && currentPrice !== null && currentPrice >= targetHigh,
       targetLowReached: targetLow !== null && currentPrice !== null && currentPrice <= targetLow,
       priceDirection,
@@ -450,6 +453,59 @@ async function handleAddCoin(req: NextApiRequest, res: NextApiResponse<MutationR
  * news, but preserves journal entries by detaching them (coinId -> null,
  * becoming general entries) rather than deleting user-authored content.
  */
+
+/**
+ * PATCH /api/coins — pause or resume price tracking.
+ * Keeps coin, transactions, price history, journal. Cron and auto-scans skip paused coins.
+ * Body: { symbol, trackingEnabled: boolean }
+ */
+async function handleSetTracking(
+  req: NextApiRequest,
+  res: NextApiResponse<TrackingResponse | ErrorResponse>
+) {
+  if (!isAuthenticatedRequest(req)) {
+    return res.status(401).json({ error: "Login required" });
+  }
+
+  const parsed = setTrackingSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Invalid payload" });
+  }
+
+  const { symbol, trackingEnabled } = parsed.data;
+  const coin = await prisma.coin.findUnique({ where: { symbol } });
+  if (!coin) {
+    return res.status(404).json({ error: `No coin with symbol ${symbol}` });
+  }
+
+  try {
+    await prisma.coin.update({
+      where: { id: coin.id },
+      data: { trackingEnabled },
+    });
+  } catch (err) {
+    return res.status(500).json({
+      error:
+        (err as Error).message ||
+        "Failed to update tracking. Run prisma db push if trackingEnabled column is missing.",
+    });
+  }
+
+  // When pausing, also turn off Home monitor so it leaves Target cards
+  if (!trackingEnabled) {
+    try {
+      await prisma.priceTarget.updateMany({
+        where: { coinId: coin.id },
+        data: { onMonitor: false },
+      });
+    } catch {
+      /* optional */
+    }
+  }
+
+  return res.status(200).json({ ok: true, symbol, trackingEnabled });
+}
+
 async function handleRemoveCoin(req: NextApiRequest, res: NextApiResponse<DeleteResponse | ErrorResponse>) {
   if (!isAuthenticatedRequest(req)) {
     return res.status(401).json({ error: "Login required" });
@@ -485,11 +541,14 @@ export default async function handler(
     if (req.method === "POST") {
       return await handleAddCoin(req, res as NextApiResponse<MutationResponse | ErrorResponse>);
     }
+    if (req.method === "PATCH") {
+      return await handleSetTracking(req, res as NextApiResponse<TrackingResponse | ErrorResponse>);
+    }
     if (req.method === "DELETE") {
       return await handleRemoveCoin(req, res as NextApiResponse<DeleteResponse | ErrorResponse>);
     }
     if (req.method !== "GET") {
-      res.setHeader("Allow", "GET, POST, DELETE");
+      res.setHeader("Allow", "GET, POST, PATCH, DELETE");
       return res.status(405).json({ error: "Method not allowed" });
     }
 
