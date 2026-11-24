@@ -96,3 +96,16 @@ export const chartHoursQuerySchema = z.coerce.number().int().min(1).max(24 * 180
 /** Validates the `granularity` query param for the chart page. */
 export const chartGranularitySchema = z.enum(["daily", "weekly", "monthly", "yearly"]);
 export type ChartGranularity = z.infer<typeof chartGranularitySchema>;
+
+
+/** Pause or resume price tracking without deleting history. */
+export const setTrackingSchema = z.object({
+  symbol: z
+    .string()
+    .trim()
+    .min(1, "Symbol is required")
+    .transform((val) => val.toUpperCase()),
+  trackingEnabled: z.boolean(),
+});
+
+export type SetTrackingInput = z.infer<typeof setTrackingSchema>;
