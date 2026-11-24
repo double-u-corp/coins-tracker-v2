@@ -2001,7 +2001,16 @@ export default function HomeTable() {
       )}
 
       {/* 2a) Coin watch dates from journals */}
-      <HomeMonitorBoard universe={allCoins || []} />
+      <HomeMonitorBoard
+        universe={(allCoins || []).filter(
+          (c) => (c as { trackingEnabled?: boolean }).trackingEnabled !== false
+        )}
+        watchPlanCoins={planMonitorCards.map((c) => ({
+          symbol: c.symbol,
+          name: c.name,
+          currentPrice: c.currentPrice,
+        }))}
+      />
 
           <HomeCoinWatchDates journalEntries={journalEntries} allCoins={allCoins} />
 

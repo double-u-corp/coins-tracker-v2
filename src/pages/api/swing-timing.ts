@@ -312,6 +312,7 @@ export default async function handler(
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
   const coins = await prisma.coin.findMany({
+    where: { trackingEnabled: true },
     select: { id: true, symbol: true, name: true },
     orderBy: { symbol: "asc" },
   });

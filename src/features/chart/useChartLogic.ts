@@ -84,8 +84,12 @@ export function useChartLogic() {
       .then((data: { coins: CoinSummary[] }) => {
         if (!cancelled) {
           setAllCoins(data.coins);
+          // Hide paused (trackingEnabled=false) from Spot dropdown — Manage still lists them
+          const active = data.coins.filter(
+            (c) => (c as { trackingEnabled?: boolean }).trackingEnabled !== false
+          );
           setCoinOptions(
-            data.coins.map((c) => ({
+            active.map((c) => ({
               symbol: c.symbol,
               name: c.name,
               currentPrice: c.currentPrice,

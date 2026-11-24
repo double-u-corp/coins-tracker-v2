@@ -31,11 +31,13 @@ export function useCalendarLogic() {
       .then((data: { coins: CoinSummary[] }) => {
         if (!cancelled && Array.isArray(data.coins)) {
           setCoinOptions(
-            data.coins.map((c) => ({
-              symbol: c.symbol,
-              name: c.name,
-              currentPrice: c.currentPrice,
-            }))
+            data.coins
+              .filter((c) => (c as { trackingEnabled?: boolean }).trackingEnabled !== false)
+              .map((c) => ({
+                symbol: c.symbol,
+                name: c.name,
+                currentPrice: c.currentPrice,
+              }))
           );
         }
       })

@@ -897,7 +897,11 @@ export default function SwingTimingView() {
         const list = (j.coins || []) as { symbol?: string; name?: string }[];
         if (cancelled) return;
         const opts = list
-          .filter((c) => c.symbol)
+          .filter((c) => {
+            if (!c.symbol) return false;
+            // Paused coins stay out of Timing analytics dropdown
+            return (c as { trackingEnabled?: boolean }).trackingEnabled !== false;
+          })
           .map((c) => ({ symbol: String(c.symbol), name: String(c.name || c.symbol) }))
           .sort((a, b) => a.name.localeCompare(b.name));
         if (opts.length) setCoinOptions(opts);
@@ -1639,7 +1643,8 @@ export default function SwingTimingView() {
           ) : null}
         </div>
       ) : null}
-
+        </div>
+      ) : null}
 
 
       {loading && !data && (

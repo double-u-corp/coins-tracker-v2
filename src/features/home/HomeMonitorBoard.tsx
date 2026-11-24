@@ -91,18 +91,117 @@ function Section({
   );
 }
 
+/** Combined research prompt: near support + RSI oversold + Watch/plan not held. */
+function buildEntryMonitorPrompt(
+  near: MonitorHitBase[],
+  rsi: MonitorHitBase[],
+  watchPlan: CoinPx[]
+): string {
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+  const lines: string[] = [];
+  lines.push(
+    `You are a neutral crypto research assistant (Philippines PHP spot context — research only).`
+  );
+  lines.push(`Analysis date (Manila): **${today}**.`);
+  lines.push(``);
+  lines.push(`## Task`);
+  lines.push(
+    `Gather **verified news, events, unlocks, listings/delistings, upgrades, and security items** for the coins below.`
+  );
+  lines.push(
+    `Windows: **past ~30 days**, **present / ~72h**, and **next ~30 days**. Security incidents: last ~90 days if still relevant.`
+  );
+  lines.push(
+    `Do **not** recommend buy, sell, hold, add, average down, or size. Do **not** rank for entry. Lists are only which tickers to research.`
+  );
+  lines.push(``);
+  lines.push(`## List A — Near 30-day support · top 8 (app context only)`);
+  if (!near.length) lines.push(`(none in list right now)`);
+  else {
+    near.forEach((h, i) => {
+      const base = h.name || h.symbol.replace(/PHP$/i, "");
+      lines.push(`${i + 1}. **${base}** (\`${h.symbol}\`) — ${h.detail || "near support"}`);
+    });
+  }
+  lines.push(``);
+  lines.push(`## List B — Watch / plan · not held`);
+  const plan = watchPlan.filter((c) => c.symbol);
+  if (!plan.length) lines.push(`(none on watch/plan right now)`);
+  else {
+    plan.forEach((c, i) => {
+      const sym = String(c.symbol).toUpperCase();
+      const base = c.name || sym.replace(/PHP$/i, "");
+      lines.push(`${i + 1}. **${base}** (\`${sym}\`)`);
+    });
+  }
+  lines.push(``);
+  lines.push(`## List C — RSI oversold (app context only)`);
+  if (!rsi.length) lines.push(`(none loaded)`);
+  else {
+    rsi.forEach((r, i) => {
+      const sym = (r.symbol || "").toUpperCase();
+      const base = r.name || sym.replace(/PHP$/i, "");
+      lines.push(`${i + 1}. **${base}** (\`${sym}\`) — ${r.detail || "RSI oversold"}`);
+    });
+  }
+  lines.push(``);
+  lines.push(`## Rules`);
+  lines.push(`- Neutral research only — no trading verdicts.`);
+  lines.push(`- Verified sources only; no training-memory headlines; no invented dates.`);
+  lines.push(`- Search by **project name / base ticker** (e.g. XLM not XLMPHP).`);
+  lines.push(`- Nothing found after search for a category → **none verified** (do not stay silent).`);
+  lines.push(``);
+  lines.push(`## Output (required)`);
+  lines.push(`1. Short bullets or table: Coin | Past 30d | Present | Next 30d | Security`);
+  lines.push(`2. **Watch date lines — critical.** For **every** dated catalyst, emit exactly:`);
+  lines.push(
+    `   \`- **Watch date:** YYYY-MM-DD · unlock|delisting|event|integration|listing|hardfork · short detail\``
+  );
+  lines.push(
+    `   Example: \`- **Watch date:** 2026-11-19 · event · SKY governance executive vote (Nov 9 proposal)\``
+  );
+  lines.push(
+    `   Our app saves these into **Coin watch dates**. Missing this format means the calendar will not update.`
+  );
+  lines.push(`3. Omit a coin's Watch date lines only when no dated item was verified.`);
+  lines.push(`4. End with a fenced markdown block the trader can paste to journal:`);
+  lines.push(``);
+  lines.push("```markdown");
+  lines.push(`## Entry monitor research · ${today} (Manila)`);
+  lines.push(`- **Agent:** Spot Trading Desk AI (name model)`);
+  lines.push(`- **Prompt:** Home · Entry monitor · news/events only`);
+  lines.push(`- **Coins covered:** …`);
+  lines.push(`- **Watch date:** YYYY-MM-DD · event · short detail`);
+  lines.push(`- **Notes:** …`);
+  lines.push("```");
+  return lines.join("\n");
+}
+
 /**
- * Near support + fast pump + RSI oversold from ONE saved bulk scan.
+ * Near support + RSI oversold from ONE saved bulk scan.
  * Home load = GET snapshot only. POST only when user clicks Run.
+ * Entry monitor prompt = Lists A/B/C (support + watch/plan + RSI) ±30d research.
  */
-export default function HomeMonitorBoard({ universe }: { universe: CoinPx[] }) {
+export default function HomeMonitorBoard({
+  universe,
+  watchPlanCoins = [],
+}: {
+  universe: CoinPx[];
+  /** Watch / plan · not held — included in Entry monitor prompt */
+  watchPlanCoins?: CoinPx[];
+}) {
   const [snap, setSnap] = useState<HomeMonitorSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [promptCopied, setPromptCopied] = useState(false);
+
+  const trackedUniverse = universe.filter(
+    (c) => (c as { trackingEnabled?: boolean }).trackingEnabled !== false
+  );
 
   const priceBySym = new Map<string, number | null>();
-  for (const c of universe) {
+  for (const c of trackedUniverse) {
     if (c.symbol) priceBySym.set(c.symbol.toUpperCase(), c.currentPrice ?? null);
   }
 
@@ -146,9 +245,10 @@ export default function HomeMonitorBoard({ universe }: { universe: CoinPx[] }) {
         <div>
           <h2 className="text-base font-extrabold text-indigo-950">Monitor board</h2>
           <p className="text-[11px] text-slate-500 max-w-xl">
-            Near 30d support · RSI oversold — one bulk scan, saved for reference. (Fast pump removed — use weekly Timing.)
-            Home does not re-scan on every visit. Compare <span className="font-semibold">price at scan</span>{" "}
-            vs live price below.
+            Near 30d support · RSI oversold — one bulk scan, saved for reference.{" "}
+            <span className="font-semibold">Entry monitor prompt</span> covers support + Watch/plan + RSI
+            (past/present/next ~30d news). Home does not re-scan every visit. Compare{" "}
+            <span className="font-semibold">price at scan</span> vs live price below.
           </p>
           {snap?.scannedAt && (
             <p className="mt-1 text-[11px] font-bold text-indigo-800">
@@ -162,14 +262,40 @@ export default function HomeMonitorBoard({ universe }: { universe: CoinPx[] }) {
             </p>
           )}
         </div>
-        <button
-          type="button"
-          disabled={running}
-          onClick={() => void run()}
-          className="rounded-md border border-indigo-300 bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-60"
-        >
-          {running ? "Scanning…" : "↻ Run monitor scan"}
-        </button>
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            disabled={
+              !(snap?.nearSupport?.length || snap?.rsiOversold?.length || watchPlanCoins.length)
+            }
+            onClick={async () => {
+              const text = buildEntryMonitorPrompt(
+                snap?.nearSupport || [],
+                snap?.rsiOversold || [],
+                watchPlanCoins
+              );
+              try {
+                await navigator.clipboard.writeText(text);
+                setPromptCopied(true);
+                window.setTimeout(() => setPromptCopied(false), 2000);
+              } catch {
+                /* ignore */
+              }
+            }}
+            className="rounded-md border border-rose-400 bg-rose-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-700 disabled:opacity-50"
+            title="Past 30d + next 30d research for Near support, Watch/plan, RSI oversold"
+          >
+            {promptCopied ? "✅ Copied" : "📋 Entry monitor prompt"}
+          </button>
+          <button
+            type="button"
+            disabled={running}
+            onClick={() => void run()}
+            className="rounded-md border border-indigo-300 bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-60"
+          >
+            {running ? "Scanning…" : "↻ Run monitor scan"}
+          </button>
+        </div>
       </div>
 
       {error && <p className="text-xs text-rose-600">{error}</p>}
