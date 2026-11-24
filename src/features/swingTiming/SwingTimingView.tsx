@@ -1643,9 +1643,6 @@ export default function SwingTimingView() {
           ) : null}
         </div>
       ) : null}
-        </div>
-      ) : null}
-
 
       {loading && !data && (
         <p className="text-sm text-gray-500 py-8 text-center">Computing slot-to-slot swings…</p>

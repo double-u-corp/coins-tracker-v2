@@ -909,6 +909,37 @@ export default function HomeTable() {
     return (monitorCards || []).filter((card) => !heldSyms.has(card.symbol.toUpperCase()));
   }, [monitorCards, heldSyms]);
 
+  /** Same set as "Watch / plan · not held" cards — for Entry monitor List B (never empty when UI shows cards). */
+  const watchPlanForPrompt = useMemo(() => {
+    const fromCards = (planMonitorCards || [])
+      .filter((c) => c.symbol)
+      .map((c) => ({
+        symbol: String(c.symbol).toUpperCase(),
+        name: c.name || String(c.symbol).replace(/PHP$/i, ""),
+        currentPrice: c.currentPrice ?? null,
+      }));
+    if (fromCards.length > 0) return fromCards;
+
+    // Fallback: onMonitor + not held + still tracked (matches UI rules if monitorCards lagged)
+    const out: { symbol: string; name: string; currentPrice: number | null }[] = [];
+    for (const coin of allCoins || []) {
+      const sym = String(coin.symbol || "").toUpperCase();
+      if (!sym) continue;
+      if ((coin as { trackingEnabled?: boolean }).trackingEnabled === false) continue;
+      if (heldSyms.has(sym)) continue;
+      const on =
+        (coin as { onMonitor?: boolean }).onMonitor === true ||
+        (!!coin.reviewUntil && (coin as { onMonitor?: boolean }).onMonitor !== false);
+      if (!on) continue;
+      out.push({
+        symbol: sym,
+        name: coin.name || sym.replace(/PHP$/i, ""),
+        currentPrice: coin.currentPrice ?? null,
+      });
+    }
+    return out;
+  }, [planMonitorCards, allCoins, heldSyms]);
+
   /**
    * Held charts must use ALL open bags (not only onMonitor).
    * Before, only monitorCards appeared — so on phone you often only saw
@@ -2005,11 +2036,7 @@ export default function HomeTable() {
         universe={(allCoins || []).filter(
           (c) => (c as { trackingEnabled?: boolean }).trackingEnabled !== false
         )}
-        watchPlanCoins={planMonitorCards.map((c) => ({
-          symbol: c.symbol,
-          name: c.name,
-          currentPrice: c.currentPrice,
-        }))}
+        watchPlanCoins={watchPlanForPrompt}
       />
 
           <HomeCoinWatchDates journalEntries={journalEntries} allCoins={allCoins} />

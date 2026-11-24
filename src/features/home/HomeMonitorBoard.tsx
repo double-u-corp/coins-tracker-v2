@@ -125,13 +125,20 @@ function buildEntryMonitorPrompt(
   }
   lines.push(``);
   lines.push(`## List B — Watch / plan · not held`);
-  const plan = watchPlan.filter((c) => c.symbol);
-  if (!plan.length) lines.push(`(none on watch/plan right now)`);
-  else {
+  const plan = watchPlan.filter((c) => c && String(c.symbol || "").trim());
+  if (!plan.length) {
+    lines.push(
+      `(none on watch/plan right now — flag Monitor=yes on Manage for coins you plan to buy)`
+    );
+  } else {
     plan.forEach((c, i) => {
       const sym = String(c.symbol).toUpperCase();
-      const base = c.name || sym.replace(/PHP$/i, "");
-      lines.push(`${i + 1}. **${base}** (\`${sym}\`)`);
+      const base = (c.name && String(c.name).trim()) || sym.replace(/PHP$/i, "");
+      const px =
+        c.currentPrice != null && Number(c.currentPrice) > 0
+          ? ` · ~${Number(c.currentPrice)}`
+          : "";
+      lines.push(`${i + 1}. **${base}** (\`${sym}\`)${px}`);
     });
   }
   lines.push(``);
@@ -246,9 +253,9 @@ export default function HomeMonitorBoard({
           <h2 className="text-base font-extrabold text-indigo-950">Monitor board</h2>
           <p className="text-[11px] text-slate-500 max-w-xl">
             Near 30d support · RSI oversold — one bulk scan, saved for reference.{" "}
-            <span className="font-semibold">Entry monitor prompt</span> covers support + Watch/plan + RSI
-            (past/present/next ~30d news). Home does not re-scan every visit. Compare{" "}
-            <span className="font-semibold">price at scan</span> vs live price below.
+            <span className="font-semibold">Entry monitor prompt</span> covers support + Watch/plan (
+            {watchPlanCoins.length}) + RSI (past/present/next ~30d news). Home does not re-scan every
+            visit. Compare <span className="font-semibold">price at scan</span> vs live price below.
           </p>
           {snap?.scannedAt && (
             <p className="mt-1 text-[11px] font-bold text-indigo-800">

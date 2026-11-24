@@ -227,7 +227,7 @@ function MonitoredCoinCard({
               {pendingSymbol === coin.symbol ? "…" : "Resume tracking"}
             </button>
           )}
-          <button
+          {/* <button
             type="button"
             disabled={pendingSymbol === coin.symbol}
             onClick={() => {
@@ -242,7 +242,7 @@ function MonitoredCoinCard({
             className="rounded-md border border-red-200 px-2.5 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
           >
             {pendingSymbol === coin.symbol ? "…" : "Delete forever"}
-          </button>
+          </button> */}
         </div>
       </div>
 
