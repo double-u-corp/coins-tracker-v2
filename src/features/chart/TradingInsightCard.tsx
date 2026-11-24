@@ -85,6 +85,8 @@ function formatAssetLabel(symbol: string): { base: string; pair: string; label: 
     ONDO: "Ondo Finance RWA",
     RENDER: "Render Network (RNDR/RENDER) GPU/decentralized rendering — crypto token, not the English verb “render”",
     NEAR: "NEAR Protocol L1 blockchain — crypto token, not “near” as in proximity",
+    DOT: "Polkadot DOT — L1 / parachain ecosystem crypto token, not a punctuation mark",
+    INJ: "Injective INJ — crypto L1 / DeFi protocol token",
     SKY: "Sky protocol (MakerDAO-related)",
     TRUMP: "TRUMP meme coin on Solana — not the person as a news topic alone",
     SOL: "Solana",

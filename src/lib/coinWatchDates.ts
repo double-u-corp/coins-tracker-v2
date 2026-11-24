@@ -83,6 +83,7 @@ function inferSymbolFromText(text: string, known?: string | null): string | null
     "ASTER", "TRUMP", "WEMIX", "VIRTUAL", "HBAR", "AAVE", "LINK", "ONDO", "GRAM",
     "SHIB", "XAUT", "BCH", "BNB", "BTC", "ETH", "SOL", "SUI", "XLM", "XRP", "XDC",
     "ADA", "UNI", "TRX", "SPX", "ENA", "XPL", "RON", "TX", "POL", "BGB", "SKY", "HYPE", "RENDER", "NEAR",
+    "DOT", "INJ",
   ];
   const upper = t.toUpperCase();
   for (const b of bases) {

@@ -31,7 +31,7 @@ interface CoinsTickerResponse {
  * ticker endpoint, with custom interceptors for CoinMarketCap tokens.
  */
 /** CMC symbols that may lack a Coins.ph PHP pair (or pair is unreliable). */
-const CMC_FALLBACK_BASES = new Set(["ONDO", "TX", "RENDER", "NEAR"]);
+const CMC_FALLBACK_BASES = new Set(["ONDO", "TX", "RENDER", "NEAR", "DOT", "INJ"]);
 
 async function fetchUsdToPhpRate(): Promise<number> {
   const fxRes = await fetch(FOREX_API_URL, { cache: "no-store" });
