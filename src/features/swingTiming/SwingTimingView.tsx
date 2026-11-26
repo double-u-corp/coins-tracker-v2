@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import AlertBanner from "@/components/AlertBanner";
 import {
@@ -813,6 +813,8 @@ function symbolsFor2dPath(data: TimingResponse): string[] {
 export default function SwingTimingView() {
   const [days, setDays] = useState(28);
   const [data, setData] = useState<TimingResponse | null>(null);
+  /** Client cache per window so 7↔14↔28 is a view switch, not a repeat transfer when already loaded. */
+  const dataByDaysRef = useRef<Partial<Record<7 | 14 | 28, TimingResponse>>>({});
 
   const [weeklyBrief, setWeeklyBrief] = useState<{
     weekOf: string;
@@ -1012,8 +1014,12 @@ export default function SwingTimingView() {
       if (!res.ok) throw new Error(j.error || "Weekly brief failed");
       if (j.brief) {
         setWeeklyBrief(j.brief);
-        // Keep main Timing board in sync with primary window after full refresh
-        if (full) void load(days, { refresh: false });
+        // Full pipeline refreshed server caches for 7/14/28 — drop client copies and reload active window
+        if (full) {
+          dataByDaysRef.current = {};
+          void loadMacroImpact(false);
+          void load(days, { refresh: false });
+        }
       } else {
         setWeeklyBrief(null);
         setWeeklyBriefMsg(j.message || "No brief yet — run full weekly analysis once.");
@@ -1134,19 +1140,37 @@ export default function SwingTimingView() {
 
   const load = useCallback(async (d: number, opts?: { refresh?: boolean }) => {
     const refresh = !!opts?.refresh;
+    const key = (d === 7 || d === 14 || d === 28 ? d : 28) as 7 | 14 | 28;
+    if (!refresh && dataByDaysRef.current[key]) {
+      const cached = dataByDaysRef.current[key]!;
+      setData(cached);
+      setRefreshedAt(
+        (cached as { cacheUpdatedAt?: string }).cacheUpdatedAt ||
+          cached.generatedAt ||
+          null
+      );
+      setError(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
       const q = new URLSearchParams({
-        days: String(d),
+        days: String(key),
         _: String(Date.now()),
       });
       if (refresh) q.set("refresh", "1");
       const res = await fetch(`/api/swing-timing?${q}`, { cache: "no-store" });
       if (!res.ok) throw new Error(`Failed to load (${res.status})`);
       const json: TimingResponse = await res.json();
+      dataByDaysRef.current[key] = json;
       setData(json);
-      setRefreshedAt(json.cacheUpdatedAt || new Date().toISOString());
+      setRefreshedAt(
+        (json as { cacheUpdatedAt?: string }).cacheUpdatedAt ||
+          json.generatedAt ||
+          new Date().toISOString()
+      );
     } catch (err) {
       setError((err as Error).message);
       if (refresh) setData(null);
@@ -1155,9 +1179,16 @@ export default function SwingTimingView() {
     }
   }, []);
 
-  // Load cached snapshot only — full recompute is "Run analysis"
-  useEffect(() => { void loadMacroImpact(false);
-    void loadWeeklyBrief(false); void load(days, { refresh: false });
+  // Weekly brief + macro are independent of the 7/14/28 activity selector
+  useEffect(() => {
+    void loadWeeklyBrief(false);
+    void loadMacroImpact(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only snapshot load
+  }, []);
+
+  // Selected activity window only
+  useEffect(() => {
+    void load(days, { refresh: false });
   }, [days, load]);
 
 
@@ -1191,13 +1222,15 @@ export default function SwingTimingView() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-sm text-gray-600 max-w-2xl">
-            Poll-window and weekday patterns from your 3h data. Cached by default —{" "}
-            <span className="font-semibold">Full weekly analysis</span> rebuilds 7d/14d/28d + macro impact and saves the Monday brief.
-            Watch vs stage limits only — not a buy signal. Confirm on{" "}
+            <span className="font-semibold text-slate-800">Monitor when activity tends to happen</span>{" "}
+            (poll slots &amp; weekdays from your 3h Manila data) —{" "}
+            <span className="font-semibold">not</span> a buy/sell signal. Confirm entries on{" "}
             <Link href="/chart" className="font-semibold text-purple-700 hover:underline">
               Spot
             </Link>
-            .
+            . The <span className="font-semibold">7d / 14d / 28d</span> control only the{" "}
+            <span className="font-semibold">Selected activity window</span> below; the Monday brief and
+            macro cards are separate snapshots until you run Full weekly analysis.
           </p>
           <div className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50/80 p-3 text-[11px] text-indigo-950 shadow-sm">
             <div className="text-xs font-extrabold text-indigo-900 mb-1.5">
@@ -1223,24 +1256,6 @@ export default function SwingTimingView() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mr-1">
-            Activity (slots/weekdays)
-          </span>
-          {[7, 14, 28].map((d) => (
-            <button
-              key={d}
-              type="button"
-              onClick={() => setDays(d)}
-              disabled={loading}
-              className={`rounded-md px-3 py-1.5 text-xs font-semibold border transition-colors ${
-                days === d
-                  ? "bg-indigo-600 text-white border-indigo-600"
-                  : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
-              } disabled:opacity-50`}
-            >
-              {d}d
-            </button>
-          ))}
           <button
             type="button"
             onClick={() => void loadWeeklyBrief(true)}
@@ -1255,394 +1270,63 @@ export default function SwingTimingView() {
 
       {error && <AlertBanner variant="error" message={error} />}
 
-      {(weeklyBrief || weeklyBriefMsg) && (
-        <div className="rounded-lg border border-sky-200 bg-sky-50/50 p-3 shadow-sm space-y-2">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div>
-              <h2 className="text-sm font-bold text-sky-950">Weekly Monday brief</h2>
-              <p className="text-[10px] text-sky-900/80">
-                After Full weekly analysis: bars + 7/14/28 line + weekday donut update here and save for Home Did you know.
-                Then message Grok “Monday weekly timing review” for research-backed interpretation.
-              </p>
-              {weeklyBrief && (
-                <p className="text-[10px] text-slate-500 mt-0.5">
-                  Week of {weeklyBrief.weekOf} · generated{" "}
-                  {new Date(weeklyBrief.generatedAt).toLocaleString(undefined, { timeZone: "Asia/Manila" })} Manila
-                </p>
-              )}
-            </div>
-          </div>
-          {weeklyBriefMsg && <p className="text-xs text-sky-900">{weeklyBriefMsg}</p>}
-          {weeklyBrief && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
-              <div>
-                <div className="font-bold text-slate-800 mb-1">Monitor this week</div>
-                <ul className="list-disc list-inside space-y-1 text-slate-700">
-                  {weeklyBrief.monitorRules.slice(0, 6).map((r, i) => (
-                    <li key={i}>{r}</li>
-                  ))}
-                </ul>
-              </div>
-              <div>
-                <div className="font-bold text-slate-800 mb-1">Did you know</div>
-                <ul className="list-disc list-inside space-y-1 text-slate-700">
-                  {weeklyBrief.didYouKnow.slice(0, 6).map((r, i) => (
-                    <li key={i}>{r}</li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          )}
-
-          {weeklyBrief?.softBook &&
-            (weeklyBrief.softBook.consecutiveWeak?.length > 0 ||
-              weeklyBrief.softBook.losers7d?.length > 0 ||
-              weeklyBrief.softBook.rsiOversold?.length > 0) && (
-            <div className="mt-2 rounded-md border border-rose-100 bg-rose-50/40 p-2.5 text-[11px] space-y-2">
-              <div className="font-bold text-rose-950">Soft book · week path & oversold</div>
-              <p className="text-[10px] text-rose-900/80">
-                Alts weak on net path and/or RSI oversold from last Home monitor scan. Awareness only —
-                not a buy signal. Confirm news + Spot bias before any limit.
-              </p>
-              {weeklyBrief.softBook.consecutiveWeak?.length > 0 && (
-                <div>
-                  <div className="text-[10px] font-bold uppercase text-rose-800 mb-1">
-                    Weak in both 7d & 14d
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {weeklyBrief.softBook.consecutiveWeak.map((c) => (
-                      <Link
-                        key={c.symbol}
-                        href={`/chart?symbol=${encodeURIComponent(c.symbol)}`}
-                        className="rounded-md border border-rose-200 bg-white px-2 py-1 text-[10px] font-semibold text-rose-950 hover:bg-rose-50"
-                      >
-                        {c.name}{" "}
-                        <span className="font-mono text-rose-700">
-                          7d {c.net7.toFixed(1)}% · 14d {c.net14.toFixed(1)}%
-                        </span>
-                      </Link>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {weeklyBrief.softBook.losers7d?.length > 0 && (
-                <div>
-                  <div className="text-[10px] font-bold uppercase text-rose-800 mb-1">
-                    Weakest ~7d net path
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {weeklyBrief.softBook.losers7d.slice(0, 8).map((c) => (
-                      <Link
-                        key={c.symbol}
-                        href={`/chart?symbol=${encodeURIComponent(c.symbol)}`}
-                        className="rounded-md border border-rose-100 bg-white px-2 py-1 text-[10px] font-semibold text-slate-800 hover:bg-rose-50"
-                      >
-                        {c.name}{" "}
-                        <span className="font-mono text-rose-700">{c.netPct.toFixed(1)}%</span>
-                      </Link>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {weeklyBrief.softBook.rsiOversold?.length > 0 && (
-                <div>
-                  <div className="text-[10px] font-bold uppercase text-rose-800 mb-1">
-                    RSI oversold (Home monitor snapshot)
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {weeklyBrief.softBook.rsiOversold.map((c) => (
-                      <Link
-                        key={c.symbol}
-                        href={`/chart?symbol=${encodeURIComponent(c.symbol)}`}
-                        className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-semibold text-slate-800 hover:bg-amber-50"
-                      >
-                        {c.name}{" "}
-                        <span className="font-mono text-amber-800">RSI {c.rsi}</span>
-                      </Link>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {weeklyBrief?.chartSlots && weeklyBrief.chartSlots.length > 0 && (
-            <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="rounded-md border border-sky-100 bg-white p-2.5">
-                <div className="text-[10px] font-bold uppercase text-slate-500 mb-2">
-                  Poll windows · avg |move| (primary window)
-                </div>
-                <div className="space-y-1.5">
-                  {weeklyBrief.chartSlots.map((s) => {
-                    const max = Math.max(...weeklyBrief.chartSlots!.map((x) => x.avgAbsPct), 0.01);
-                    const w = Math.min(100, (s.avgAbsPct / max) * 100);
-                    return (
-                      <div key={s.label} className="flex items-center gap-2 text-[10px]">
-                        <span className="w-[7.5rem] shrink-0 truncate font-semibold text-slate-700">
-                          {s.label.replace(" Manila", "")}
-                        </span>
-                        <div className="flex-1 h-2 rounded bg-slate-100 overflow-hidden">
-                          <div
-                            className={`h-full rounded ${
-                              s.intensity === "hot"
-                                ? "bg-rose-500"
-                                : s.intensity === "active"
-                                  ? "bg-amber-400"
-                                  : s.intensity === "quiet"
-                                    ? "bg-slate-300"
-                                    : "bg-sky-400"
-                            }`}
-                            style={{ width: `${w}%` }}
-                          />
-                        </div>
-                        <span className="w-10 text-right font-mono text-slate-600">
-                          {s.avgAbsPct.toFixed(2)}%
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-              {weeklyBrief.chartWeekdays && weeklyBrief.chartWeekdays.length > 0 && (
-                <div className="rounded-md border border-sky-100 bg-white p-2.5">
-                  <div className="text-[10px] font-bold uppercase text-slate-500 mb-2">
-                    Weekday · % prints up (buy-lean vs sell-lean)
-                  </div>
-                  <div className="space-y-1.5">
-                    {weeklyBrief.chartWeekdays.map((d) => (
-                      <div key={d.label} className="flex items-center gap-2 text-[10px]">
-                        <span className="w-16 shrink-0 font-semibold text-slate-700">{d.label}</span>
-                        <div className="flex-1 h-2 rounded bg-slate-100 overflow-hidden">
-                          <div
-                            className={`h-full rounded ${
-                              d.upSharePct >= 52
-                                ? "bg-emerald-500"
-                                : d.upSharePct <= 48
-                                  ? "bg-rose-400"
-                                  : "bg-slate-400"
-                            }`}
-                            style={{ width: `${Math.min(100, d.upSharePct)}%` }}
-                          />
-                        </div>
-                        <span className="w-10 text-right font-mono text-slate-600">
-                          {d.upSharePct.toFixed(0)}%
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-          {(weeklyBrief?.chartCompareSlots && weeklyBrief.chartCompareSlots.length > 0) ||
-          weeklyBrief?.chartDonut ? (
-            <div className="mt-2 grid grid-cols-1 lg:grid-cols-3 gap-3">
-              {weeklyBrief?.chartCompareSlots && weeklyBrief.chartCompareSlots.length > 0 && (
-                <div className="lg:col-span-2 rounded-md border border-sky-100 bg-white p-2.5 min-h-[220px]">
-                  <div className="text-[10px] font-bold uppercase text-slate-500 mb-1">
-                    Slot intensity · 7d vs 14d vs 28d (avg |%| move)
-                  </div>
-                  <p className="text-[9px] text-slate-500 mb-2">
-                    Higher = more movement into that Manila poll. Not direction — confirm on Spot.
-                  </p>
-                  <div className="h-[180px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart
-                        data={weeklyBrief.chartCompareSlots.map((r) => ({
-                          ...r,
-                          tick: r.label.replace(" Manila", "").replace(" (US peak)", ""),
-                        }))}
-                        margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                        <XAxis
-                          dataKey="tick"
-                          tick={{ fontSize: 9 }}
-                          interval={0}
-                          angle={-25}
-                          textAnchor="end"
-                          height={48}
-                        />
-                        <YAxis tick={{ fontSize: 9 }} width={32} unit="%" />
-                        <Tooltip
-                          contentStyle={{ fontSize: 11 }}
-                          formatter={(v: number) => [`${Number(v).toFixed(2)}%`, ""]}
-                        />
-                        <Legend wrapperStyle={{ fontSize: 10 }} />
-                        <Line
-                          type="monotone"
-                          dataKey="avg7"
-                          name="7d"
-                          stroke="#6366f1"
-                          strokeWidth={2}
-                          dot={{ r: 2 }}
-                          connectNulls
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="avg14"
-                          name="14d"
-                          stroke="#0ea5e9"
-                          strokeWidth={2}
-                          dot={{ r: 2 }}
-                          connectNulls
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="avg28"
-                          name="28d"
-                          stroke="#94a3b8"
-                          strokeWidth={2}
-                          dot={{ r: 2 }}
-                          connectNulls
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              )}
-              {weeklyBrief?.chartDonut && (
-                <div className="rounded-md border border-sky-100 bg-white p-2.5 min-h-[220px] flex flex-col">
-                  <div className="text-[10px] font-bold uppercase text-slate-500 mb-1">
-                    Hottest weekday · up vs down
-                  </div>
-                  <p className="text-[9px] text-slate-500 mb-1">
-                    {weeklyBrief.chartDonut.weekdayLabel} · {weeklyBrief.chartDonut.windowDays}d window · % of
-                    prints up (green) vs not (rose)
-                  </p>
-                  <div className="flex-1 h-[160px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={[
-                            {
-                              name: "Up share",
-                              value: weeklyBrief.chartDonut.upSharePct,
-                            },
-                            {
-                              name: "Down / flat",
-                              value: weeklyBrief.chartDonut.downSharePct,
-                            },
-                          ]}
-                          dataKey="value"
-                          nameKey="name"
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={42}
-                          outerRadius={62}
-                          paddingAngle={2}
-                        >
-                          <Cell fill="#10b981" />
-                          <Cell fill="#fb7185" />
-                        </Pie>
-                        <Tooltip formatter={(v: number) => `${Number(v).toFixed(1)}%`} />
-                        <Legend wrapperStyle={{ fontSize: 10 }} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <div className="text-center text-[11px] font-bold text-slate-800">
-                    {weeklyBrief.chartDonut.upSharePct.toFixed(0)}% up-lean on{" "}
-                    {weeklyBrief.chartDonut.weekdayLabel}
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : null}
-
-          {weeklyBrief?.macroMeetings && weeklyBrief.macroMeetings.length > 0 && (
-            <div className="mt-2 rounded-md border border-amber-100 bg-amber-50/50 p-2.5 text-[11px] space-y-1.5">
-              <div className="font-bold text-amber-950">Recent macro impact (alts)</div>
-              {weeklyBrief.macroMeetings.slice(0, 4).map((m, i) => (
-                <div key={`${m.date}-${m.type}-${i}`} className="text-amber-950/90">
-                  <span className="font-semibold">{m.date}</span> · {m.type} · {m.regime24h}
-                  <div className="text-[10px] text-amber-900/80 line-clamp-2">{m.summary}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-
-            {macroImpact && (macroImpact.tips?.length || macroImpact.meetings?.length || macroImpact.message) ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50/40 p-3 shadow-sm space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h2 className="text-sm font-bold text-amber-950">Macro impact · alts only</h2>
-              <p className="text-[10px] text-amber-900/75">
-                Latest meetings only (max 4). Details not kept forever — re-run after next print. Home uses short trivia.
-              </p>
-            </div>
-            {macroImpact.generatedAt ? (
-              <span className="text-[10px] text-amber-900/60">
-                {new Date(macroImpact.generatedAt).toLocaleString(undefined, { timeZone: "Asia/Manila" })} MNL
-              </span>
-            ) : null}
-          </div>
-          {macroImpact.message && !(macroImpact.meetings && macroImpact.meetings.length) ? (
-            <p className="text-xs text-amber-900">{macroImpact.message}</p>
-          ) : null}
-
-          {/* Mobile carousel · desktop compact grid */}
-          {(macroImpact.meetings || []).length > 0 ? (
-            <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-1 -mx-1 px-1 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:snap-none sm:pb-0 sm:px-0">
-              {(macroImpact.meetings || []).map((m, i) => {
-                const reg = m.regime24h || "mixed";
-                const regCls =
-                  reg === "risk-off"
-                    ? "border-rose-300 bg-rose-50/90"
-                    : reg === "risk-on"
-                      ? "border-emerald-300 bg-emerald-50/90"
-                      : "border-amber-200 bg-white";
-                return (
-                  <div
-                    key={`${m.type}-${m.date}-${i}`}
-                    className={`snap-center shrink-0 w-[min(88vw,18rem)] sm:w-auto sm:shrink rounded-lg border px-2.5 py-2 ${regCls}`}
-                  >
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="rounded bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-extrabold uppercase text-amber-950">
-                        {m.type}
-                      </span>
-                      <span className="font-mono text-[11px] font-bold">{m.date}</span>
-                      <span className="text-[10px] font-bold uppercase text-slate-600">{reg}</span>
-                    </div>
-                    <p className="mt-1 text-[11px] font-semibold text-slate-800 line-clamp-2">{m.title}</p>
-                    <p className="mt-0.5 text-[11px] text-slate-600">
-                      24h ↓{m.downShare24h}% · avg {m.avgSigned24h}%
-                      {m.downShare72h != null ? ` · 72h ↓${m.downShare72h}%` : ""}
-                    </p>
-                    {m.topMoves && m.topMoves.length > 0 ? (
-                      <ul className="mt-1.5 space-y-0.5 text-[10px]">
-                        {m.topMoves.slice(0, 4).map((c) => (
-                          <li key={c.symbol} className="flex justify-between gap-2 tabular-nums">
-                            <span className="truncate font-semibold text-slate-700">{c.name}</span>
-                            <span
-                              className={
-                                (c.pct24h ?? 0) >= 0 ? "font-bold text-emerald-700" : "font-bold text-rose-700"
-                              }
-                            >
-                              {c.pct24h != null
-                                ? `${c.pct24h >= 0 ? "+" : ""}${c.pct24h.toFixed(1)}%`
-                                : "—"}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-          ) : null}
-
-          {(macroImpact.tips || []).length > 0 ? (
-            <p className="text-[11px] text-amber-950/90 rounded-md border border-amber-100 bg-white/70 px-2 py-1.5">
-              <span className="font-bold">Trivia · </span>
-              {(macroImpact.tips || [])[0]}
+      {/* ——— A · Selected activity window (7/14/28 controls only this block) ——— */}
+      <section className="rounded-xl border-2 border-indigo-200 bg-indigo-50/30 p-3 sm:p-4 shadow-sm space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-sm font-extrabold text-indigo-950">
+              A · Selected activity window
+            </h2>
+            <p className="text-[11px] text-indigo-900/80 mt-0.5 max-w-2xl">
+              Rolling last <span className="font-bold">{days} days</span> from now (Manila), not a
+              fixed calendar week. Slot intensity is <span className="font-semibold">relative</span>{" "}
+              to your other poll times — not a guarantee of high market volatility. Direction stats
+              are historical (“often up / often down”), not trade advice.
             </p>
-          ) : null}
+            {refreshedAt && (
+              <p className="text-[10px] text-slate-500 mt-1">
+                Snapshot:{" "}
+                {new Date(refreshedAt).toLocaleString(undefined, { timeZone: "Asia/Manila" })} Manila
+                {data?.fromCache ? " · from cache" : ""}
+                {data?.slots?.[0]?.sampleCount != null
+                  ? ` · samples shown in tables below`
+                  : ""}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-wide text-indigo-800">
+              Window
+            </span>
+            {[7, 14, 28].map((d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => setDays(d)}
+                disabled={loading}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold border transition-colors ${
+                  days === d
+                    ? "bg-indigo-600 text-white border-indigo-600"
+                    : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                } disabled:opacity-50`}
+              >
+                {d}d
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => {
+                dataByDaysRef.current[days as 7 | 14 | 28] = undefined;
+                void load(days, { refresh: true });
+              }}
+              disabled={loading}
+              className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              title="Force recompute this window only"
+            >
+              {loading ? "…" : "↻ Refresh window"}
+            </button>
+          </div>
         </div>
-      ) : null}
 
       {loading && !data && (
         <p className="text-sm text-gray-500 py-8 text-center">Computing slot-to-slot swings…</p>
@@ -1654,20 +1338,20 @@ export default function SwingTimingView() {
             {data.hottestSlot && (
               <div className="rounded-lg border border-rose-200 bg-rose-50/60 p-4 shadow-sm">
                 <div className="text-[11px] font-bold uppercase tracking-wide text-rose-800">
-                  Hottest time
+                  Highest relative activity
                 </div>
                 <div className="mt-1 text-sm font-bold text-rose-950 leading-snug">
                   {data.hottestSlot.label}
                 </div>
                 <div className="mt-1 font-mono text-sm font-bold text-rose-900">
-                  {data.hottestSlot.avgAbsPct}% avg
+                  {data.hottestSlot.avgAbsPct}% avg |move|
                 </div>
               </div>
             )}
             {data.quietestSlot && (
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 shadow-sm">
                 <div className="text-[11px] font-bold uppercase tracking-wide text-slate-700">
-                  Quietest time
+                  Lower relative activity
                 </div>
                 <div className="mt-1 text-sm font-bold text-slate-900 leading-snug">
                   {data.quietestSlot.label}
@@ -1755,8 +1439,8 @@ export default function SwingTimingView() {
                   Your timing vs the book (Manila · {data.days}d)
                 </h3>
                 <p className="mt-0.5 text-[11px] text-slate-600">
-                  Did your buys land on <span className="font-semibold">buy-lean</span> weekdays and sells on{" "}
-                  <span className="font-semibold">sell-lean</span> days? More useful than chasing 24h path % after a fill.
+                  Optional check: did past buys land on historically “often-up” weekdays and sells on
+                  “often-down” days? Awareness only — not a rule to trade by.
                   Confirm entries on Spot — this is alignment only.
                 </p>
               </div>
@@ -1766,14 +1450,14 @@ export default function SwingTimingView() {
                     <div className="text-slate-500 font-semibold">Buys</div>
                     <div className="text-lg font-extrabold text-slate-900">{data.fillAlignment.buyCount}</div>
                     <div className="text-emerald-800">
-                      {data.fillAlignment.buysOnBuyLeanWeekday} on buy-lean days
+                      {data.fillAlignment.buysOnBuyLeanWeekday} on often-up days
                     </div>
                   </div>
                   <div className="rounded-lg border border-rose-200 bg-white px-2.5 py-2">
                     <div className="text-slate-500 font-semibold">Sells</div>
                     <div className="text-lg font-extrabold text-slate-900">{data.fillAlignment.sellCount}</div>
                     <div className="text-rose-800">
-                      {data.fillAlignment.sellsOnSellLeanWeekday} on sell-lean days
+                      {data.fillAlignment.sellsOnSellLeanWeekday} on often-down days
                     </div>
                   </div>
                   <div className="rounded-lg border border-slate-200 bg-white px-2.5 py-2">
@@ -1810,11 +1494,11 @@ export default function SwingTimingView() {
             <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm space-y-4">
               <div>
                 <h2 className="text-sm font-bold text-gray-900">
-                  Buy vs sell days (Manila · {data.days}d)
+                  Historical weekday direction (Manila · {data.days}d)
                 </h2>
                 <p className="mt-1 text-[11px] text-gray-500">
-                  From your 3h polls: which weekdays the book more often rises (buy-lean) vs falls
-                  (sell-lean), and which coins show that pattern most. Not a trade signal — monitor
+                  From your 3h polls: weekdays that more often finished up vs down in this window,
+                  and which coins matched that pattern. Historical only — not a trade signal. Monitor
                   only; confirm on Spot.
                 </p>
               </div>
@@ -2185,6 +1869,400 @@ export default function SwingTimingView() {
           </p>
         </>
       )}
+      </section>
+
+      {(weeklyBrief || weeklyBriefMsg) && (
+        <div className="rounded-lg border border-sky-200 bg-sky-50/50 p-3 shadow-sm space-y-2">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-bold text-sky-950">
+                B · Weekly Monday brief{" "}
+                <span className="font-semibold text-sky-800/80">(not controlled by 7/14/28)</span>
+              </h2>
+              <p className="text-[10px] text-sky-900/80">
+                Fixed snapshot until you run <span className="font-semibold">Full weekly analysis</span>.
+                Includes 7 vs 14 vs 28 comparison charts and soft-book notes. Saved for Home Did you know.
+              </p>
+              {weeklyBrief && (
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  Week of {weeklyBrief.weekOf} · generated{" "}
+                  {new Date(weeklyBrief.generatedAt).toLocaleString(undefined, { timeZone: "Asia/Manila" })} Manila
+                </p>
+              )}
+            </div>
+          </div>
+          {weeklyBriefMsg && <p className="text-xs text-sky-900">{weeklyBriefMsg}</p>}
+          {weeklyBrief && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
+              <div>
+                <div className="font-bold text-slate-800 mb-1">Monitor this week</div>
+                <ul className="list-disc list-inside space-y-1 text-slate-700">
+                  {weeklyBrief.monitorRules.slice(0, 6).map((r, i) => (
+                    <li key={i}>{r}</li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <div className="font-bold text-slate-800 mb-1">Did you know</div>
+                <ul className="list-disc list-inside space-y-1 text-slate-700">
+                  {weeklyBrief.didYouKnow.slice(0, 6).map((r, i) => (
+                    <li key={i}>{r}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {weeklyBrief?.softBook &&
+            (weeklyBrief.softBook.consecutiveWeak?.length > 0 ||
+              weeklyBrief.softBook.losers7d?.length > 0 ||
+              weeklyBrief.softBook.rsiOversold?.length > 0) && (
+            <div className="mt-2 rounded-md border border-rose-100 bg-rose-50/40 p-2.5 text-[11px] space-y-2">
+              <div className="font-bold text-rose-950">Soft book · week path & oversold</div>
+              <p className="text-[10px] text-rose-900/80">
+                Alts weak on net path and/or RSI oversold from last Home monitor scan. Awareness only —
+                not a buy signal. Confirm news + Spot bias before any limit.
+              </p>
+              {weeklyBrief.softBook.consecutiveWeak?.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-bold uppercase text-rose-800 mb-1">
+                    Weak in both 7d & 14d
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {weeklyBrief.softBook.consecutiveWeak.map((c) => (
+                      <Link
+                        key={c.symbol}
+                        href={`/chart?symbol=${encodeURIComponent(c.symbol)}`}
+                        className="rounded-md border border-rose-200 bg-white px-2 py-1 text-[10px] font-semibold text-rose-950 hover:bg-rose-50"
+                      >
+                        {c.name}{" "}
+                        <span className="font-mono text-rose-700">
+                          7d {c.net7.toFixed(1)}% · 14d {c.net14.toFixed(1)}%
+                        </span>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {weeklyBrief.softBook.losers7d?.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-bold uppercase text-rose-800 mb-1">
+                    Weakest ~7d net path
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {weeklyBrief.softBook.losers7d.slice(0, 8).map((c) => (
+                      <Link
+                        key={c.symbol}
+                        href={`/chart?symbol=${encodeURIComponent(c.symbol)}`}
+                        className="rounded-md border border-rose-100 bg-white px-2 py-1 text-[10px] font-semibold text-slate-800 hover:bg-rose-50"
+                      >
+                        {c.name}{" "}
+                        <span className="font-mono text-rose-700">{c.netPct.toFixed(1)}%</span>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {weeklyBrief.softBook.rsiOversold?.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-bold uppercase text-rose-800 mb-1">
+                    RSI oversold (Home monitor snapshot)
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {weeklyBrief.softBook.rsiOversold.map((c) => (
+                      <Link
+                        key={c.symbol}
+                        href={`/chart?symbol=${encodeURIComponent(c.symbol)}`}
+                        className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-semibold text-slate-800 hover:bg-amber-50"
+                      >
+                        {c.name}{" "}
+                        <span className="font-mono text-amber-800">RSI {c.rsi}</span>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {weeklyBrief?.chartSlots && weeklyBrief.chartSlots.length > 0 && (
+            <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="rounded-md border border-sky-100 bg-white p-2.5">
+                <div className="text-[10px] font-bold uppercase text-slate-500 mb-2">
+                  Poll windows · avg |move| (primary window)
+                </div>
+                <div className="space-y-1.5">
+                  {weeklyBrief.chartSlots.map((s) => {
+                    const max = Math.max(...weeklyBrief.chartSlots!.map((x) => x.avgAbsPct), 0.01);
+                    const w = Math.min(100, (s.avgAbsPct / max) * 100);
+                    return (
+                      <div key={s.label} className="flex items-center gap-2 text-[10px]">
+                        <span className="w-[7.5rem] shrink-0 truncate font-semibold text-slate-700">
+                          {s.label.replace(" Manila", "")}
+                        </span>
+                        <div className="flex-1 h-2 rounded bg-slate-100 overflow-hidden">
+                          <div
+                            className={`h-full rounded ${
+                              s.intensity === "hot"
+                                ? "bg-rose-500"
+                                : s.intensity === "active"
+                                  ? "bg-amber-400"
+                                  : s.intensity === "quiet"
+                                    ? "bg-slate-300"
+                                    : "bg-sky-400"
+                            }`}
+                            style={{ width: `${w}%` }}
+                          />
+                        </div>
+                        <span className="w-10 text-right font-mono text-slate-600">
+                          {s.avgAbsPct.toFixed(2)}%
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              {weeklyBrief.chartWeekdays && weeklyBrief.chartWeekdays.length > 0 && (
+                <div className="rounded-md border border-sky-100 bg-white p-2.5">
+                  <div className="text-[10px] font-bold uppercase text-slate-500 mb-2">
+                    Weekday · % prints up (buy-lean vs sell-lean)
+                  </div>
+                  <div className="space-y-1.5">
+                    {weeklyBrief.chartWeekdays.map((d) => (
+                      <div key={d.label} className="flex items-center gap-2 text-[10px]">
+                        <span className="w-16 shrink-0 font-semibold text-slate-700">{d.label}</span>
+                        <div className="flex-1 h-2 rounded bg-slate-100 overflow-hidden">
+                          <div
+                            className={`h-full rounded ${
+                              d.upSharePct >= 52
+                                ? "bg-emerald-500"
+                                : d.upSharePct <= 48
+                                  ? "bg-rose-400"
+                                  : "bg-slate-400"
+                            }`}
+                            style={{ width: `${Math.min(100, d.upSharePct)}%` }}
+                          />
+                        </div>
+                        <span className="w-10 text-right font-mono text-slate-600">
+                          {d.upSharePct.toFixed(0)}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {(weeklyBrief?.chartCompareSlots && weeklyBrief.chartCompareSlots.length > 0) ||
+          weeklyBrief?.chartDonut ? (
+            <div className="mt-2 grid grid-cols-1 lg:grid-cols-3 gap-3">
+              {weeklyBrief?.chartCompareSlots && weeklyBrief.chartCompareSlots.length > 0 && (
+                <div className="lg:col-span-2 rounded-md border border-sky-100 bg-white p-2.5 min-h-[220px]">
+                  <div className="text-[10px] font-bold uppercase text-slate-500 mb-1">
+                    Slot intensity · 7d vs 14d vs 28d (avg |%| move)
+                  </div>
+                  <p className="text-[9px] text-slate-500 mb-2">
+                    Higher = more movement into that Manila poll. Not direction — confirm on Spot.
+                  </p>
+                  <div className="h-[180px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart
+                        data={weeklyBrief.chartCompareSlots.map((r) => ({
+                          ...r,
+                          tick: r.label.replace(" Manila", "").replace(" (US peak)", ""),
+                        }))}
+                        margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        <XAxis
+                          dataKey="tick"
+                          tick={{ fontSize: 9 }}
+                          interval={0}
+                          angle={-25}
+                          textAnchor="end"
+                          height={48}
+                        />
+                        <YAxis tick={{ fontSize: 9 }} width={32} unit="%" />
+                        <Tooltip
+                          contentStyle={{ fontSize: 11 }}
+                          formatter={(v: number) => [`${Number(v).toFixed(2)}%`, ""]}
+                        />
+                        <Legend wrapperStyle={{ fontSize: 10 }} />
+                        <Line
+                          type="monotone"
+                          dataKey="avg7"
+                          name="7d"
+                          stroke="#6366f1"
+                          strokeWidth={2}
+                          dot={{ r: 2 }}
+                          connectNulls
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="avg14"
+                          name="14d"
+                          stroke="#0ea5e9"
+                          strokeWidth={2}
+                          dot={{ r: 2 }}
+                          connectNulls
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="avg28"
+                          name="28d"
+                          stroke="#94a3b8"
+                          strokeWidth={2}
+                          dot={{ r: 2 }}
+                          connectNulls
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+              {weeklyBrief?.chartDonut && (
+                <div className="rounded-md border border-sky-100 bg-white p-2.5 min-h-[220px] flex flex-col">
+                  <div className="text-[10px] font-bold uppercase text-slate-500 mb-1">
+                    Hottest weekday · up vs down
+                  </div>
+                  <p className="text-[9px] text-slate-500 mb-1">
+                    {weeklyBrief.chartDonut.weekdayLabel} · {weeklyBrief.chartDonut.windowDays}d window · % of
+                    prints up (green) vs not (rose)
+                  </p>
+                  <div className="flex-1 h-[160px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={[
+                            {
+                              name: "Up share",
+                              value: weeklyBrief.chartDonut.upSharePct,
+                            },
+                            {
+                              name: "Down / flat",
+                              value: weeklyBrief.chartDonut.downSharePct,
+                            },
+                          ]}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={42}
+                          outerRadius={62}
+                          paddingAngle={2}
+                        >
+                          <Cell fill="#10b981" />
+                          <Cell fill="#fb7185" />
+                        </Pie>
+                        <Tooltip formatter={(v: number) => `${Number(v).toFixed(1)}%`} />
+                        <Legend wrapperStyle={{ fontSize: 10 }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="text-center text-[11px] font-bold text-slate-800">
+                    {weeklyBrief.chartDonut.upSharePct.toFixed(0)}% up-lean on{" "}
+                    {weeklyBrief.chartDonut.weekdayLabel}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          {weeklyBrief?.macroMeetings && weeklyBrief.macroMeetings.length > 0 && (
+            <div className="mt-2 rounded-md border border-amber-100 bg-amber-50/50 p-2.5 text-[11px] space-y-1.5">
+              <div className="font-bold text-amber-950">Recent macro impact (alts)</div>
+              {weeklyBrief.macroMeetings.slice(0, 4).map((m, i) => (
+                <div key={`${m.date}-${m.type}-${i}`} className="text-amber-950/90">
+                  <span className="font-semibold">{m.date}</span> · {m.type} · {m.regime24h}
+                  <div className="text-[10px] text-amber-900/80 line-clamp-2">{m.summary}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+
+            {macroImpact && (macroImpact.tips?.length || macroImpact.meetings?.length || macroImpact.message) ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50/40 p-3 shadow-sm space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-bold text-amber-950">C · Macro event context <span className="font-semibold text-amber-800/80">(not controlled by 7/14/28)</span></h2>
+              <p className="text-[10px] text-amber-900/75">
+                Latest meetings only (max 4). Details not kept forever — re-run after next print. Home uses short trivia.
+              </p>
+            </div>
+            {macroImpact.generatedAt ? (
+              <span className="text-[10px] text-amber-900/60">
+                {new Date(macroImpact.generatedAt).toLocaleString(undefined, { timeZone: "Asia/Manila" })} MNL
+              </span>
+            ) : null}
+          </div>
+          {macroImpact.message && !(macroImpact.meetings && macroImpact.meetings.length) ? (
+            <p className="text-xs text-amber-900">{macroImpact.message}</p>
+          ) : null}
+
+          {/* Mobile carousel · desktop compact grid */}
+          {(macroImpact.meetings || []).length > 0 ? (
+            <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-1 -mx-1 px-1 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:snap-none sm:pb-0 sm:px-0">
+              {(macroImpact.meetings || []).map((m, i) => {
+                const reg = m.regime24h || "mixed";
+                const regCls =
+                  reg === "risk-off"
+                    ? "border-rose-300 bg-rose-50/90"
+                    : reg === "risk-on"
+                      ? "border-emerald-300 bg-emerald-50/90"
+                      : "border-amber-200 bg-white";
+                return (
+                  <div
+                    key={`${m.type}-${m.date}-${i}`}
+                    className={`snap-center shrink-0 w-[min(88vw,18rem)] sm:w-auto sm:shrink rounded-lg border px-2.5 py-2 ${regCls}`}
+                  >
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="rounded bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-extrabold uppercase text-amber-950">
+                        {m.type}
+                      </span>
+                      <span className="font-mono text-[11px] font-bold">{m.date}</span>
+                      <span className="text-[10px] font-bold uppercase text-slate-600">{reg}</span>
+                    </div>
+                    <p className="mt-1 text-[11px] font-semibold text-slate-800 line-clamp-2">{m.title}</p>
+                    <p className="mt-0.5 text-[11px] text-slate-600">
+                      24h ↓{m.downShare24h}% · avg {m.avgSigned24h}%
+                      {m.downShare72h != null ? ` · 72h ↓${m.downShare72h}%` : ""}
+                    </p>
+                    {m.topMoves && m.topMoves.length > 0 ? (
+                      <ul className="mt-1.5 space-y-0.5 text-[10px]">
+                        {m.topMoves.slice(0, 4).map((c) => (
+                          <li key={c.symbol} className="flex justify-between gap-2 tabular-nums">
+                            <span className="truncate font-semibold text-slate-700">{c.name}</span>
+                            <span
+                              className={
+                                (c.pct24h ?? 0) >= 0 ? "font-bold text-emerald-700" : "font-bold text-rose-700"
+                              }
+                            >
+                              {c.pct24h != null
+                                ? `${c.pct24h >= 0 ? "+" : ""}${c.pct24h.toFixed(1)}%`
+                                : "—"}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+
+          {(macroImpact.tips || []).length > 0 ? (
+            <p className="text-[11px] text-amber-950/90 rounded-md border border-amber-100 bg-white/70 px-2 py-1.5">
+              <span className="font-bold">Trivia · </span>
+              {(macroImpact.tips || [])[0]}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
     </div>
   );
 }

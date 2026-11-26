@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { formatPhp } from "@/lib/format";
 import type { HomeMonitorSnapshot, MonitorHitBase } from "@/lib/homeMonitorScan";
+import { compareByTier, getCoinTier } from "@/lib/coinPriorityTiers";
 
 type CoinPx = { symbol: string; name?: string; currentPrice?: number | null };
 
@@ -115,17 +116,34 @@ function buildEntryMonitorPrompt(
     `Do **not** recommend buy, sell, hold, add, average down, or size. Do **not** rank for entry. Lists are only which tickers to research.`
   );
   lines.push(``);
+  lines.push(
+    `## Research priority (app labels — not buy signals): S core · A priority alts · B conditional · C low/pause`
+  );
+  lines.push(
+    `When many names compete, prefer researching **A/S** first if a technical setup exists. Never force a buy.`
+  );
+  lines.push(``);
   lines.push(`## List A — Near 30-day support · top 8 (app context only)`);
   if (!near.length) lines.push(`(none in list right now)`);
   else {
-    near.forEach((h, i) => {
+    const sortedNear = [...near].sort((a, b) =>
+      compareByTier(a.symbol, b.symbol, a.name, b.name)
+    );
+    sortedNear.forEach((h, i) => {
       const base = h.name || h.symbol.replace(/PHP$/i, "");
-      lines.push(`${i + 1}. **${base}** (\`${h.symbol}\`) — ${h.detail || "near support"}`);
+      const tier = getCoinTier(h.symbol);
+      lines.push(
+        `${i + 1}. **${base}** (\`${h.symbol}\`) · tier ${tier} — ${h.detail || "near support"}`
+      );
     });
   }
   lines.push(``);
   lines.push(`## List B — Watch / plan · not held`);
-  const plan = watchPlan.filter((c) => c && String(c.symbol || "").trim());
+  const plan = watchPlan
+    .filter((c) => c && String(c.symbol || "").trim())
+    .sort((a, b) =>
+      compareByTier(String(a.symbol), String(b.symbol), a.name, b.name)
+    );
   if (!plan.length) {
     lines.push(
       `(none on watch/plan right now — flag Monitor=yes on Manage for coins you plan to buy)`
@@ -134,21 +152,28 @@ function buildEntryMonitorPrompt(
     plan.forEach((c, i) => {
       const sym = String(c.symbol).toUpperCase();
       const base = (c.name && String(c.name).trim()) || sym.replace(/PHP$/i, "");
+      const tier = getCoinTier(sym);
       const px =
         c.currentPrice != null && Number(c.currentPrice) > 0
           ? ` · ~${Number(c.currentPrice)}`
           : "";
-      lines.push(`${i + 1}. **${base}** (\`${sym}\`)${px}`);
+      lines.push(`${i + 1}. **${base}** (\`${sym}\`) · tier ${tier}${px}`);
     });
   }
   lines.push(``);
   lines.push(`## List C — RSI oversold (app context only)`);
   if (!rsi.length) lines.push(`(none loaded)`);
   else {
-    rsi.forEach((r, i) => {
+    const sortedRsi = [...rsi].sort((a, b) =>
+      compareByTier(a.symbol, b.symbol, a.name, b.name)
+    );
+    sortedRsi.forEach((r, i) => {
       const sym = (r.symbol || "").toUpperCase();
       const base = r.name || sym.replace(/PHP$/i, "");
-      lines.push(`${i + 1}. **${base}** (\`${sym}\`) — ${r.detail || "RSI oversold"}`);
+      const tier = getCoinTier(sym);
+      lines.push(
+        `${i + 1}. **${base}** (\`${sym}\`) · tier ${tier} — ${r.detail || "RSI oversold"}`
+      );
     });
   }
   lines.push(``);

@@ -15,6 +15,7 @@ import { useState, useEffect, useMemo, type ReactNode } from "react";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
 import { buildCoinNewsResearchPrompt } from "@/lib/coinNewsResearchPrompt";
+import { getCoinTierMeta, compareByTier } from "@/lib/coinPriorityTiers";
 import { buildCoinAnalytics, type CoinAnalytics } from "@/features/trade/useTradeLogic";
 
 import { useHomeLogic } from "./useHomeLogic";
@@ -529,6 +530,8 @@ function MonitorCard({
     );
   }
 
+  const tierMeta = getCoinTierMeta(card.symbol);
+
   return (
     <div className={`rounded-lg border p-3 transition-all ${border}`}>
       <div className="flex items-start justify-between gap-2 mb-2">
@@ -537,6 +540,12 @@ function MonitorCard({
             {card.name}{" "}
             <span className="font-mono text-sm font-semibold text-gray-500">
               {card.symbol}
+            </span>{" "}
+            <span
+              title={tierMeta.short}
+              className={`inline-block align-middle text-[10px] font-bold px-1.5 py-0.5 rounded border ${tierMeta.badgeClass}`}
+            >
+              {tierMeta.tier}
             </span>
           </div>
           {card.currentPrice != null && (
@@ -904,9 +913,13 @@ export default function HomeTable() {
     return set;
   }, [openHoldingsBySymbol, portfolio]);
 
-  // Plan chart: onMonitor (or review targets) and NOT currently held
+  // Plan chart: onMonitor (or review targets) and NOT currently held · S→A→B→C
   const planMonitorCards = useMemo(() => {
-    return (monitorCards || []).filter((card) => !heldSyms.has(card.symbol.toUpperCase()));
+    const list = (monitorCards || []).filter(
+      (card) => !heldSyms.has(card.symbol.toUpperCase())
+    );
+    list.sort((a, b) => compareByTier(a.symbol, b.symbol, a.name, b.name));
+    return list;
   }, [monitorCards, heldSyms]);
 
   /** Same set as "Watch / plan · not held" cards — for Entry monitor List B (never empty when UI shows cards). */

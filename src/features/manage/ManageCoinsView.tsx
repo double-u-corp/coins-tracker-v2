@@ -3,6 +3,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import AlertBanner from "@/components/AlertBanner";
 import { formatPhp } from "@/lib/format";
+import { getCoinTierMeta, compareByTier } from "@/lib/coinPriorityTiers";
 import { useManageCoinsLogic } from "./useManageCoinsLogic";
 
 function formatRawPrice(value: number): string {
@@ -24,6 +25,7 @@ function MonitoredCoinCard({
   onSaved?: () => void | Promise<void>;
 }) {
   const trackingOn = coin.trackingEnabled !== false;
+  const tierMeta = getCoinTierMeta(coin.symbol);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -152,10 +154,16 @@ function MonitoredCoinCard({
         <div className="flex flex-col gap-1.5">
           
           {/* 1. Name & Symbol Inline */}
-          <div className="flex items-baseline gap-2">
+          <div className="flex flex-wrap items-baseline gap-2">
             <h3 className="text-base font-bold text-gray-900">{coin.name}</h3>
             <span className="text-xs font-semibold text-gray-500 font-mono tracking-tight bg-gray-100 px-1.5 py-0.5 rounded">
               {coin.symbol}
+            </span>
+            <span
+              title={tierMeta.short}
+              className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${tierMeta.badgeClass}`}
+            >
+              {tierMeta.label}
             </span>
             {!trackingOn && (
               <span className="text-[10px] font-bold uppercase text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200">
@@ -163,6 +171,7 @@ function MonitoredCoinCard({
               </span>
             )}
           </div>
+          <p className="text-[10px] text-slate-500 max-w-md leading-snug">{tierMeta.short}</p>
 
           {/* 2. Current Price Inline */}
           <div className="flex items-baseline gap-2">
@@ -227,7 +236,7 @@ function MonitoredCoinCard({
               {pendingSymbol === coin.symbol ? "…" : "Resume tracking"}
             </button>
           )}
-          {/* <button
+          <button
             type="button"
             disabled={pendingSymbol === coin.symbol}
             onClick={() => {
@@ -242,7 +251,7 @@ function MonitoredCoinCard({
             className="rounded-md border border-red-200 px-2.5 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
           >
             {pendingSymbol === coin.symbol ? "…" : "Delete forever"}
-          </button> */}
+          </button>
         </div>
       </div>
 
@@ -418,14 +427,17 @@ export default function ManageCoinsView({
   const [manualPrice, setManualPrice] = useState("");
   const [manualFormError, setManualFormError] = useState<string | null>(null);
 
-  // Filter monitored list based on URL coin parameter
+  // Filter monitored list based on URL coin parameter; S → A → B → C order
   const filteredMonitored = useMemo(() => {
-    if (!activeCoinFilter) return monitored;
-    return monitored.filter(
-      (c) =>
-        c.symbol.toLowerCase() === activeCoinFilter.toLowerCase() ||
-        c.name.toLowerCase() === activeCoinFilter.toLowerCase()
-    );
+    const list = !activeCoinFilter
+      ? [...monitored]
+      : monitored.filter(
+          (c) =>
+            c.symbol.toLowerCase() === activeCoinFilter.toLowerCase() ||
+            c.name.toLowerCase() === activeCoinFilter.toLowerCase()
+        );
+    list.sort((a, b) => compareByTier(a.symbol, b.symbol, a.name, b.name));
+    return list;
   }, [monitored, activeCoinFilter]);
 
   async function submitManualAdd() {
