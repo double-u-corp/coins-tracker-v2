@@ -133,6 +133,8 @@ export default function TradeView() {
 
   const filteredTransactions = useMemo(() => {
     return transactions.filter((t) => {
+      const v = (t as { venue?: string }).venue || "coins_ph";
+      if (v !== venue) return false;
       const typeOk = txFilter === "all" || t.type.toLowerCase() === txFilter;
       if (!typeOk) return false;
       if (txCoinFilter === "all") return true;
@@ -142,18 +144,20 @@ export default function TradeView() {
       }
       return t.symbol === txCoinFilter;
     });
-  }, [transactions, txFilter, txCoinFilter]);
+  }, [transactions, txFilter, txCoinFilter, venue]);
 
   const txCoinOptions = useMemo(() => {
     const set = new Map<string, string>();
     for (const t of transactions) {
+      const v = (t as { venue?: string }).venue || "coins_ph";
+      if (v !== venue) continue;
       if (!t.symbol || t.symbol === "PHP") continue;
       set.set(t.symbol, t.name || t.symbol);
     }
     return Array.from(set.entries())
       .map(([value, name]) => ({ value, label: `${name} (${value})` }))
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [transactions]);
+  }, [transactions, venue]);
 
   // Cash for the *active venue only* (Coins.ph vs Maya vs GCash stay separate)
   const { totalDeposited, totalWithdrawn, availableCash } = useMemo(() => {
@@ -180,13 +184,14 @@ export default function TradeView() {
     return { totalDeposited: dep, totalWithdrawn: wit, availableCash: cash };
   }, [transactions, venue]);
 
-  // Open crypto mark from analytics (tx-based holdings), not the old per-coin card list
+  // Open crypto mark — active venue only (Coins.ph / Maya / GCash must not mix)
   const portfolioSnapshot = useMemo(() => {
     let crypto = 0;
     let openGl = 0;
     let spentOpen = 0;
     let hasGl = false;
     for (const c of coinAnalytics) {
+      if ((c.venue || "coins_ph") !== venue) continue;
       if (!(c.holdings > 0)) continue;
       if (c.currentValue != null) crypto += c.currentValue;
       if (c.unrealizedPnl != null) {
@@ -201,6 +206,60 @@ export default function TradeView() {
       spentOpen,
     };
   }, [coinAnalytics, venue]);
+
+  /** Profit & patience totals for the selected venue only */
+  const venueAnalyticsSummary = useMemo(() => {
+    let realized = 0;
+    let unrealized = 0;
+    let hasUnrealized = false;
+    let win = 0;
+    let loss = 0;
+    let longest: (typeof coinAnalytics)[0] | null = null;
+    for (const c of coinAnalytics) {
+      if ((c.venue || "coins_ph") !== venue) continue;
+      realized += c.realizedPnl;
+      if (c.unrealizedPnl != null) {
+        unrealized += c.unrealizedPnl;
+        hasUnrealized = true;
+      }
+      win += c.winningSells;
+      loss += c.losingSells;
+      if (c.isUnderwater) {
+        if (!longest || (c.daysUnderwater ?? 0) > (longest.daysUnderwater ?? 0)) {
+          longest = c;
+        }
+      }
+    }
+    const closed = win + loss;
+    return {
+      totalRealizedPnl: realized,
+      totalUnrealizedPnl: hasUnrealized ? unrealized : null,
+      sellWinRate: closed > 0 ? win / closed : null,
+      winningSells: win,
+      losingSells: loss,
+      longestUnderwater: longest,
+    };
+  }, [coinAnalytics, venue]);
+
+  /** Coin history dropdown: only coins with buy/sell on this venue (or open bag here) */
+  const historyCoinOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of transactions) {
+      const v = (t as { venue?: string }).venue || "coins_ph";
+      if (v !== venue) continue;
+      if (!t.symbol || t.symbol === "PHP") continue;
+      const ty = String(t.type).toLowerCase();
+      if (ty !== "buy" && ty !== "sell") continue;
+      map.set(t.symbol, t.name || t.symbol);
+    }
+    for (const c of coinAnalytics) {
+      if ((c.venue || "coins_ph") !== venue) continue;
+      if (c.holdings > 0) map.set(c.symbol, c.name || c.symbol);
+    }
+    return Array.from(map.entries())
+      .map(([value, name]) => ({ value, label: `${name} (${value})` }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [transactions, coinAnalytics, venue]);
 
   // Holdings come from the same tx replay as the cards (server portfolio can be stale)
   const selectedAnalytics = useMemo(
@@ -541,7 +600,10 @@ export default function TradeView() {
               {venueLabel(venue)}
             </span>
           </h2>
-          <p className="text-[11px] text-slate-500">Live mark · open totals only (per-coin list removed)</p>
+          <p className="text-[11px] text-slate-500">
+            Live mark · <span className="font-semibold">{venueLabel(venue)} only</span> — cash and
+            crypto are not mixed across Coins.ph / Maya / GCash
+          </p>
         </div>
         {loading ? (
           <OverviewSkeleton />
@@ -632,27 +694,27 @@ export default function TradeView() {
                 <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-700/70">Realized</div>
                 <div
                   className={`mt-0.5 text-base font-bold tabular-nums ${
-                    analyticsSummary.totalRealizedPnl >= 0 ? "text-emerald-700" : "text-rose-600"
+                    venueAnalyticsSummary.totalRealizedPnl >= 0 ? "text-emerald-700" : "text-rose-600"
                   }`}
                 >
-                  {analyticsSummary.totalRealizedPnl >= 0 ? "+" : ""}
-                  {formatPhp(analyticsSummary.totalRealizedPnl)}
+                  {venueAnalyticsSummary.totalRealizedPnl >= 0 ? "+" : ""}
+                  {formatPhp(venueAnalyticsSummary.totalRealizedPnl)}
                 </div>
               </div>
               <div className="rounded-xl border border-sky-100 bg-gradient-to-br from-sky-50 to-white px-3 py-2.5 shadow-sm">
                 <div className="text-[10px] font-bold uppercase tracking-wider text-sky-700/70">Unrealized</div>
                 <div
                   className={`mt-0.5 text-base font-bold tabular-nums ${
-                    analyticsSummary.totalUnrealizedPnl == null
+                    venueAnalyticsSummary.totalUnrealizedPnl == null
                       ? "text-slate-300"
-                      : analyticsSummary.totalUnrealizedPnl >= 0
+                      : venueAnalyticsSummary.totalUnrealizedPnl >= 0
                       ? "text-emerald-700"
                       : "text-rose-600"
                   }`}
                 >
-                  {analyticsSummary.totalUnrealizedPnl != null
-                    ? `${analyticsSummary.totalUnrealizedPnl >= 0 ? "+" : ""}${formatPhp(
-                        analyticsSummary.totalUnrealizedPnl
+                  {venueAnalyticsSummary.totalUnrealizedPnl != null
+                    ? `${venueAnalyticsSummary.totalUnrealizedPnl >= 0 ? "+" : ""}${formatPhp(
+                        venueAnalyticsSummary.totalUnrealizedPnl
                       )}`
                     : "—"}
                 </div>
@@ -660,24 +722,24 @@ export default function TradeView() {
               <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white px-3 py-2.5 shadow-sm">
                 <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Win rate</div>
                 <div className="mt-0.5 text-base font-bold tabular-nums text-slate-900">
-                  {analyticsSummary.sellWinRate != null
-                    ? `${(analyticsSummary.sellWinRate * 100).toFixed(0)}%`
+                  {venueAnalyticsSummary.sellWinRate != null
+                    ? `${(venueAnalyticsSummary.sellWinRate * 100).toFixed(0)}%`
                     : "—"}
                 </div>
                 <p className="text-[10px] text-slate-400">
-                  {analyticsSummary.winningSells}W · {analyticsSummary.losingSells}L
+                  {venueAnalyticsSummary.winningSells}W · {venueAnalyticsSummary.losingSells}L
                 </p>
               </div>
               <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white px-3 py-2.5 shadow-sm">
                 <div className="text-[10px] font-bold uppercase tracking-wider text-amber-700/70">Longest under</div>
                 <div className="mt-0.5 text-sm font-bold text-amber-900 truncate">
-                  {analyticsSummary.longestUnderwater
-                    ? `${analyticsSummary.longestUnderwater.symbol}`
+                  {venueAnalyticsSummary.longestUnderwater
+                    ? `${venueAnalyticsSummary.longestUnderwater.symbol}`
                     : "None"}
-                  {analyticsSummary.longestUnderwater?.daysUnderwater != null && (
+                  {venueAnalyticsSummary.longestUnderwater?.daysUnderwater != null && (
                     <span className="text-amber-700 font-semibold">
                       {" "}
-                      · {analyticsSummary.longestUnderwater.daysUnderwater}d
+                      · {venueAnalyticsSummary.longestUnderwater.daysUnderwater}d
                     </span>
                   )}
                 </div>
@@ -1046,20 +1108,31 @@ export default function TradeView() {
             </p>
           </div>
           <select
-            value={symbol}
+            value={
+              historyCoinOptions.some((o) => o.value === symbol) ? symbol : ""
+            }
             onChange={(e) => setSymbol(e.target.value)}
             className="rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm"
           >
-            {coinOptions.map((c) => (
-              <option key={`${c.symbol}::${(c as { venue?: string }).venue || "coins_ph"}`} value={c.symbol}>
-                {c.name} ({c.symbol})
+            <option value="">
+              {historyCoinOptions.length === 0
+                ? `No ${venueLabel(venue)} trades yet`
+                : "Select coin…"}
+            </option>
+            {historyCoinOptions.map((c) => (
+              <option key={c.value} value={c.value}>
+                {c.label}
               </option>
             ))}
           </select>
         </div>
         {loading ? (
           <TableSkeleton />
-        ) : !symbol ? (
+        ) : historyCoinOptions.length === 0 ? (
+          <p className="text-sm text-gray-500">
+            No buy/sell on {venueLabel(venue)} yet — only this venue’s coins appear here.
+          </p>
+        ) : !symbol || !historyCoinOptions.some((o) => o.value === symbol) ? (
           <p className="text-sm text-gray-500">Select a coin to see its history.</p>
         ) : (
           <>
