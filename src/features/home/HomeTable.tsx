@@ -1565,8 +1565,9 @@ export default function HomeTable() {
                     ) || 0;
                   const spent =
                     Number(pos?.spent ?? (card as { spent?: number }).spent ?? 0) || 0;
+                  // Poll mark (same as Spot) — not portfolio live quote
                   const price =
-                    Number(pos?.currentPrice ?? coin?.currentPrice ?? card.currentPrice ?? 0) || 0;
+                    Number(coin?.currentPrice ?? card.currentPrice ?? 0) || 0;
                   const avg = holdings > 0 && spent > 0 ? spent / holdings : null;
                   const mtm = holdings > 0 && price > 0 ? holdings * price : null;
                   const pnlPhp = mtm != null && spent > 0 ? mtm - spent : null;
@@ -1870,13 +1871,22 @@ export default function HomeTable() {
                     an?.holdings ??
                     Number(openHoldingsBySymbol?.[sym] ?? 0) ??
                     0;
+                  // Same source as Spot: last poll on Coin summary — NOT portfolio live fetch
+                  // (portfolio can differ from Coins.ph poll and made Home look "wrong").
                   const price =
-                    Number(an?.currentPrice ?? coin?.currentPrice ?? card.currentPrice ?? 0) || 0;
+                    Number(coin?.currentPrice ?? card.currentPrice ?? 0) || 0;
                   const avg = an?.avgCost ?? null;
-                  const openPnl = an?.unrealizedPnl ?? null;
-                  const openPct = an?.unrealizedPct ?? null;
                   const daysHeld = an?.daysSinceFirstBuy ?? daysHeldBySymbol?.[sym] ?? null;
                   const nowPx = price > 0 ? price : null;
+                  // Recompute open P&L with poll mark so % matches Spot
+                  const openPnl =
+                    holdings > 0 && avg != null && avg > 0 && price > 0
+                      ? holdings * (price - avg)
+                      : an?.unrealizedPnl ?? null;
+                  const openPct =
+                    holdings > 0 && avg != null && avg > 0 && price > 0
+                      ? ((price - avg) / avg) * 100
+                      : an?.unrealizedPct ?? null;
                   return (
                     <div
                       key={sym}

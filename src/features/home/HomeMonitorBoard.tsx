@@ -11,6 +11,7 @@ function pctChange(atScan: number, now: number | null | undefined): number | nul
   return ((now - atScan) / atScan) * 100;
 }
 
+/** Scan → now path as a mini bar diagram (not a price table). */
 function HitRow({
   hit,
   nowPrice,
@@ -18,39 +19,104 @@ function HitRow({
   hit: MonitorHitBase;
   nowPrice: number | null | undefined;
 }) {
-  const ch = pctChange(hit.priceAtScan, nowPrice);
+  const scan = hit.priceAtScan;
+  const now = nowPrice != null && nowPrice > 0 ? nowPrice : null;
+  const ch = pctChange(scan, now);
+  const lo = Math.min(scan, now ?? scan) * 0.995;
+  const hi = Math.max(scan, now ?? scan) * 1.005;
+  const span = hi - lo || 1;
+  const scanPct = Math.min(100, Math.max(0, ((scan - lo) / span) * 100));
+  const nowPct =
+    now != null ? Math.min(100, Math.max(0, ((now - lo) / span) * 100)) : scanPct;
+  const up = ch != null && ch >= 0;
+
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2">
-      <div className="min-w-0">
-        <div className="text-sm font-bold text-slate-900 truncate">
-          {hit.name}{" "}
-          <span className="font-mono text-[10px] font-semibold text-slate-500">{hit.symbol}</span>
-        </div>
-        <p className="text-[11px] text-slate-600 leading-snug">{hit.detail}</p>
-      </div>
-      <div className="text-right shrink-0">
-        <div className="text-[10px] font-bold uppercase text-slate-400">At scan → now</div>
-        <div className="font-mono text-xs font-bold text-slate-800">
-          {formatPhp(hit.priceAtScan)}
-          <span className="text-slate-400"> → </span>
-          {nowPrice != null && nowPrice > 0 ? formatPhp(nowPrice) : "—"}
-        </div>
-        {ch != null && (
-          <div
-            className={`text-[11px] font-extrabold tabular-nums ${
-              ch >= 0 ? "text-emerald-700" : "text-rose-700"
-            }`}
-          >
-            {ch >= 0 ? "+" : ""}
-            {ch.toFixed(2)}% since scan
+    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-sm font-bold text-slate-900 truncate">
+            {hit.name}{" "}
+            <span className="font-mono text-[10px] font-semibold text-slate-500">
+              {hit.symbol}
+            </span>
           </div>
-        )}
+          <p className="text-[11px] text-slate-600 leading-snug">{hit.detail}</p>
+        </div>
         <Link
           href={`/chart?symbol=${encodeURIComponent(hit.symbol)}`}
-          className="text-[11px] font-bold text-indigo-600 hover:underline"
+          className="shrink-0 rounded-md bg-indigo-600 px-2 py-0.5 text-[11px] font-bold text-white hover:bg-indigo-700"
         >
           Spot →
         </Link>
+      </div>
+
+      {/* Horizontal path: scan marker → now marker */}
+      <div className="relative mt-1 mb-1 h-10 select-none">
+        <div className="absolute left-0 right-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-slate-100" />
+        {now != null && Math.abs(nowPct - scanPct) > 0.5 && (
+          <div
+            className={`absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full ${
+              up ? "bg-emerald-300" : "bg-rose-300"
+            }`}
+            style={{
+              left: `${Math.min(scanPct, nowPct)}%`,
+              width: `${Math.abs(nowPct - scanPct)}%`,
+            }}
+          />
+        )}
+        {/* Scan dot */}
+        <div
+          className="absolute top-1/2 z-10 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-slate-500 shadow"
+          style={{ left: `${scanPct}%` }}
+          title={`At scan ${formatPhp(scan)}`}
+        />
+        {/* Now dot */}
+        {now != null && (
+          <div
+            className={`absolute top-1/2 z-20 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow ${
+              up ? "bg-emerald-600" : "bg-rose-600"
+            }`}
+            style={{ left: `${nowPct}%` }}
+            title={`Now ${formatPhp(now)}`}
+          />
+        )}
+        <div
+          className="absolute -bottom-0.5 text-[9px] font-bold text-slate-500"
+          style={{ left: `${scanPct}%`, transform: "translateX(-50%)" }}
+        >
+          scan
+        </div>
+        {now != null && (
+          <div
+            className={`absolute -top-0.5 text-[9px] font-extrabold ${
+              up ? "text-emerald-700" : "text-rose-700"
+            }`}
+            style={{ left: `${nowPct}%`, transform: "translateX(-50%)" }}
+          >
+            now
+          </div>
+        )}
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-end justify-between gap-2 border-t border-slate-100 pt-2">
+        <div className="font-mono text-[11px] text-slate-600">
+          <span className="font-semibold text-slate-500">Scan</span> {formatPhp(scan)}
+          <span className="mx-1 text-slate-300">→</span>
+          <span className="font-semibold text-slate-500">Now</span>{" "}
+          <span className="font-bold text-slate-900">
+            {now != null ? formatPhp(now) : "—"}
+          </span>
+        </div>
+        {ch != null && (
+          <div
+            className={`rounded-md px-2 py-0.5 text-[12px] font-extrabold tabular-nums ${
+              up ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-800"
+            }`}
+          >
+            {up ? "▲" : "▼"} {ch >= 0 ? "+" : ""}
+            {ch.toFixed(2)}%
+          </div>
+        )}
       </div>
     </div>
   );
